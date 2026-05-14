@@ -39,7 +39,8 @@ export class AuditService {
       entries = entries.filter((e) => e.what === filters.what)
     }
     if (filters.since) {
-      entries = entries.filter((e) => e.ts >= filters.since)
+      const since = filters.since
+      entries = entries.filter((e) => e.ts >= since)
     }
     return entries.reverse()
   }
