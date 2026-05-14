@@ -1,0 +1,28 @@
+'use client'
+
+import { useTheme } from 'next-themes'
+import { Button } from '@/components/ui/button'
+import { Sun, Moon, Search } from 'lucide-react'
+
+export function Topbar() {
+  const { theme, setTheme } = useTheme()
+
+  return (
+    <header className="flex items-center justify-between h-14 px-6 border-b border-[var(--border)] bg-[var(--surface)]">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Search className="h-4 w-4" />
+        <span className="opacity-60">Search... Cmd+K</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          className="h-8 w-8"
+        >
+          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </Button>
+      </div>
+    </header>
+  )
+}
