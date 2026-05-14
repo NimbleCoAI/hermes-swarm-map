@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Swarm Map · Redesign</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&display=swap"/>
+<link rel="stylesheet" href="theme.css"/>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f0eee9; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  #root { width: 100%; height: 100%; }
+  .sm-root *, .sm-root *::before, .sm-root *::after { box-sizing: border-box; }
+  .sm-root button { font-family: inherit; }
+  .sm-root[data-density="compact"] { --density-pad: 10px; --density-row: 36px; }
+  .sm-root[data-density="comfy"]  { --density-pad: 18px; --density-row: 56px; }
+  .sm-root[data-density="regular"] { --density-pad: 14px; --density-row: 44px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "themeA": "dark",
+    "themeB": "light",
+    "density": "regular",
+    "defaultView": "calm"
+  }/*EDITMODE-END*/;
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="mock-data.js"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel" src="a-atoms.jsx"></script>
+<script type="text/babel" src="a-shell.jsx"></script>
+<script type="text/babel" src="a-harness-detail.jsx"></script>
+<script type="text/babel" src="a-admin.jsx"></script>
+<script type="text/babel" src="a-app.jsx"></script>
+
+<script type="text/babel" src="b-shell.jsx"></script>
+<script type="text/babel" src="b-app.jsx"></script>
+
+<script type="text/babel" src="app-shell.jsx"></script>
+
+<script type="text/babel">
+  function App() {
+    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+    const data = window.MOCK_DATA;
+
+    const sharedAppProps = {
+      data,
+      themeA: t.themeA, setThemeA: (v) => setTweak('themeA', v),
+      themeB: t.themeB, setThemeB: (v) => setTweak('themeB', v),
+      density: t.density, setDensity: (v) => setTweak('density', v),
+    };
+
+    return (
+      <React.Fragment>
+        <DesignCanvas>
+          <DCSection id="live" title="Swarm Map"
+                     subtitle="Multiplayer AI for the cyborg era.">
+            <DCArtboard id="app-dashboard" label="Dashboard (defaults to Calm)" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="dashboard" />
+            </DCArtboard>
+            <DCArtboard id="app-detail" label="Harness detail · cryptid (Telegram, org tier)" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="harnesses/h_cryptid" />
+            </DCArtboard>
+            <DCArtboard id="app-operator" label="Same dashboard · Operator view" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="operator" initialRoute="dashboard" />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="surfaces" title="Chat surfaces · OAuth-first connection"
+                     subtitle="Mattermost OAuth, Telegram via BotFather (in-app guidance). Adapter pattern means Discord/Slack/Signal slot in as new cards.">
+            <DCArtboard id="b-surfaces" label="Calm · Chat surfaces" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="surfaces" />
+            </DCArtboard>
+            <DCArtboard id="a-surfaces" label="Operator · Chat surfaces" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="operator" initialRoute="surfaces" />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="capability" title="Capability — tools & memory"
+                     subtitle="Tier is a clamp, not a tag. Hand-classified Hermes tools ship sorted; user-added tools land in 'needs review'. Web access and deletes always ride high-risk.">
+            <DCArtboard id="b-tools" label="Calm · Tools" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="tools" />
+            </DCArtboard>
+            <DCArtboard id="a-tools" label="Operator · Tools" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="operator" initialRoute="tools" />
+            </DCArtboard>
+            <DCArtboard id="b-memory" label="Calm · Memory" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="memory" />
+            </DCArtboard>
+            <DCArtboard id="a-memory" label="Operator · Memory" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="operator" initialRoute="memory" />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="keys-people" title="Keys, people, settings"
+                     subtitle="Keys are vault entries — multi-habitat, can bind to N harnesses. People get tier access + budget caps. Local API toggle replaces bearer tokens.">
+            <DCArtboard id="b-keys" label="Calm · Keys" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="keys" />
+            </DCArtboard>
+            <DCArtboard id="a-keys" label="Operator · Keys" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="operator" initialRoute="keys" />
+            </DCArtboard>
+            <DCArtboard id="b-people" label="Calm · People" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="permissions" />
+            </DCArtboard>
+            <DCArtboard id="b-settings" label="Calm · Settings (Local API)" width={1280} height={820}>
+              <SwarmMapApp {...sharedAppProps} initialView="calm" initialRoute="settings" />
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+
+        <TweaksPanel>
+          <TweakSection label="Default view" />
+          <TweakRadio label="Open in" value={t.defaultView}
+                      options={['calm', 'operator']}
+                      onChange={(v) => setTweak('defaultView', v)} />
+          <TweakSection label="Theme" />
+          <TweakRadio label="Calm" value={t.themeB}
+                      options={['light', 'dark']}
+                      onChange={(v) => setTweak('themeB', v)} />
+          <TweakRadio label="Operator" value={t.themeA}
+                      options={['dark', 'light']}
+                      onChange={(v) => setTweak('themeA', v)} />
+          <TweakSection label="Density" />
+          <TweakRadio label="Rows" value={t.density}
+                      options={['compact', 'regular', 'comfy']}
+                      onChange={(v) => setTweak('density', v)} />
+        </TweaksPanel>
+      </React.Fragment>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
