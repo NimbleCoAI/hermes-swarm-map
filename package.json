@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed": "npx tsx lib/seed.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
