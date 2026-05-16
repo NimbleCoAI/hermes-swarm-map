@@ -98,7 +98,8 @@ export type AuditEntry = {
 }
 
 export type Settings = {
-  hermesDir: string
+  hermesDir: string  // directory to scan for docker-compose*.yml files
   dataDir: string
   theme: 'light' | 'dark'
+  composeFiles: string[]  // explicit list of compose files; empty = auto-scan hermesDir
 }

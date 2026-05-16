@@ -7,9 +7,10 @@ const PEOPLE_FILE = 'people.json'
 const SURFACES_FILE = 'surfaces.json'
 
 const DEFAULT_SETTINGS: Settings = {
-  hermesDir: '~/hermes-agent',
+  hermesDir: '~/Documents/GitHub/hermes-swarm',
   dataDir: '~/.hermes-swarm-map',
   theme: 'light',
+  composeFiles: [],
 }
 
 export class ConfigService {

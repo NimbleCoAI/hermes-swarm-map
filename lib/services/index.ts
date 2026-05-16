@@ -17,13 +17,15 @@ const storage = new Storage(DATA_DIR)
 const docker = new DockerService()
 const audit = new AuditService(storage)
 
+const config = new ConfigService(storage)
+
 export const services = {
   storage,
   docker,
   audit,
-  harness: new HarnessService(storage, docker, audit),
+  config,
+  harness: new HarnessService(storage, docker, audit, config),
   keys: new KeysService(storage, audit),
   tools: new ToolsService(storage),
   memory: new MemoryService(storage),
-  config: new ConfigService(storage),
 }

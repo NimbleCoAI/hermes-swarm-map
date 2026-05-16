@@ -9,16 +9,18 @@ const DATA_DIR = process.env.DATA_DIR
 const storage = new Storage(DATA_DIR)
 const now = Date.now()
 
-storage.write('harnesses.json', [
-  { id: 'h_alpha', name: 'alpha', runtime: 'hermes', status: 'running', health: { errors: 0 }, persona: 'Helpful operator. Threaded updates.', tier: 'team', platform: 'mattermost', channel: 'team-ops', lastSeen: now, models: ['claude-sonnet-4.5','claude-haiku-4.5','qwen2.5:14b'], costToday: 1.84, invocations: 142, cpu: 18, mem: 412, tools: ['t_memread','t_chatpost','t_notion','t_github_r'] },
-  { id: 'h_recon', name: 'recon-01', runtime: 'hermes', status: 'running', health: { errors: 0 }, persona: 'Methodical researcher. Always cites sources.', tier: 'individual', platform: 'mattermost', channel: 'private', lastSeen: now, models: ['claude-sonnet-4.5','qwen2.5:14b'], costToday: 0.42, invocations: 38, cpu: 9, mem: 287, tools: ['t_web_search','t_github_r','t_memread','t_fs_read'] },
-  { id: 'h_coder', name: 'coder', runtime: 'hermes', status: 'running', health: { errors: 1, errorMsg: 'Rate limit at 84%' }, persona: 'Code specialist. Terse. Verifies twice.', tier: 'org', platform: 'telegram', channel: '@example_coder', lastSeen: now, models: ['qwen2.5-coder:32b','claude-haiku-4.5'], costToday: 0.0, invocations: 211, cpu: 31, mem: 612, tools: ['t_github_r','t_github_w','t_code_run','t_memread'] },
-  { id: 'h_helpdesk', name: 'helpdesk', runtime: 'hermes', status: 'running', health: { errors: 3 }, persona: 'Public-facing help bot. Read-only.', tier: 'public', platform: 'telegram', channel: '@example_help', lastSeen: now, models: ['claude-haiku-4.5','qwen2.5:14b'], costToday: 4.21, invocations: 1284, cpu: 6, mem: 198, tools: ['t_memread'] },
-  { id: 'h_standup', name: 'standup', runtime: 'hermes', status: 'idle', health: { errors: 0 }, persona: 'Daily standup curator.', tier: 'team', platform: 'mattermost', channel: 'standup', lastSeen: now - 42*60000, models: ['claude-haiku-4.5','qwen2.5:14b'], costToday: 0.08, invocations: 4, cpu: 0, mem: 92, tools: ['t_calendar','t_chatpost','t_memread'] },
-  { id: 'h_reviewer', name: 'pr-review', runtime: 'hermes', status: 'error', health: { errors: 12, errorMsg: 'GitHub token expired — see Keys' }, persona: 'Reads PRs. Inline comments.', tier: 'org', platform: 'mattermost', channel: 'eng-review', lastSeen: now - 8*60000, models: ['claude-sonnet-4.5','claude-haiku-4.5'], costToday: 0.31, invocations: 22, cpu: 0, mem: 0, tools: ['t_github_r','t_github_w','t_code_run','t_memread'] },
-  { id: 'h_shared', name: 'shared-entity', runtime: 'hermes', status: 'stopped', health: { errors: 0 }, persona: 'Shared-context entity.', tier: 'orgpublic', platform: 'telegram', channel: '@example_shared', lastSeen: now - 6*3600000, models: ['claude-sonnet-4.5','claude-haiku-4.5','qwen2.5:14b'], costToday: 0.0, invocations: 0, cpu: 0, mem: 0, tools: ['t_memread','t_web_search'] },
-  { id: 'h_sandbox', name: 'sandbox-dev', runtime: 'hermes', status: 'running', health: { errors: 0 }, persona: 'Local-only experiment harness.', tier: 'individual', platform: 'mattermost', channel: 'private', lastSeen: now, models: ['qwen3.5:9b','qwen2.5-coder:32b'], costToday: 0.0, invocations: 67, cpu: 24, mem: 510, tools: ['t_fs_read','t_fs_write','t_code_run','t_memread','t_web_fetch'] },
-])
+// Write settings pointing at the real hermes-swarm compose directory
+storage.write('settings.json', {
+  hermesDir: path.join(os.homedir(), 'Documents/GitHub/hermes-swarm'),
+  dataDir: DATA_DIR,
+  theme: 'light',
+  composeFiles: [],
+})
+
+// Harnesses are discovered live from Docker — no static seed data.
+// harnesses.json stores user-configured overlays (tier, tools, keys, etc.)
+// and is written on first updateConfig() call. Start with an empty overlay file.
+storage.write('harnesses.json', [])
 
 storage.write('surfaces.json', [
   { id: 'int_mm', platform: 'mattermost', name: 'Mattermost Instance', status: 'connected', config: { url: 'https://mattermost.example.com' }, harnessIds: ['h_alpha','h_recon','h_standup','h_reviewer','h_sandbox'] },
