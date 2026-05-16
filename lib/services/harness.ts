@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { execSync } from 'child_process'
-import type { Harness, HarnessStatus, RestartMode } from '@/lib/types'
+import type { Harness, HarnessStatus, HabitatTier, RestartMode } from '@/lib/types'
 import type { Storage } from './storage'
 import type { DockerService } from './docker'
 import type { AuditService } from './audit'
@@ -325,6 +325,70 @@ export class HarnessService {
     })
 
     return duplicate
+  }
+
+  createOverlay(input: { name: string; tier?: HabitatTier; platform?: string; channel?: string; models?: string[] }): Partial<Harness> {
+    const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
+
+    // Check for duplicate name
+    const id = 'h_' + input.name.replace(/-/g, '_').replace(/\s+/g, '_')
+    if (overlays.some((h) => h.id === id || h.name === input.name)) {
+      throw new Error(`Harness "${input.name}" already exists`)
+    }
+
+    const overlay: Partial<Harness> = {
+      id,
+      name: input.name,
+      tier: input.tier ?? 'individual',
+      platform: input.platform ?? 'hermes',
+      channel: input.channel ?? '',
+      models: input.models ?? [],
+      tools: [],
+    }
+
+    overlays.push(overlay)
+    this.storage.write('harnesses.json', overlays)
+    this.audit.append({ who: 'admin', what: 'create', target: input.name })
+    return overlay
+  }
+
+  importFromDir(dataDir: string, name: string): Partial<Harness> {
+    // Read SOUL.md for persona
+    let persona = ''
+    try {
+      const soulPath = path.join(dataDir, 'SOUL.md')
+      const content = fs.readFileSync(soulPath, 'utf-8')
+      const lines = content
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#') && !l.startsWith('---'))
+      persona = lines.join(' ').slice(0, 200)
+    } catch {}
+
+    // Detect platform from .env
+    let platform = 'hermes'
+    try {
+      const envContent = fs.readFileSync(path.join(dataDir, '.env'), 'utf-8')
+      if (envContent.includes('MATTERMOST_TOKEN') || envContent.includes('MATTERMOST_URL')) {
+        platform = 'mattermost'
+      } else if (envContent.includes('TELEGRAM_BOT_TOKEN')) {
+        platform = 'telegram'
+      }
+    } catch {}
+
+    const overlay = this.createOverlay({ name, platform })
+    if (persona) {
+      overlay.persona = persona
+      // Update the stored overlay
+      const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
+      const idx = overlays.findIndex((h) => h.id === overlay.id)
+      if (idx !== -1) {
+        overlays[idx].persona = persona
+        this.storage.write('harnesses.json', overlays)
+      }
+    }
+
+    return overlay
   }
 
   restartRunning(): { restarted: string[]; errors: Record<string, string> } {

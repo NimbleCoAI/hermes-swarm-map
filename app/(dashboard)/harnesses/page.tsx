@@ -46,15 +46,97 @@ export default function HarnessesPage() {
     }
   }
 
+  async function createNew() {
+    const name = window.prompt('Name for the new harness:')
+    if (!name?.trim()) return
+
+    const tierOptions = ['individual', 'team', 'org', 'orgpublic', 'public']
+    const tier = window.prompt(`Tier (${tierOptions.join('/')}):`, 'individual') ?? 'individual'
+
+    const platformOptions = ['hermes', 'mattermost', 'telegram']
+    const platform = window.prompt(`Platform (${platformOptions.join('/')}):`, 'hermes') ?? 'hermes'
+
+    try {
+      const res = await fetch('/api/harnesses/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), tier, platform }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Create failed')
+        return
+      }
+      toast.success(`Created "${name.trim()}"`)
+      refetch()
+    } catch {
+      toast.error('Create failed')
+    }
+  }
+
+  async function importHarness() {
+    const dataDir = window.prompt('Path to harness data directory (e.g. ~/.hermes-myagent):')
+    if (!dataDir?.trim()) return
+
+    const name = window.prompt('Name for the imported harness:')
+    if (!name?.trim()) return
+
+    try {
+      const res = await fetch('/api/harnesses/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataDir: dataDir.trim(), name: name.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Import failed')
+        return
+      }
+      toast.success(`Imported "${name.trim()}"`)
+      refetch()
+    } catch {
+      toast.error('Import failed')
+    }
+  }
+
+  async function duplicateOne(id: string, currentName: string) {
+    const newName = window.prompt('Name for the duplicate harness:', `${currentName}-copy`)
+    if (!newName?.trim()) return
+    try {
+      const res = await fetch(`/api/harnesses/${id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Duplicate failed')
+        return
+      }
+      toast.success(`Duplicated as "${newName.trim()}"`)
+      refetch()
+    } catch {
+      toast.error('Duplicate failed')
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold">Harnesses</h2>
-        {running.length > 0 && (
-          <Button variant="outline" size="sm" onClick={restartAll}>
-            Restart all running ({running.length})
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={createNew}>
+            Create New
           </Button>
-        )}
+          <Button variant="outline" size="sm" onClick={importHarness}>
+            Import
+          </Button>
+          {running.length > 0 && (
+            <Button variant="outline" size="sm" onClick={restartAll}>
+              Restart all running ({running.length})
+            </Button>
+          )}
+        </div>
       </div>
 
       {loading && <p className="text-muted-foreground">Loading...</p>}
@@ -99,6 +181,9 @@ export default function HarnessesPage() {
                       </Button>
                       <Button variant="ghost" size="xs" onClick={() => stopOne(h.id)}>
                         Stop
+                      </Button>
+                      <Button variant="ghost" size="xs" onClick={() => duplicateOne(h.id, h.name)} title="Duplicate">
+                        ⧉
                       </Button>
                     </div>
                   </td>
