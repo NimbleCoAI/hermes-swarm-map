@@ -21,8 +21,9 @@ describe('KeysService', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
+  // Pass [] as harnessNames so discovery is skipped (no real agent dirs in test env)
   it('starts with empty list', () => {
-    expect(keys.list()).toEqual([])
+    expect(keys.list([])).toEqual([])
   })
 
   it('adds a key and masks the value', () => {
@@ -35,7 +36,7 @@ describe('KeysService', () => {
   it('lists keys with masked values', () => {
     keys.add({ provider: 'anthropic', value: 'sk-ant-12345678' })
     keys.add({ provider: 'openai', value: 'sk-proj-abcdefgh' })
-    const list = keys.list()
+    const list = keys.list([])
     expect(list).toHaveLength(2)
     expect(JSON.stringify(list)).not.toContain('sk-ant-12345678')
     expect(JSON.stringify(list)).not.toContain('sk-proj-abcdefgh')
@@ -44,13 +45,13 @@ describe('KeysService', () => {
   it('removes a key', () => {
     const key = keys.add({ provider: 'test', value: 'test-key-value' })
     keys.remove(key.id)
-    expect(keys.list()).toHaveLength(0)
+    expect(keys.list([])).toHaveLength(0)
   })
 
   it('updates key assignment', () => {
     const key = keys.add({ provider: 'test', value: 'test-key' })
     keys.update(key.id, { assignedTo: ['h_audrey', 'h_cryptid'] })
-    const updated = keys.list().find((k) => k.id === key.id)
+    const updated = keys.list([]).find((k) => k.id === key.id)
     expect(updated!.assignedTo).toEqual(['h_audrey', 'h_cryptid'])
   })
 })

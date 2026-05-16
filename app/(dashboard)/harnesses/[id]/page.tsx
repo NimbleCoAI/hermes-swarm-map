@@ -1,6 +1,6 @@
 'use client'
 
-import { use } from 'react'
+import { use, useState } from 'react'
 import { useApi } from '@/lib/hooks/use-api'
 import { StatusDot } from '@/components/shared/status-dot'
 import { TierBadge } from '@/components/shared/tier-badge'
@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
 import { toast } from 'sonner'
 
+type LogsResponse = { logs: string; lines: number }
+
 export default function HarnessDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
 
@@ -20,6 +22,11 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const { data: keys } = useApi<Key[]>('/api/keys')
   const { data: memoryScopes } = useApi<MemoryScope[]>('/api/memory-scopes')
   const { data: surfaces } = useApi<Surface[]>('/api/surfaces')
+
+  const [logLines, setLogLines] = useState(100)
+  const { data: logsData, loading: logsLoading, refetch: refetchLogs } = useApi<LogsResponse>(
+    `/api/harnesses/${id}/logs?lines=${logLines}`
+  )
 
   async function doRestart(mode: string) {
     try {
@@ -80,6 +87,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           <TabsTrigger value="keys">Keys ({harnessKeys.length})</TabsTrigger>
           <TabsTrigger value="memory">Memory ({harnessMemory.length})</TabsTrigger>
           <TabsTrigger value="environment">Environment</TabsTrigger>
+          <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -201,6 +209,34 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
             {!harness.composeFile && !harness.serviceName && (
               <p className="text-sm text-muted-foreground">No environment config.</p>
             )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="logs" className="mt-4">
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <select
+                value={logLines}
+                onChange={(e) => setLogLines(Number(e.target.value))}
+                className="text-sm border border-[var(--border)] rounded-md px-2 py-1 bg-[var(--surface)]"
+              >
+                <option value={50}>50 lines</option>
+                <option value={100}>100 lines</option>
+                <option value={250}>250 lines</option>
+              </select>
+              <button
+                onClick={() => refetchLogs()}
+                disabled={logsLoading}
+                className="text-sm px-3 py-1 rounded-md border border-[var(--border)] bg-[var(--surface)] hover:bg-muted disabled:opacity-50"
+              >
+                {logsLoading ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
+            <div className="rounded-xl border border-[var(--border)] bg-black/90 overflow-auto max-h-[500px]">
+              <pre className="text-xs font-mono text-green-400 p-4 whitespace-pre-wrap">
+                {logsData?.logs || (logsLoading ? 'Fetching logs…' : 'No logs available.')}
+              </pre>
+            </div>
           </div>
         </TabsContent>
       </Tabs>
