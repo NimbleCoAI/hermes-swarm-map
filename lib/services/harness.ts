@@ -303,6 +303,30 @@ export class HarnessService {
     this.audit.append({ who: 'admin', what: 'stop', target: harness.name })
   }
 
+  duplicateOverlay(sourceId: string, newName: string): Partial<Harness> | undefined {
+    const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
+    const source = overlays.find((h) => h.id === sourceId)
+    if (!source) return undefined
+
+    const newId = 'h_' + newName.replace(/-/g, '_').replace(/\s+/g, '_')
+    const duplicate: Partial<Harness> = {
+      ...source,
+      id: newId,
+      name: newName,
+    }
+
+    overlays.push(duplicate)
+    this.storage.write('harnesses.json', overlays)
+
+    this.audit.append({
+      who: 'admin',
+      what: 'duplicate',
+      target: `${source.name ?? sourceId} → ${newName}`,
+    })
+
+    return duplicate
+  }
+
   restartRunning(): { restarted: string[]; errors: Record<string, string> } {
     const running = this.list().filter((h) => h.status === 'running')
     const restarted: string[] = []

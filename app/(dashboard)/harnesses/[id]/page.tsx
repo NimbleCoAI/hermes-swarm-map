@@ -1,27 +1,29 @@
 'use client'
 
 import { use, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useApi } from '@/lib/hooks/use-api'
 import { StatusDot } from '@/components/shared/status-dot'
 import { TierBadge } from '@/components/shared/tier-badge'
 import { CacheStatePill } from '@/components/shared/cache-state-pill'
+import { Button } from '@/components/ui/button'
 import { SplitButton } from '@/components/shared/split-button'
 import { RiskBar } from '@/components/shared/risk-bar'
 import { TierMix } from '@/components/shared/tier-mix'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
+import type { Harness, Tool, Key, MemoryScope } from '@/lib/types'
 import { toast } from 'sonner'
 
 type LogsResponse = { logs: string; lines: number }
 
 export default function HarnessDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const router = useRouter()
 
   const { data: harness, loading, refetch } = useApi<Harness>(`/api/harnesses/${id}`)
   const { data: tools } = useApi<Tool[]>('/api/tools')
   const { data: keys } = useApi<Key[]>('/api/keys')
   const { data: memoryScopes } = useApi<MemoryScope[]>('/api/memory-scopes')
-  const { data: surfaces } = useApi<Surface[]>('/api/surfaces')
 
   const [logLines, setLogLines] = useState(100)
   const { data: logsData, loading: logsLoading, refetch: refetchLogs } = useApi<LogsResponse>(
@@ -43,13 +45,33 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function doDuplicate() {
+    const newName = window.prompt('Name for the duplicate harness:')
+    if (!newName) return
+    try {
+      const res = await fetch(`/api/harnesses/${id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Duplicate failed')
+        return
+      }
+      toast.success(`Duplicated as "${newName}"`)
+      router.push('/harnesses')
+    } catch {
+      toast.error('Duplicate failed')
+    }
+  }
+
   if (loading) return <p className="text-muted-foreground">Loading...</p>
   if (!harness) return <p className="text-destructive">Harness not found.</p>
 
   const harnessTools = tools?.filter((t) => harness.tools.includes(t.id)) ?? []
   const harnessKeys = keys?.filter((k) => k.assignedTo.includes(harness.id)) ?? []
   const harnessMemory = memoryScopes?.filter((m) => m.members.includes(harness.id)) ?? []
-  const harnessSurfaces = surfaces?.filter((s) => s.harnessIds.includes(harness.id)) ?? []
 
   return (
     <div>
@@ -68,22 +90,26 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         </div>
-        <SplitButton
-          label="Quick Restart"
-          onClick={() => doRestart('quick')}
-          disabled={harness.status === 'stopped'}
-          items={[
-            { label: 'Rebuild', description: 'Rebuild container', onClick: () => doRestart('rebuild') },
-            { label: 'Purge & Restart', description: 'Clear cache and restart', onClick: () => doRestart('purge') },
-          ]}
-        />
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={doDuplicate}>
+            Duplicate
+          </Button>
+          <SplitButton
+            label="Quick Restart"
+            onClick={() => doRestart('quick')}
+            disabled={harness.status === 'stopped'}
+            items={[
+              { label: 'Rebuild', description: 'Rebuild container', onClick: () => doRestart('rebuild') },
+              { label: 'Purge & Restart', description: 'Clear cache and restart', onClick: () => doRestart('purge') },
+            ]}
+          />
+        </div>
       </div>
 
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="tools">Tools ({harnessTools.length})</TabsTrigger>
-          <TabsTrigger value="surfaces">Surfaces ({harnessSurfaces.length})</TabsTrigger>
           <TabsTrigger value="keys">Keys ({harnessKeys.length})</TabsTrigger>
           <TabsTrigger value="memory">Memory ({harnessMemory.length})</TabsTrigger>
           <TabsTrigger value="environment">Environment</TabsTrigger>
@@ -149,23 +175,6 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                 )}
               </tbody>
             </table>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="surfaces" className="mt-4">
-          <div className="space-y-2">
-            {harnessSurfaces.map((s) => (
-              <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-                <div>
-                  <p className="font-medium text-sm">{s.name}</p>
-                  <p className="text-xs text-muted-foreground">{s.platform}</p>
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${s.status === 'connected' ? 'bg-[var(--success)]/10 text-[var(--success)]' : 'bg-muted text-muted-foreground'}`}>
-                  {s.status}
-                </span>
-              </div>
-            ))}
-            {harnessSurfaces.length === 0 && <p className="text-sm text-muted-foreground">No surfaces connected.</p>}
           </div>
         </TabsContent>
 
