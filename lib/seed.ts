@@ -17,10 +17,19 @@ storage.write('settings.json', {
   composeFiles: [],
 })
 
-// Harnesses are discovered live from Docker — no static seed data.
+// Harnesses are discovered live from Docker.
 // harnesses.json stores user-configured overlays (tier, tools, keys, etc.)
-// and is written on first updateConfig() call. Start with an empty overlay file.
-storage.write('harnesses.json', [])
+// These set the correct tiers for the known hermes agents.
+storage.write('harnesses.json', [
+  { id: 'h_personal', tier: 'individual', platform: 'mattermost', channel: 'sanctum' },
+  { id: 'h_osint', tier: 'team', platform: 'mattermost', channel: 'sanctum' },
+  { id: 'h_cyborg', tier: 'team', platform: 'mattermost', channel: 'team-ops' },
+  { id: 'h_cryptids', tier: 'org', platform: 'telegram', channel: '@nimble_cryptid' },
+  { id: 'h_egregore', tier: 'orgpublic', platform: 'telegram', channel: '@egregore_bot' },
+  { id: 'h_seraph_thinker', tier: 'org', platform: 'hermes', channel: ':8692' },
+  { id: 'h_seraph_doer', tier: 'org', platform: 'hermes', channel: ':8702' },
+  { id: 'h_seraph_generalist', tier: 'org', platform: 'hermes', channel: ':8712' },
+])
 
 storage.write('surfaces.json', [
   { id: 'int_mm', platform: 'mattermost', name: 'Mattermost Instance', status: 'connected', config: { url: 'https://mattermost.example.com' }, harnessIds: ['h_alpha','h_recon','h_standup','h_reviewer','h_sandbox'] },

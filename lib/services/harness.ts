@@ -188,6 +188,9 @@ export class HarnessService {
       }
     }
 
+    // Batch stats for ALL containers in one Docker call (~2s total, not 10s per container)
+    const allStats = this.docker.getAllContainerStats()
+
     const harnesses: Harness[] = []
 
     for (const [containerName, live] of Object.entries(liveContainers)) {
@@ -196,8 +199,7 @@ export class HarnessService {
       const dataDir = guessDataDir(live.serviceName, containerName)
       const persona = readSoul(dataDir)
 
-      // Get live stats (non-blocking — if it fails, we get zeros)
-      const stats = this.docker.getContainerStats(containerName)
+      const stats = allStats[containerName] ?? { cpu: 0, memMiB: 0 }
 
       // Port: first published port
       const port = live.ports[0]?.published

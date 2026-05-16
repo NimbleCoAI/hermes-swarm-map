@@ -126,32 +126,42 @@ export class DockerService {
     }
   }
 
-  getContainerStats(containerName: string): ContainerStats {
+  // Get stats for ALL containers in one call (avoids per-container 10s penalty)
+  getAllContainerStats(): Record<string, ContainerStats> {
     try {
       const output = execSync(
-        `docker stats ${containerName} --no-stream --format '{{json .}}'`,
-        { stdio: 'pipe', timeout: 10000 }
+        `docker stats --no-stream --format '{{json .}}'`,
+        { stdio: 'pipe', timeout: 15000 }
       ).toString().trim()
 
-      const parsed = JSON.parse(output)
-      const cpuStr: string = parsed.CPUPerc ?? '0%'
-      const memStr: string = parsed.MemUsage ?? '0MiB / 0GiB'
+      const result: Record<string, ContainerStats> = {}
+      for (const line of output.split('\n').filter((l) => l.trim())) {
+        try {
+          const parsed = JSON.parse(line)
+          const name: string = parsed.Name ?? ''
+          const cpuStr: string = parsed.CPUPerc ?? '0%'
+          const memStr: string = parsed.MemUsage ?? '0MiB / 0GiB'
 
-      const cpu = parseFloat(cpuStr.replace('%', '')) || 0
-      const memMatch = memStr.match(/^([\d.]+)(\w+)/)
-      let memMiB = 0
-      if (memMatch) {
-        const val = parseFloat(memMatch[1])
-        const unit = memMatch[2].toUpperCase()
-        if (unit === 'GIB') memMiB = val * 1024
-        else if (unit === 'MIB') memMiB = val
-        else if (unit === 'KIB') memMiB = val / 1024
-        else memMiB = val
+          const cpu = parseFloat(cpuStr.replace('%', '')) || 0
+          const memMatch = memStr.match(/^([\d.]+)(\w+)/)
+          let memMiB = 0
+          if (memMatch) {
+            const val = parseFloat(memMatch[1])
+            const unit = memMatch[2].toUpperCase()
+            if (unit === 'GIB') memMiB = val * 1024
+            else if (unit === 'MIB') memMiB = val
+            else if (unit === 'KIB') memMiB = val / 1024
+            else memMiB = val
+          }
+
+          result[name] = { cpu, memMiB: Math.round(memMiB) }
+        } catch {
+          // skip unparseable lines
+        }
       }
-
-      return { cpu, memMiB: Math.round(memMiB) }
+      return result
     } catch {
-      return { cpu: 0, memMiB: 0 }
+      return {}
     }
   }
 
