@@ -1,0 +1,214 @@
+// components/harness/settings-tab.tsx
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Shield, Loader2, Save } from 'lucide-react'
+import { toast } from 'sonner'
+import { TagInput } from '@/components/ui/tag-input'
+import type { Surface } from '@/lib/types'
+
+type SurfaceSettings = {
+  allowedUsers: string[]
+  allowedGroups: string[]
+  adminUsers: string[]
+  allowAll: boolean
+}
+
+type Settings = {
+  dmPolicy: 'approved-only' | 'allow-all'
+  surfaces: Record<string, SurfaceSettings>
+}
+
+type Props = {
+  harnessId: string
+  connectedSurfaces: Surface[]
+}
+
+const PLATFORM_LABELS: Record<string, { users: string; groups: string }> = {
+  signal: { users: 'Phone numbers (E.164)', groups: 'Group IDs' },
+  telegram: { users: 'User IDs', groups: 'Chat IDs' },
+  mattermost: { users: 'Usernames', groups: 'Channel names' },
+}
+
+export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/harnesses/${harnessId}/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) setSettings(data)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [harnessId])
+
+  function updateSurface(platform: string, field: keyof SurfaceSettings, value: string[] | boolean) {
+    if (!settings) return
+    setSettings({
+      ...settings,
+      surfaces: {
+        ...settings.surfaces,
+        [platform]: { ...settings.surfaces[platform], [field]: value },
+      },
+    })
+    setDirty(true)
+  }
+
+  function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
+    if (!settings) return
+    setSettings({ ...settings, dmPolicy: policy })
+    setDirty(true)
+  }
+
+  async function handleSave() {
+    if (!settings) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/harnesses/${harnessId}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success('Settings saved. Restart agent to apply.')
+        setDirty(false)
+      } else {
+        toast.error(data.error || 'Failed to save')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <p className="text-sm text-muted-foreground">Loading settings...</p>
+  }
+
+  if (!settings) {
+    return <p className="text-sm text-muted-foreground">No .env found for this harness.</p>
+  }
+
+  const activePlatforms = connectedSurfaces.map(s => s.platform.toLowerCase())
+
+  return (
+    <div className="space-y-6">
+      {/* DM Policy */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">DM Access Policy</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="dmPolicy"
+              checked={settings.dmPolicy === 'approved-only'}
+              onChange={() => updateDmPolicy('approved-only')}
+              className="accent-[var(--accent)]"
+            />
+            Approved users only
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="dmPolicy"
+              checked={settings.dmPolicy === 'allow-all'}
+              onChange={() => updateDmPolicy('allow-all')}
+              className="accent-[var(--accent)]"
+            />
+            Allow all
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.dmPolicy === 'approved-only'
+            ? 'Only users in the approved list below can DM this agent.'
+            : 'Anyone can DM this agent. Use with caution.'}
+        </p>
+      </div>
+
+      {/* Per-surface cards */}
+      {activePlatforms.map(platform => {
+        const surf = settings.surfaces[platform]
+        if (!surf) return null
+        const labels = PLATFORM_LABELS[platform] || { users: 'Users', groups: 'Groups' }
+        const surfaceInfo = connectedSurfaces.find(s => s.platform.toLowerCase() === platform)
+
+        return (
+          <div key={platform} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-medium text-sm capitalize">{platform}</h3>
+              {surfaceInfo?.config?.phone && (
+                <span className="text-xs font-mono text-muted-foreground">{surfaceInfo.config.phone}</span>
+              )}
+              {surfaceInfo?.config?.url && (
+                <span className="text-xs font-mono text-muted-foreground">{surfaceInfo.config.url}</span>
+              )}
+            </div>
+
+            {settings.dmPolicy === 'approved-only' && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
+                <TagInput
+                  values={surf.allowedUsers}
+                  onChange={(v) => updateSurface(platform, 'allowedUsers', v)}
+                  placeholder={`Add ${labels.users.toLowerCase()}...`}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Approved {labels.groups}</label>
+              <TagInput
+                values={surf.allowedGroups}
+                onChange={(v) => updateSurface(platform, 'allowedGroups', v)}
+                placeholder={`Add ${labels.groups.toLowerCase()}...`}
+              />
+              <p className="text-xs text-muted-foreground">Leave empty + use * for all groups</p>
+            </div>
+
+            {platform === 'mattermost' && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Admin Users</label>
+                <TagInput
+                  values={surf.adminUsers}
+                  onChange={(v) => updateSurface(platform, 'adminUsers', v)}
+                  placeholder="Add admin usernames..."
+                />
+              </div>
+            )}
+
+            {platform !== 'mattermost' && (
+              <p className="text-xs text-muted-foreground italic">Admin roles not enforced on {platform} yet.</p>
+            )}
+          </div>
+        )
+      })}
+
+      {activePlatforms.length === 0 && (
+        <p className="text-sm text-muted-foreground">No surfaces connected. Connect a surface first to configure access.</p>
+      )}
+
+      {/* Save button */}
+      {dirty && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save Settings
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
