@@ -1,0 +1,154 @@
+import { NextResponse } from 'next/server'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+
+function agentDataDir(harnessId: string): string {
+  const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
+  if (name === 'personal') return path.join(os.homedir(), '.hermes')
+  return path.join(os.homedir(), `.hermes-${name}`)
+}
+
+// Env var names that map to permission settings, per platform
+const PLATFORM_VARS: Record<string, { users: string; groups: string; admins?: string }> = {
+  signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS' },
+  telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS' },
+  mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS', admins: 'MATTERMOST_ADMIN_USERS' },
+}
+
+function parseEnvFile(envPath: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  try {
+    const content = fs.readFileSync(envPath, 'utf-8')
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim()
+      if (!line || line.startsWith('#')) continue
+      const eq = line.indexOf('=')
+      if (eq === -1) continue
+      const key = line.slice(0, eq).trim()
+      const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+      if (key) result[key] = value
+    }
+  } catch {}
+  return result
+}
+
+function parseCommaList(value: string | undefined): string[] {
+  if (!value || value === '*') return []
+  return value.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+type SurfaceSettings = {
+  allowedUsers: string[]
+  allowedGroups: string[]
+  adminUsers: string[]
+  allowAll: boolean
+}
+
+type SettingsResponse = {
+  dmPolicy: 'approved-only' | 'allow-all'
+  surfaces: Record<string, SurfaceSettings>
+}
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const dataDir = agentDataDir(id)
+  const envPath = path.join(dataDir, '.env')
+
+  if (!fs.existsSync(envPath)) {
+    return NextResponse.json({ error: 'Agent .env not found' }, { status: 404 })
+  }
+
+  const env = parseEnvFile(envPath)
+  const surfaces: Record<string, SurfaceSettings> = {}
+
+  // Determine if any platform has allow-all
+  let hasAllowAll = false
+
+  for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
+    const usersRaw = env[vars.users]
+    const groupsRaw = env[vars.groups]
+    const adminsRaw = vars.admins ? env[vars.admins] : undefined
+
+    const allowAll = usersRaw === '*'
+    if (allowAll) hasAllowAll = true
+
+    surfaces[platform] = {
+      allowedUsers: parseCommaList(usersRaw),
+      allowedGroups: parseCommaList(groupsRaw),
+      adminUsers: adminsRaw ? parseCommaList(adminsRaw) : [],
+      allowAll,
+    }
+  }
+
+  const response: SettingsResponse = {
+    dmPolicy: hasAllowAll ? 'allow-all' : 'approved-only',
+    surfaces,
+  }
+
+  return NextResponse.json(response)
+}
+
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const dataDir = agentDataDir(id)
+  const envPath = path.join(dataDir, '.env')
+
+  if (!fs.existsSync(envPath)) {
+    return NextResponse.json({ error: 'Agent .env not found' }, { status: 404 })
+  }
+
+  const body = await request.json() as SettingsResponse
+
+  let content = fs.readFileSync(envPath, 'utf-8')
+
+  for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
+    const settings = body.surfaces[platform]
+    if (!settings) continue
+
+    // Users
+    const usersValue = body.dmPolicy === 'allow-all' || settings.allowAll
+      ? '*'
+      : settings.allowedUsers.length > 0
+        ? settings.allowedUsers.join(',')
+        : '*'
+    const usersRegex = new RegExp(`^${vars.users}=.*$`, 'm')
+    if (usersRegex.test(content)) {
+      content = content.replace(usersRegex, `${vars.users}=${usersValue}`)
+    } else if (settings.allowedUsers.length > 0 || body.dmPolicy === 'allow-all') {
+      content = content.trimEnd() + `\n${vars.users}=${usersValue}\n`
+    }
+
+    // Groups
+    const groupsValue = settings.allowedGroups.length > 0
+      ? settings.allowedGroups.join(',')
+      : '*'
+    const groupsRegex = new RegExp(`^${vars.groups}=.*$`, 'm')
+    if (groupsRegex.test(content)) {
+      content = content.replace(groupsRegex, `${vars.groups}=${groupsValue}`)
+    } else if (settings.allowedGroups.length > 0) {
+      content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
+    }
+
+    // Admins (Mattermost only currently)
+    if (vars.admins && settings.adminUsers.length > 0) {
+      const adminsValue = settings.adminUsers.join(',')
+      const adminsRegex = new RegExp(`^${vars.admins}=.*$`, 'm')
+      if (adminsRegex.test(content)) {
+        content = content.replace(adminsRegex, `${vars.admins}=${adminsValue}`)
+      } else {
+        content = content.trimEnd() + `\n${vars.admins}=${adminsValue}\n`
+      }
+    }
+  }
+
+  fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  return NextResponse.json({ success: true })
+}
