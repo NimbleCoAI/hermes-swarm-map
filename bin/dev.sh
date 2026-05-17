@@ -6,6 +6,9 @@
 
 set -euo pipefail
 
+# Ensure Docker and node are in PATH
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
 PROJECT_NAME="hermes-swarm-map"
 DEFAULT_PORT="${PORT:-3000}"
 MAX_PORT=$((DEFAULT_PORT + 10))

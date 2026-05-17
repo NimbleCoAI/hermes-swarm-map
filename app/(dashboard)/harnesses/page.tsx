@@ -138,9 +138,9 @@ export default function HarnessesPage() {
                 <tr key={h.id} className="border-b border-[var(--border)] last:border-0 hover:bg-muted/30 transition-colors">
                   <td className="px-4 py-3">
                     <Link href={`/harnesses/${h.id}`} className="flex items-center gap-2 hover:underline">
-                      <StatusDot status={h.status} />
-                      <span className="font-medium">{h.name}</span>
-                      {h.health.errors > 0 && (
+                      <StatusDot status={h.status ?? 'stopped'} />
+                      <span className="font-medium">{h.name ?? h.id}</span>
+                      {h.health?.errors > 0 && (
                         <span className="text-xs text-destructive">({h.health.errors} err)</span>
                       )}
                     </Link>
@@ -149,9 +149,9 @@ export default function HarnessesPage() {
                     <TierBadge tier={h.tier} />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{h.platform} / {h.channel}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{h.models[0]}</td>
-                  <td className="px-4 py-3 text-right">${h.costToday.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right">{h.invocations}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{h.models?.[0] ?? '—'}</td>
+                  <td className="px-4 py-3 text-right">${(h.costToday ?? 0).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right">{h.invocations ?? 0}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <Button variant="ghost" size="xs" onClick={() => restartOne(h.id)}>
