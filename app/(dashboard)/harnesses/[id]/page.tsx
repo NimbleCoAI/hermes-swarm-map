@@ -281,7 +281,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                       </span>
                       <button
                         onClick={() => setConnectDialog(s.platform.toLowerCase())}
-                        className="text-xs px-2 py-0.5 rounded-md border border-[var(--border)] hover:bg-muted hover:opacity-100 transition-opacity"
+                        className="text-xs px-2 py-1 rounded-md border border-[var(--accent)] text-[var(--accent)] opacity-100 hover:bg-[var(--accent)] hover:text-white transition-colors"
                       >
                         Connect
                       </button>
