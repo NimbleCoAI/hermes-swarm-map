@@ -16,14 +16,34 @@ export async function POST(request: Request) {
   const cmd = `docker exec ${CONTAINER} signal-cli -a ${phone} register${captchaArg}`
 
   try {
-    await execAsync(cmd, { timeout: 30000 })
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 })
+    const output = (stderr || '') + (stdout || '')
+
+    // signal-cli sometimes exits 0 even on failure — check output for errors
+    if (output.toLowerCase().includes('captcha')) {
+      return NextResponse.json({ success: false, needsCaptcha: true, error: 'Captcha required — solve at https://signalcaptchas.org/registration/generate.html and paste the token' })
+    }
+
+    if (output.toLowerCase().includes('rate limit') || output.includes('429')) {
+      return NextResponse.json({ success: false, error: 'Rate limited by Signal. Wait a few minutes and try again.' }, { status: 429 })
+    }
+
+    if (output.includes('Failed to register')) {
+      const match = output.match(/Failed to register: (.+)/)?.[1]
+      return NextResponse.json({ success: false, error: match || 'Registration failed' }, { status: 500 })
+    }
+
     return NextResponse.json({ success: true })
   } catch (error: unknown) {
     const err = error as { stderr?: string; stdout?: string; message?: string }
     const output = (err.stderr || '') + (err.stdout || '') + (err.message || '')
 
     if (output.toLowerCase().includes('captcha')) {
-      return NextResponse.json({ success: false, needsCaptcha: true })
+      return NextResponse.json({ success: false, needsCaptcha: true, error: 'Captcha required — solve at https://signalcaptchas.org/registration/generate.html and paste the token' })
+    }
+
+    if (output.toLowerCase().includes('rate limit') || output.includes('429')) {
+      return NextResponse.json({ success: false, error: 'Rate limited by Signal. Wait a few minutes and try again.' }, { status: 429 })
     }
 
     const match = output.match(/Failed to register: (.+)/)?.[1] || output.split('\n').pop()
