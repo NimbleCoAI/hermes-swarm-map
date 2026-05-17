@@ -296,6 +296,9 @@ export function guessDataDir(serviceName: string, containerName: string): string
   if (containerName === 'hermes-personal' || serviceName === 'hermes-personal') {
     return path.join(home, '.hermes')
   }
+  if (!serviceName) {
+    return path.join(home, '.hermes-' + (containerName || 'unknown'))
+  }
   if (serviceName.startsWith('hermes-')) {
     return path.join(home, '.' + serviceName)
   }
