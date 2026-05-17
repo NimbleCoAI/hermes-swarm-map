@@ -2,11 +2,13 @@
 
 Open-source admin GUI for orchestrating [Hermes](https://github.com/NousResearch/hermes-agent) agent harnesses. Discover, create, configure, start/stop/restart, and audit Hermes agents running in Docker — including API key management, tool registries, model fallback chains, and memory scopes across your fleet.
 
-<!-- TODO: Add screenshots here -->
+<img width="1600" height="963" alt="image" src="https://github.com/user-attachments/assets/99b3395c-27a0-4ea2-ac12-46e4d7f63a89" />
 
 ---
 
 ## Quick Start
+
+requires: npm & docker
 
 ```bash
 pnpm install
@@ -15,6 +17,7 @@ pnpm dev         # http://localhost:3000
 ```
 
 On first launch, the setup wizard detects your Hermes compose directories automatically. Point it at your `hermes-swarm/` directory and go.
+
 
 ---
 
@@ -44,6 +47,9 @@ The smart dev script (`bin/dev.sh`) handles port conflicts automatically — fin
 5. **Deploy** — pulls image, scaffolds config, starts container
 
 Each agent gets a standalone compose file at `~/.hermes-swarm-map/compose/{name}/docker-compose.yml` and a data directory at `~/.hermes-{name}/`.
+
+<img width="680" height="686" alt="image" src="https://github.com/user-attachments/assets/62ff24dc-d266-4c18-9542-038ac1b09eaa" />
+
 
 **Via the API:** You can also drive agent management programmatically:
 
