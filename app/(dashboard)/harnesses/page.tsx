@@ -6,9 +6,11 @@ import { TierBadge } from '@/components/shared/tier-badge'
 import { Button } from '@/components/ui/button'
 import type { Harness } from '@/lib/types'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 export default function HarnessesPage() {
+  const router = useRouter()
   const { data: harnesses, loading, refetch } = useApi<Harness[]>('/api/harnesses', 5000)
 
   const running = harnesses?.filter((h) => h.status === 'running') ?? []
@@ -46,32 +48,8 @@ export default function HarnessesPage() {
     }
   }
 
-  async function createNew() {
-    const name = window.prompt('Name for the new harness:')
-    if (!name?.trim()) return
-
-    const tierOptions = ['individual', 'team', 'org', 'orgpublic', 'public']
-    const tier = window.prompt(`Tier (${tierOptions.join('/')}):`, 'individual') ?? 'individual'
-
-    const platformOptions = ['hermes', 'mattermost', 'telegram']
-    const platform = window.prompt(`Platform (${platformOptions.join('/')}):`, 'hermes') ?? 'hermes'
-
-    try {
-      const res = await fetch('/api/harnesses/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), tier, platform }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        toast.error(err.error ?? 'Create failed')
-        return
-      }
-      toast.success(`Created "${name.trim()}"`)
-      refetch()
-    } catch {
-      toast.error('Create failed')
-    }
+  function createNew() {
+    router.push('/setup/wizard')
   }
 
   async function importHarness() {

@@ -14,6 +14,7 @@ storage.write('settings.json', {
   dataDir: DATA_DIR,
   theme: 'light',
   composeFiles: [],
+  onboarded: true,
 })
 
 // Harnesses are discovered live from Docker.

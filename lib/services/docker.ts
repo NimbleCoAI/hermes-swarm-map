@@ -221,6 +221,28 @@ export class DockerService {
     })
   }
 
+  pullImage(image: string): { ok: boolean; error?: string } {
+    try {
+      execSync(`docker pull ${image}`, { stdio: 'pipe', timeout: 300000 })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Pull failed' }
+    }
+  }
+
+  healthCheck(url: string, timeoutMs: number = 30000): boolean {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      try {
+        execSync(`curl -sf ${url}`, { stdio: 'pipe', timeout: 5000 })
+        return true
+      } catch {
+        execSync('sleep 2', { stdio: 'pipe' })
+      }
+    }
+    return false
+  }
+
   getLogs(composeFile: string, service: string, lines: number = 50): string {
     try {
       return execSync(

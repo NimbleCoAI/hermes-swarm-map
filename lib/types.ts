@@ -102,4 +102,5 @@ export type Settings = {
   dataDir: string
   theme: 'light' | 'dark'
   composeFiles: string[]  // explicit list of compose files; empty = auto-scan hermesDir
+  onboarded?: boolean
 }
