@@ -42,3 +42,22 @@ next-env.d.ts
 
 .env
 .env.local
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code settings (personal, not project)
+.claude/
+
+# Archives
+*.zip
+*.tar.gz
+
+# OS
+Thumbs.db
+
+# Swarm Map data (never commit runtime data)
+compose/
