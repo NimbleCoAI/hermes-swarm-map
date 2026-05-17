@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import type { Key, KeyInput } from '@/lib/types'
 import type { Storage } from './storage'
 import type { AuditService } from './audit'
+import { Encryption } from './encryption'
 
 const KEYS_FILE = 'keys.json'
 
@@ -109,7 +110,8 @@ function parseEnvFile(envPath: string): Array<{ varName: string; value: string }
 }
 
 // Discover all keys from agent env files
-function discoverKeys(harnessNames: string[]): Map<string, { key: StoredKey; harnesses: string[] }> {
+// encryption is optional: if provided, values are encrypted before storing in the registry
+function discoverKeys(harnessNames: string[], encryption?: Encryption): Map<string, { key: StoredKey; harnesses: string[] }> {
   // Deduplicate by fingerprint: same key value = same key
   const registry = new Map<string, { key: StoredKey; harnesses: string[] }>()
 
@@ -129,11 +131,12 @@ function discoverKeys(harnessNames: string[]): Map<string, { key: StoredKey; har
           existing.harnesses.push(harnessName)
         }
       } else {
+        const encryptedValue = encryption ? encryption.encrypt(value) : value
         const storedKey: StoredKey = {
           id: fpId,
           provider,
           maskedValue: maskValue(value),
-          encryptedValue: value, // only stored server-side, never exposed in API
+          encryptedValue, // encrypted at rest; never exposed in API
           assignedTo: [],
           health: 'good',
         }
@@ -146,10 +149,17 @@ function discoverKeys(harnessNames: string[]): Map<string, { key: StoredKey; har
 }
 
 export class KeysService {
+  private encryption: Encryption
+
   constructor(
     private storage: Storage,
     private audit: AuditService,
-  ) {}
+    dataDir?: string,
+  ) {
+    // Use the storage directory as the data dir for the encryption key file
+    const dir = dataDir ?? storage.getBaseDir()
+    this.encryption = new Encryption(dir)
+  }
 
   private defaultHarnessNames(): string[] {
     return [
@@ -177,7 +187,7 @@ export class KeysService {
 
   list(harnessNames?: string[]): Key[] {
     const names = harnessNames ?? this.defaultHarnessNames()
-    const registry = discoverKeys(names)
+    const registry = discoverKeys(names, this.encryption)
     const storedAll = this.storage.read<StoredKey[]>(KEYS_FILE, [])
 
     // Build override map for discovered keys
@@ -231,7 +241,7 @@ export class KeysService {
       id: generateId(),
       provider: input.provider,
       maskedValue: maskValue(input.value),
-      encryptedValue: input.value,
+      encryptedValue: this.encryption.encrypt(input.value),
       assignedTo: [],
       budgetUsd: input.budgetUsd,
       health: 'good',
@@ -242,6 +252,19 @@ export class KeysService {
     this.audit.append({ who: 'admin', what: 'key:add', target: input.provider })
     const { encryptedValue: _, manuallyAdded: __, ...key } = newKey
     return key
+  }
+
+  // Get the decrypted value for a key by id (internal use: restart flows, key injection)
+  getDecryptedValue(id: string): string | undefined {
+    const stored = this.storage.read<StoredKey[]>(KEYS_FILE, [])
+    const key = stored.find((k) => k.id === id)
+    if (!key?.encryptedValue) return undefined
+    try {
+      return this.encryption.decrypt(key.encryptedValue)
+    } catch {
+      // Fallback for legacy unencrypted values (plain text stored before encryption was added)
+      return key.encryptedValue
+    }
   }
 
   update(id: string, partial: Partial<Key>): Key | undefined {

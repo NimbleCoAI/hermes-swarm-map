@@ -4,6 +4,10 @@ import path from 'path'
 export class Storage {
   constructor(private baseDir: string) {}
 
+  getBaseDir(): string {
+    return this.baseDir
+  }
+
   private resolve(filename: string): string {
     return path.join(this.baseDir, filename)
   }

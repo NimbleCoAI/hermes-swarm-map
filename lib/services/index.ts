@@ -25,7 +25,7 @@ export const services = {
   audit,
   config,
   harness: new HarnessService(storage, docker, audit, config),
-  keys: new KeysService(storage, audit),
+  keys: new KeysService(storage, audit, DATA_DIR),
   tools: new ToolsService(storage),
   memory: new MemoryService(storage),
 }
