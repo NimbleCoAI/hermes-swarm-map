@@ -30,14 +30,14 @@ window.MOCK_DATA = (() => {
   HARNESSES.forEach((h) => { if (!h.model && h.models) h.model = h.models[0]; });
 
   const INTEGRATIONS = [
-    { id: 'int_mm',  kind: 'mattermost', label: 'mattermost.nimbleco.ai', status: 'connected', scopes: ['post_messages','read_channels','manage_bots'], harnessIds: ['h_audrey','h_osint','h_handoff','h_review','h_sandbox'], serverInfo: 'v9.11 · 4 teams · 23 channels', lastSync: min(2),  dmsBlocked: true,  allowList: 8 },
+    { id: 'int_mm',  kind: 'mattermost', label: 'mattermost.example.org', status: 'connected', scopes: ['post_messages','read_channels','manage_bots'], harnessIds: ['h_audrey','h_osint','h_handoff','h_review','h_sandbox'], serverInfo: 'v9.11 · 4 teams · 23 channels', lastSync: min(2),  dmsBlocked: true,  allowList: 8 },
     { id: 'int_tg',  kind: 'telegram',   label: '@NimbleBotFather suite',  status: 'connected', scopes: ['receive_messages','send_messages','inline_query'], harnessIds: ['h_cryptid','h_frontdesk','h_egregore'], serverInfo: '3 bots registered', lastSync: min(0.5), dmsAllowed: 'whitelisted', groupAdds: 'admin-only' },
     { id: 'int_dc',  kind: 'discord',    label: 'Discord',                  status: 'available', scopes: [], harnessIds: [], serverInfo: 'Not yet configured' },
     { id: 'int_sg',  kind: 'signal',     label: 'Signal',                   status: 'planned',   scopes: [], harnessIds: [], serverInfo: 'Roadmap · phase 2' },
   ];
 
   const PEOPLE = [
-    { id: 'p_juni',   name: 'Juni Bevensee',  handle: '@juni',  role: 'owner',    tierAccess: ['individual','team','org','orgpublic','public'], lastActive: min(1) },
+    { id: 'p_juni',   name: 'Juni B.',         handle: '@juni',  role: 'owner',    tierAccess: ['individual','team','org','orgpublic','public'], lastActive: min(1) },
     { id: 'p_audrey', name: 'Audrey K.',      handle: '@audrey',role: 'admin',    tierAccess: ['team','org','orgpublic','public'], lastActive: min(14) },
     { id: 'p_max',    name: 'Max Lin',        handle: '@max',   role: 'operator', tierAccess: ['team','org'], lastActive: hr(2) },
     { id: 'p_rin',    name: 'Rin Park',       handle: '@rin',   role: 'operator', tierAccess: ['team'], lastActive: hr(20) },
