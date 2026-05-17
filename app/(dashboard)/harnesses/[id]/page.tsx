@@ -15,6 +15,7 @@ import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
 import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
 import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
 import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
+import { SettingsTab } from '@/components/harness/settings-tab'
 import { toast } from 'sonner'
 import { MessageSquare, Globe, Bot, Hash } from 'lucide-react'
 
@@ -181,6 +182,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           <TabsTrigger value="memory">Memory ({harnessMemory.length})</TabsTrigger>
           <TabsTrigger value="environment">Environment</TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -396,6 +398,13 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
               </pre>
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="settings" className="mt-4">
+          <SettingsTab
+            harnessId={harness.id}
+            connectedSurfaces={connectedSurfaces}
+          />
         </TabsContent>
       </Tabs>
 
