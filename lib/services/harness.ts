@@ -225,6 +225,94 @@ export function readModelConfig(dataDir: string): string[] {
   }
 }
 
+export type FallbackProvider = {
+  provider: string
+  model: string
+  base_url?: string
+  api_key?: string
+}
+
+export function readFallbackProviders(dataDir: string): FallbackProvider[] {
+  try {
+    const configPath = path.join(dataDir, 'config.yaml')
+    const content = fs.readFileSync(configPath, 'utf-8')
+    const lines = content.split('\n')
+
+    const providers: FallbackProvider[] = []
+    let inSection = false
+    let current: Partial<FallbackProvider> | null = null
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+
+      // Detect the fallback_providers: top-level key
+      if (/^fallback_providers:\s*$/.test(line) || /^fallback_providers:$/.test(line.trim())) {
+        inSection = true
+        continue
+      }
+
+      // Any new top-level key ends the section
+      if (inSection && /^\w/.test(line) && !trimmed.startsWith('#')) {
+        inSection = false
+        // Flush last entry
+        if (current?.provider && current?.model) {
+          const entry: FallbackProvider = { provider: current.provider, model: current.model }
+          if (current.base_url) entry.base_url = current.base_url
+          if (current.api_key) entry.api_key = current.api_key
+          providers.push(entry)
+        }
+        current = null
+        continue
+      }
+
+      if (!inSection) continue
+
+      // New list item starts with "- "
+      if (trimmed.startsWith('- ')) {
+        // Flush previous entry
+        if (current?.provider && current?.model) {
+          const entry: FallbackProvider = { provider: current.provider, model: current.model }
+          if (current.base_url) entry.base_url = current.base_url
+          if (current.api_key) entry.api_key = current.api_key
+          providers.push(entry)
+        }
+        current = {}
+        // Parse the key on the same line as "- "
+        const rest = trimmed.slice(2).trim()
+        const kv = rest.match(/^(\w+):\s*(.+)$/)
+        if (kv) {
+          const key = kv[1] as keyof FallbackProvider
+          const val = kv[2].trim().replace(/^["']|["']$/g, '')
+          if (val) (current as Record<string, string>)[key] = val
+        }
+        continue
+      }
+
+      // Continuation line for current entry (indented, no "- ")
+      if (current && trimmed) {
+        const kv = trimmed.match(/^(\w+):\s*(.+)$/)
+        if (kv) {
+          const key = kv[1] as keyof FallbackProvider
+          const val = kv[2].trim().replace(/^["']|["']$/g, '')
+          if (val) (current as Record<string, string>)[key] = val
+        }
+      }
+    }
+
+    // Flush last entry
+    if (current?.provider && current?.model) {
+      const entry: FallbackProvider = { provider: current.provider, model: current.model }
+      if (current.base_url) entry.base_url = current.base_url
+      if (current.api_key) entry.api_key = current.api_key
+      providers.push(entry)
+    }
+
+    return providers
+  } catch {
+    return []
+  }
+}
+
 export function readModelProvider(dataDir: string): string {
   try {
     const configPath = path.join(dataDir, 'config.yaml')

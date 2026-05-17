@@ -6,16 +6,39 @@ See **AGENTS.md** for architecture, patterns, service layer, and what not to do.
 
 ## Session Rules
 
-1. **Read AGENTS.md first.** Every session. It contains the canonical architecture decisions. Don't infer patterns from the codebase without reading it first — some behaviors (port allocation, encryption, compose file rules) are non-obvious.
+1. **Read AGENTS.md first.** Every session. It has the architecture decisions, key patterns, and "what not to do" rules. Some behaviors (port allocation, encryption, compose rules) are non-obvious.
 
 2. **Run tests before committing.**
    ```bash
    pnpm vitest run
    ```
-   71 tests must pass. If you break any, fix them before committing. Don't skip or comment out tests.
+   71+ tests must pass. Don't skip or comment out tests.
 
-3. **This is NOT an Egregore instance.** There is no `memory/`, no `/save`, no `/handoff`, no `/wrap`. Don't reference Egregore commands or infrastructure. This is a standalone open-source project.
+3. **This is NOT an Egregore instance.** No `memory/`, no `/save`, no `/handoff`, no `/wrap`. Standard git workflow.
 
-4. **Next.js version warning.** See the notice at the top of AGENTS.md — this runs a newer Next.js than most training data covers. Check `node_modules/next/dist/docs/` when in doubt about API behavior.
+4. **Next.js version warning.** This runs Next.js 16 — params are Promises, layouts support `export const dynamic`, etc. Check `node_modules/next/dist/docs/` when unsure.
 
-5. **No secrets in commits.** API keys, tokens, and `.env` files are gitignored. Keep them that way.
+5. **No secrets in commits.** API keys, tokens, `.env` files are gitignored.
+
+## Quick Reference
+
+```bash
+pnpm dev          # smart port detection via bin/dev.sh
+pnpm build        # production build
+pnpm vitest run   # all tests
+pnpm seed         # re-seed settings + tier config
+```
+
+## Key Files
+
+- `lib/services/harness.ts` — agent discovery, create/import/duplicate, lifecycle
+- `lib/services/docker.ts` — Docker CLI wrapper (stats, restart, pull, health check)
+- `lib/services/keys.ts` — key discovery from .env files + encryption
+- `lib/types.ts` — all shared TypeScript types
+- `app/api/setup/deploy/route.ts` — full agent deploy pipeline
+- `app/(dashboard)/harnesses/[id]/page.tsx` — harness detail page (tabbed, largest component)
+- `app/(setup)/setup/wizard/page.tsx` — 5-step creation wizard
+
+## API-First
+
+The REST API at `/api/*` supports full programmatic control. Any AI agent (Claude Code, Hermes, scripts) can orchestrate the fleet without the GUI. See README.md for the full endpoint table.

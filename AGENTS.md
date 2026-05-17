@@ -10,123 +10,180 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## What It Is
 
-Hermes Swarm Map is an open-source admin GUI for orchestrating Hermes agent harnesses. It lets you discover, create, configure, start/stop/restart, and audit Hermes agents running in Docker — including managing API keys, tool registries, model fallback chains, and memory scopes across the fleet.
+Hermes Swarm Map is an open-source admin GUI + REST API for orchestrating Hermes agent harnesses. Discover, create, configure, start/stop/restart, and audit Hermes agents running in Docker — including API keys, tool registries, model fallback chains, and memory scopes.
+
+**The REST API is first-class.** Everything the GUI does, the API does. This means any AI agent (Claude Code, Hermes, custom scripts) can programmatically orchestrate the fleet — deploy new agents, restart harnesses, read logs, manage model cascades. See the API reference in README.md.
 
 ## Architecture
 
-**Next.js 14 fullstack monorepo.** API routes live in `app/api/` and shell out to Docker via the service layer. There is no separate backend process — the Next.js server IS the backend.
+**Next.js fullstack monorepo.** API routes in `app/api/` shell out to Docker via the service layer. No separate backend process — Next.js IS the backend.
 
-**Data lives in `~/.hermes-swarm-map/`** (configurable via `DATA_DIR` env var). This directory holds per-harness configs, the encryption key, and audit logs. It is not in the repo.
+**Data at `~/.hermes-swarm-map/`** (configurable via `DATA_DIR`). Holds configs, encryption key, audit logs, and standalone compose files for new agents. Not in the repo.
 
-**Agents are discovered from Docker.** The app scans running containers and compose files for Hermes markers. Existing compose files that weren't created by Swarm Map are read-only — they are never modified.
+**Agents discovered from Docker.** Scans running containers and compose files for Hermes markers. Existing compose files (e.g. `hermes-swarm/docker-compose.yml`) are read-only — never modified.
 
-**New agents get standalone compose files.** When you create an agent via the wizard, it gets its own `~/.hermes-swarm-map/compose/{name}/docker-compose.yml`. This is the only compose file Swarm Map ever writes.
+**New agents get standalone compose.** Created via wizard or API, each gets `~/.hermes-swarm-map/compose/{name}/docker-compose.yml`. This is the only compose file Swarm Map writes.
+
+**Designed for headless operation.** Runs on a Mac Mini or Linux server, accessible over the network via `--hostname 0.0.0.0`. The smart dev script (`bin/dev.sh`) auto-detects free ports and kills zombie processes.
 
 ## Key Patterns
 
 ### Hermes Detection
 
-A container or compose service is a Hermes agent if it matches any of:
-- `command: gateway` in the compose service definition
-- A volume mount targeting `/opt/data`
-- `x-hermes` anchors in the compose YAML
+A compose service is identified as a Hermes agent by matching **2+ markers**:
+- `command: gateway` in service definition
+- Volume mount to `/opt/data`
+- `x-hermes` YAML anchors
 - `HERMES_REPO_URL` environment variable
+- `nousresearch/hermes-agent` image reference
+
+This works for both Docker Hub images and locally-built agents.
 
 ### Port Allocation
 
-Ports are never hardcoded. The service scans Docker for all currently used ports, finds the highest in the Hermes range (base: 8642), and increments by 10 for each new agent. Never assign ports manually.
+Never hardcode ports. The deploy service queries Docker directly (`docker ps --format '{{.Ports}}'`) for all used ports, then picks the next available in the Hermes range (base 8642, step 10).
 
 ### Image Fallback
 
-New agents try `nousresearch/hermes-agent:latest` from Docker Hub first. If unavailable, the service falls back to a local build. This is handled in `lib/services/harness.ts` — don't bypass it.
+New agents try `nousresearch/hermes-agent:latest` from Docker Hub first. If pull fails (auth, network), falls back to a locally-built image (prefers one with `personal` in the name as the most generic base). Handled in the deploy route.
 
 ### Key Encryption
 
-All sensitive values (API keys, tokens) are encrypted at rest using AES-256-GCM. The encryption key lives at `~/.hermes-swarm-map/.key` and is machine-local. Never expose raw key values in API responses or logs. The `EncryptionService` (`lib/services/encryption.ts`) handles all encrypt/decrypt operations.
+AES-256-GCM at rest. Machine-local key at `~/.hermes-swarm-map/.key` (0600 permissions, auto-generated on first use). Never expose raw key values in API responses or logs.
+
+**Discovery keys** (from agent `.env` files) are read live on each API call — never stored by Swarm Map. **Manually-added keys** (via POST /api/keys) are encrypted before storage.
 
 ### Model Cascade
 
-Each harness has an ordered fallback chain of LLM providers/models. This is stored in the agent's `config.yaml` under `~/.hermes-{name}/`. The cascade is configured via the Models tab in the GUI and managed by `lib/services/config.ts`.
+Each harness has an ordered fallback chain. Primary model at position 0, fallbacks after. Stored in the agent's `config.yaml` under `model.default` and `model.fallback`. Editable via the cascade editor in the GUI or `PUT /api/harnesses/:id/models` with `{ cascade: ["model-1", "model-2", ...] }`.
 
 ### Agent Data Directories
 
 Each agent gets `~/.hermes-{name}/` containing:
-- `.env` — environment variables (encrypted values written here)
-- `config.yaml` — model cascade, harness settings
+- `.env` — environment variables (platform tokens, API keys)
+- `config.yaml` — model cascade, provider config
 - `SOUL.md` — agent persona/instructions
 - `memories/` — agent memory files
+- `skills/` — installed tools/skills (discovered by Swarm Map)
+
+### Surfaces / Integrations
+
+Platform connections (Mattermost, Telegram, Signal) are managed per-harness in the Surfaces tab of the harness detail page. Each platform has a setup dialog. Connection state is discovered from agent `.env` files (presence of `MATTERMOST_TOKEN`, `TELEGRAM_BOT_TOKEN`, `SIGNAL_ACCOUNT`).
 
 ## Project Structure
 
 ```
 hermes-swarm-map/
 ├── app/
-│   ├── (dashboard)/          # Main app pages (harnesses, keys, tools, etc.)
-│   │   ├── harnesses/        # Fleet overview + per-harness detail
-│   │   ├── keys/             # API key management
+│   ├── (dashboard)/          # Main app pages
+│   │   ├── harnesses/        # Fleet list + per-harness detail (tabbed)
+│   │   ├── keys/             # API key management (discovered + manual)
+│   │   ├── tools/            # Tool registry (discovered from agent configs)
 │   │   ├── memory/           # Memory scope browser
-│   │   ├── tools/            # Tool registry
-│   │   ├── audit/            # Audit log viewer
+│   │   ├── audit/            # Append-only audit log
 │   │   └── settings/         # App settings
-│   ├── (setup)/              # Onboarding/wizard pages
-│   │   └── setup/wizard/     # New agent creation wizard
-│   ├── api/                  # API routes (shell out to service layer)
-│   └── layout.tsx            # Root layout
+│   ├── (setup)/              # Onboarding / wizard
+│   │   └── setup/
+│   │       ├── page.tsx      # Welcome screen (first-launch auto-detection)
+│   │       └── wizard/       # 5-step agent creation wizard
+│   ├── api/                  # REST API routes
+│   │   ├── harnesses/        # CRUD + lifecycle + logs + models + duplicate
+│   │   ├── keys/             # Key management
+│   │   ├── tools/            # Tool registry
+│   │   ├── setup/            # Deploy, detect, complete
+│   │   └── ...               # audit, settings, memory-scopes, models, people
+│   └── layout.tsx            # Root layout (fonts, theme)
 ├── lib/
 │   ├── services/             # Core service layer (see below)
-│   │   └── __tests__/        # Vitest tests for services
+│   │   └── __tests__/        # Vitest tests
+│   ├── hooks/                # React hooks (useApi)
 │   ├── types.ts              # Shared TypeScript types
-│   ├── utils.ts              # Shared utilities
-│   ├── constants.ts          # App-wide constants
+│   ├── constants.ts          # Tier colors, risk levels, sidebar items
 │   └── seed.ts               # Dev seed data script
 ├── components/
-│   ├── harness/              # Harness-specific UI components
-│   ├── ui/                   # Base UI primitives (shadcn)
-│   ├── shell/                # Layout chrome (nav, sidebar)
-│   └── wizard/               # Setup wizard components
-├── bin/                      # Shell scripts (dev startup, etc.)
-├── scripts/                  # Build/utility scripts
-└── handoff/                  # ARCHIVED — historical design docs (see handoff/ARCHIVED.md)
+│   ├── shared/               # TierBadge, StatusDot, RiskBar, SplitButton, etc.
+│   ├── shell/                # Sidebar, Topbar
+│   ├── wizard/               # StepIndicator
+│   ├── surfaces/             # Platform setup dialogs
+│   └── ui/                   # shadcn primitives
+├── bin/
+│   └── dev.sh                # Smart dev launcher (port detection, zombie cleanup)
+└── handoff/                  # ARCHIVED — original design docs (see handoff/ARCHIVED.md)
 ```
 
 ## Service Layer
 
-All business logic lives in `lib/services/`. API routes are thin — they call services, not the other way around.
+All business logic in `lib/services/`. API routes are thin wrappers.
 
-| Service | File | What It Does |
+| Service | File | Responsibility |
 |---|---|---|
-| `HarnessService` | `harness.ts` | Create, start, stop, restart, delete harnesses; compose file management |
-| `DockerService` | `docker.ts` | Exec Docker CLI commands, parse container/compose state, port scanning |
-| `KeysService` | `keys.ts` | Store and retrieve encrypted API keys per harness |
-| `ToolsService` | `tools.ts` | Tool registry — list, enable/disable tools per harness |
-| `MemoryService` | `memory.ts` | Browse and manage agent memory scopes |
-| `AuditService` | `audit.ts` | Append-only audit log for all admin actions |
-| `ConfigService` | `config.ts` | Read/write per-harness config.yaml (model cascade, settings) |
-| `EncryptionService` | `encryption.ts` | AES-256-GCM encrypt/decrypt, key loading from `~/.hermes-swarm-map/.key` |
-| `StorageService` | `storage.ts` | Low-level file I/O for `~/.hermes-swarm-map/` data directory |
+| `HarnessService` | `harness.ts` | Discovery from Docker, create/import/duplicate, lifecycle (start/stop/restart), overlay management |
+| `DockerService` | `docker.ts` | CLI wrapper: compose ps, stats, restart, pull, health check |
+| `KeysService` | `keys.ts` | Discover keys from .env files, encrypt manual keys, mask values |
+| `ToolsService` | `tools.ts` | Discover tools from agent config.yaml + skills/ dirs |
+| `MemoryService` | `memory.ts` | Read memory scope sizes from agent data dirs |
+| `AuditService` | `audit.ts` | Append-only JSONL log, filtered queries |
+| `ConfigService` | `config.ts` | App settings, model/people/surfaces config |
+| `Encryption` | `encryption.ts` | AES-256-GCM encrypt/decrypt, key file management |
+| `Storage` | `storage.ts` | JSON/JSONL file I/O for `~/.hermes-swarm-map/` |
+
+## Agentic Use (Claude Code, Hermes, etc.)
+
+The API is designed for programmatic access. An AI agent can:
+
+```bash
+# Check fleet status
+curl http://host:3002/api/harnesses
+
+# Quick-restart an agent
+curl -X POST http://host:3002/api/harnesses/h_personal/restart \
+  -H "Content-Type: application/json" -d '{"mode":"quick"}'
+
+# Deploy a new agent
+curl -X POST http://host:3002/api/setup/deploy \
+  -H "Content-Type: application/json" \
+  -d '{"name":"researcher","provider":"anthropic","primaryModel":"claude-sonnet-4-6","llmKey":"sk-ant-..."}'
+
+# Read logs
+curl http://host:3002/api/harnesses/h_personal/logs?lines=50
+
+# Update model cascade
+curl -X PUT http://host:3002/api/harnesses/h_personal/models \
+  -H "Content-Type: application/json" \
+  -d '{"cascade":["claude-sonnet-4-6","claude-haiku-4-5","qwen3:8b"]}'
+```
+
+No auth required (v1 is localhost-bound). Future versions will add API tokens for remote access.
 
 ## Running Locally
 
 ```bash
 pnpm install
-pnpm seed        # populate with sample/dev data
-pnpm dev         # starts at http://localhost:3000
+pnpm seed        # first run only — writes settings + tier overlays
+pnpm dev         # starts at http://localhost:3000 (or next free port)
 ```
 
-`pnpm dev` runs `bin/dev.sh` which may do environment prep before launching Next.js. Use `pnpm dev:raw` to skip the shell wrapper and run Next.js directly.
+## Running on Remote (Mac Mini)
+
+```bash
+pnpm build
+npx next start --port 3002 --hostname 0.0.0.0
+```
+
+Access from any machine on the LAN at `http://<hostname>:3002`.
 
 ## Testing
 
 ```bash
-pnpm vitest run
+pnpm vitest run   # 71 tests across 12 files
 ```
 
-71 tests across 12 test files in `lib/services/__tests__/`. All tests must pass before committing. Tests use `vitest` with `jsdom` environment — no real Docker or filesystem calls in unit tests (services are mocked).
+All tests must pass before committing. Tests mock Docker and filesystem — no real containers needed.
 
 ## What NOT To Do
 
-- **Never modify shared compose files** — files not created by Swarm Map are read-only. If you need to change harness config, write to the standalone compose at `~/.hermes-swarm-map/compose/{name}/`.
-- **Never expose raw key values** — `KeysService` always returns encrypted blobs or masked values for display. API responses must not contain plaintext secrets.
-- **Never hardcode port numbers** — always use the port allocation logic in `DockerService`. Hardcoded ports cause conflicts across harnesses.
-- **Never write directly to `~/.hermes-{name}/`** — go through `ConfigService`, `KeysService`, or `MemoryService`. Direct file writes bypass encryption and audit logging.
-- **Never bypass `EncryptionService`** — all sensitive values at rest must be encrypted. Writing plaintext to `.env` files breaks the security model.
+- **Never modify shared compose files** — `hermes-swarm/docker-compose.yml` and similar are read-only. Swarm Map only writes to `~/.hermes-swarm-map/compose/{name}/`.
+- **Never expose raw key values** — API responses return masked values only. `Encryption` handles all at-rest secrets.
+- **Never hardcode ports** — always use the port scanning logic. Hardcoded ports cause conflicts.
+- **Never write directly to `~/.hermes-{name}/`** — go through the service layer. Direct writes bypass encryption and audit.
+- **Never skip tests** — run `pnpm vitest run` before every commit.

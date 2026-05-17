@@ -36,9 +36,11 @@ const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
   planned: 'bg-[var(--warning)]/10 text-[var(--warning)]',
 }
 
-const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'google', 'bedrock'] as const
+const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'custom', 'gemini', 'nous', 'bedrock'] as const
 
-type ModelConfig = { provider: string; primary: string; models: string[] }
+type FallbackProviderEntry = { provider: string; model: string; base_url?: string }
+
+type ModelConfig = { provider: string; primary: string; models: string[]; fallbackProviders?: FallbackProviderEntry[] }
 
 type LogsResponse = { logs: string; lines: number }
 

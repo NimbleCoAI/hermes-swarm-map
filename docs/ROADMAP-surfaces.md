@@ -13,20 +13,29 @@
 
 ## P0 — Required for v1
 
-- [ ] **Settings tab per harness** — new tab showing per-surface access control
+- [x] **Settings tab per harness** — new tab showing per-surface access control
   - Per-surface approved users (tag input, comma-separated → env var)
   - Per-surface approved groups/channels (tag input → env var)
   - DM policy toggle: approved-only vs allow-all
-  - Read from both `.env` (static) and pairing store JSON (dynamic approvals)
   - `GET/PUT /api/harnesses/[id]/settings`
 
-- [ ] **Admin users per surface** — display who has admin privileges
+- [x] **Admin users per surface** — display who has admin privileges
   - Mattermost: `MATTERMOST_ADMIN_USERS` env var
   - Signal/Telegram: show "not enforced" until Hermes adds support
 
+- [x] **Discover groups** — "Discover existing groups →" button for Signal/Mattermost
+
+- [x] **Sane defaults** — DMs disabled, groups empty by default. Only admins can approve.
+
+- [ ] **Pairing store visibility** — read `~/.hermes-{name}/pairing/{platform}-approved.json`, show dynamically-approved users alongside static allowlist, allow revoking
+
 - [ ] **Register Signal on Mac Mini** — need to re-register +19498344611 (or new number) from the Mac Mini's daemon since accounts aren't transferable
 
-- [ ] **Restart prompt after settings change** — when env vars are modified, prompt "Restart agent to apply changes?"
+- [ ] **Restart from settings** — after settings save, offer restart button (not just toast)
+
+- [ ] **Disconnect surface** — remove env vars, move surface back to "Available"
+
+- [ ] **Connected surface config editing** — edit existing surface config (change token, URL) without disconnecting/reconnecting
 
 ## P1 — Important, next sprint
 
