@@ -102,6 +102,24 @@ export default function SetupWelcomePage() {
             </div>
           )}
 
+          <div>
+            <input
+              type="text"
+              placeholder="Or enter a path manually..."
+              className="w-full px-3 py-2 border border-[var(--border)] rounded-md bg-[var(--bg)] text-sm font-mono"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value.trim()
+                  if (val) {
+                    setSelected(prev => new Set([...prev, val]))
+                    ;(e.target as HTMLInputElement).value = ''
+                  }
+                }
+              }}
+            />
+            <p className="text-xs text-muted-foreground mt-1">Press Enter to add a custom path</p>
+          </div>
+
           <Button
             onClick={handleImportExisting}
             disabled={selected.size === 0 || importing}

@@ -5,6 +5,9 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 
+// Force dynamic rendering — onboarding state changes at runtime
+export const dynamic = 'force-dynamic'
+
 function isOnboarded(): boolean {
   try {
     const settingsPath = path.join(os.homedir(), '.hermes-swarm-map', 'settings.json')
