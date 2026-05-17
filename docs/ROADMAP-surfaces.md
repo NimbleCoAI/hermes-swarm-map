@@ -44,7 +44,20 @@
 
 - [ ] **Tier-based defaults** — when tier is `public`/`orgpublic`, default DM policy to "allow-all"; when `individual`, default to approved-only. Suggested, not enforced.
 
-## P2 — Nice to have
+## P2 — Important but complex
+
+- [ ] **Tier-based tool permissions** — sane defaults per habitat level
+  - `individual`: all tools available (user trusts themselves)
+  - `team`: restrict dangerous tools (file system, shell, credentials)
+  - `org`: further restrict to curated safe set
+  - `orgpublic`/`public`: minimal tool set, read-only where possible
+  - Defaults auto-applied on tier assignment, admin can override per-harness
+  - UI: tool list with tier badges + toggle to break from defaults
+  - Enforcement: swarm-map writes allowed tool list to agent config; Hermes respects it
+
+- [ ] **Tier default override UI** — "This harness uses custom tool permissions (differs from team defaults)" with diff view showing what's added/removed vs the tier baseline
+
+## P3 — Backlog
 
 - [ ] **Group/channel discovery** — list available groups from the platform
   - Signal: `listGroups` RPC
