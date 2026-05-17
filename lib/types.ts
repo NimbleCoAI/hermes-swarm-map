@@ -103,4 +103,5 @@ export type Settings = {
   theme: 'light' | 'dark'
   composeFiles: string[]  // explicit list of compose files; empty = auto-scan hermesDir
   onboarded?: boolean
+  useLocalBuild?: boolean  // Build from hermesDir instead of pulling upstream image
 }
