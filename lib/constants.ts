@@ -38,7 +38,6 @@ export const RISK_COLORS = [
 export const SIDEBAR_ITEMS = [
   { label: 'Dashboard', href: '/', icon: 'LayoutDashboard' },
   { label: 'Harnesses', href: '/harnesses', icon: 'Bot' },
-  { label: 'Surfaces', href: '/surfaces', icon: 'MessageSquare' },
   { label: 'Tools', href: '/tools', icon: 'Wrench' },
   { label: 'Keys', href: '/keys', icon: 'KeyRound' },
   { label: 'Memory', href: '/memory', icon: 'Brain' },
