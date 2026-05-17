@@ -275,17 +275,12 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                         <p className="text-xs text-muted-foreground capitalize">{s.platform}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
-                        {s.status}
-                      </span>
-                      <button
-                        onClick={() => setConnectDialog(s.platform.toLowerCase())}
-                        className="text-xs px-2 py-1 rounded-md border border-[var(--accent)] text-[var(--accent)] opacity-100 hover:bg-[var(--accent)] hover:text-white transition-colors"
-                      >
-                        Connect
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setConnectDialog(s.platform.toLowerCase())}
+                      className="text-xs px-2 py-1 rounded-md border border-[var(--accent)] text-[var(--accent)] opacity-100 hover:bg-[var(--accent)] hover:text-white transition-colors"
+                    >
+                      Connect
+                    </button>
                   </div>
                 ))}
               </div>
