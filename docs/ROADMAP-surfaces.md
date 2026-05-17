@@ -65,8 +65,18 @@
   - Telegram: not possible via Bot API (bots can't list groups they're not in)
 
 - [ ] **Cross-scope memory control** — "Can non-admins query memory from other conversations?" 
+  - Non-admin requesting cross-scope analysis → blocked
+  - Admin requesting cross-scope → confirmation prompt ("are you sure? or should this be a local query?")
   - Requires Hermes code changes (session.py scoping is automatic, no toggle exists)
-  - Would need a new env var like `MEMORY_CROSS_SCOPE=true/false`
+  - Would need new env vars: `MEMORY_CROSS_SCOPE_ADMIN=prompt|allow` and `MEMORY_CROSS_SCOPE_USER=block|allow`
+  - Settings tab toggle: "Non-admins can access memory from other conversations" (default: no)
+
+- [ ] **Auto-approve on admin invite (Approach A)** — Hermes PR
+  - Add `my_chat_member` handler to Telegram adapter (event has inviter ID)
+  - Add `user_added` websocket handler to Mattermost adapter
+  - Signal: not possible (no group-join events via SSE)
+  - On detection: check inviter against admin list → auto-add to allowed groups → persist to .env
+  - If non-admin invites: leave group (Telegram/Mattermost) or ignore (Signal)
 
 - [ ] **Bulk user management** — import/export approved user lists (CSV, JSON)
 

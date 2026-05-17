@@ -2,7 +2,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Shield, Loader2, Save } from 'lucide-react'
+import { Shield, Loader2, Save, RotateCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { TagInput } from '@/components/ui/tag-input'
 import type { Surface } from '@/lib/types'
@@ -35,6 +35,8 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [discovering, setDiscovering] = useState<string | null>(null)
   const [discoveredGroups, setDiscoveredGroups] = useState<Array<{id: string; name: string}>>([])
 
@@ -58,12 +60,14 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
       },
     })
     setDirty(true)
+    setSaved(false)
   }
 
   function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
     if (!settings) return
     setSettings({ ...settings, dmPolicy: policy })
     setDirty(true)
+    setSaved(false)
   }
 
   async function handleSave() {
@@ -79,6 +83,7 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
       if (data.success) {
         toast.success('Settings saved. Restart agent to apply.')
         setDirty(false)
+        setSaved(true)
       } else {
         toast.error(data.error || 'Failed to save')
       }
@@ -86,6 +91,28 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
       toast.error('Network error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleRestart() {
+    setRestarting(true)
+    try {
+      const res = await fetch(`/api/harnesses/${harnessId}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'quick' }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Harness restarted')
+        setSaved(false)
+      } else {
+        toast.error(data.error || 'Restart failed')
+      }
+    } catch {
+      toast.error('Restart failed')
+    } finally {
+      setRestarting(false)
     }
   }
 
@@ -253,17 +280,29 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
         <p className="text-sm text-muted-foreground">No surfaces connected. Connect a surface first to configure access.</p>
       )}
 
-      {/* Save button */}
-      {dirty && (
-        <div className="flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save Settings
-          </button>
+      {/* Save + Restart buttons */}
+      {(dirty || saved) && (
+        <div className="flex justify-end gap-2">
+          {dirty && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Settings
+            </button>
+          )}
+          {saved && !dirty && (
+            <button
+              onClick={handleRestart}
+              disabled={restarting}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface)] disabled:opacity-50"
+            >
+              {restarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+              Restart to apply
+            </button>
+          )}
         </div>
       )}
     </div>

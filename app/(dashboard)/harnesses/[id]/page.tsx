@@ -15,9 +15,10 @@ import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
 import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
 import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
 import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
+import { EditSurfaceDialog } from '@/components/surfaces/edit-surface-dialog'
 import { SettingsTab } from '@/components/harness/settings-tab'
 import { toast } from 'sonner'
-import { MessageSquare, Globe, Bot, Hash } from 'lucide-react'
+import { MessageSquare, Globe, Bot, Hash, Pencil } from 'lucide-react'
 
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
   telegram: <MessageSquare className="h-4 w-4" />,
@@ -53,6 +54,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const { data: modelConfig, refetch: refetchModels } = useApi<ModelConfig>(`/api/harnesses/${id}/models`)
 
   const [connectDialog, setConnectDialog] = useState<string | null>(null)
+  const [editSurface, setEditSurface] = useState<Surface | null>(null)
 
   // Model edit state
   const [modelProvider, setModelProvider] = useState('')
@@ -254,9 +256,38 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                         )}
                       </div>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
-                      {s.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
+                        {s.status}
+                      </span>
+                      <button
+                        onClick={() => setEditSurface(s)}
+                        className="text-xs px-2 py-1 rounded-md border border-[var(--border)] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        title="Edit config"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Disconnect ${s.name}? This will remove its configuration.`)) return
+                          try {
+                            const res = await fetch(`/api/harnesses/${id}/surfaces/disconnect`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ platform: s.platform.toLowerCase() }),
+                            })
+                            if (!res.ok) throw new Error('Failed')
+                            toast.success(`${s.name} disconnected`)
+                            refetchSurfaces()
+                          } catch {
+                            toast.error(`Failed to disconnect ${s.name}`)
+                          }
+                        }}
+                        className="text-xs px-2 py-1 rounded-md border border-red-500/50 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -426,6 +457,16 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         harnessId={harness.id}
         onConnected={() => refetchSurfaces()}
       />
+      {editSurface && (
+        <EditSurfaceDialog
+          platform={editSurface.platform}
+          harnessId={harness.id}
+          currentConfig={editSurface.config}
+          open={!!editSurface}
+          onClose={() => setEditSurface(null)}
+          onSaved={() => refetchSurfaces()}
+        />
+      )}
     </div>
   )
 }
