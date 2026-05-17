@@ -19,25 +19,23 @@ function expandPath(p: string): string {
   return p.replace(/^~/, os.homedir())
 }
 
-function nextAvailablePort(composeBaseDir: string): number {
+function nextAvailablePort(): number {
   const usedPorts = new Set<number>()
+
+  // Query Docker directly for all ports in use
   try {
-    const entries = fs.readdirSync(composeBaseDir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const composePath = path.join(composeBaseDir, entry.name, 'docker-compose.yml')
-      try {
-        const content = fs.readFileSync(composePath, 'utf-8')
-        const portMatch = content.match(/published:\s*(\d+)/g)
-        if (portMatch) {
-          for (const m of portMatch) {
-            const p = parseInt(m.replace('published:', '').trim(), 10)
-            if (!isNaN(p)) usedPorts.add(p)
-          }
-        }
-      } catch {}
+    const output = execSync(
+      `docker ps --format '{{.Ports}}'`,
+      { stdio: 'pipe', timeout: 5000 }
+    ).toString()
+    // Parse port mappings like "0.0.0.0:8642->8642/tcp"
+    const portMatches = output.matchAll(/0\.0\.0\.0:(\d+)/g)
+    for (const m of portMatches) {
+      usedPorts.add(parseInt(m[1]))
     }
   } catch {}
+
+  // Find next available in the hermes range (8642+, step 10)
   let port = BASE_PORT
   while (usedPorts.has(port)) {
     port += PORT_STEP
@@ -160,14 +158,17 @@ export async function POST(request: Request) {
     const pullResult = services.docker.pullImage(hermesImage)
     if (!pullResult.ok) {
       // Fallback: look for locally-built hermes images (from hermes-swarm build)
+      // Prefer the most generic one (hermes-personal is the base build)
       try {
-        const { execSync } = await import('child_process')
-        const localImages = execSync(
-          'docker images --format "{{.Repository}}:{{.Tag}}" | grep hermes | head -1',
+        const localOutput = execSync(
+          'docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null',
           { stdio: 'pipe', timeout: 5000 }
-        ).toString().trim()
-        if (localImages) {
-          hermesImage = localImages
+        ).toString()
+        const hermesImages = localOutput.split('\n').filter(l => l.includes('hermes') && !l.includes('vertex') && !l.includes('litellm'))
+        // Prefer images with "personal" (base build) or just any hermes image
+        const preferred = hermesImages.find(i => i.includes('personal')) || hermesImages[0]
+        if (preferred) {
+          hermesImage = preferred.trim()
         } else {
           return NextResponse.json({ ok: false, error: `No Hermes image available. Pull failed: ${pullResult.error}` }, { status: 500 })
         }
@@ -183,7 +184,7 @@ export async function POST(request: Request) {
       : path.join(os.homedir(), '.hermes-swarm-map')
     const composeBaseDir = path.join(swarmMapDataDir, 'compose')
 
-    const port = nextAvailablePort(composeBaseDir)
+    const port = nextAvailablePort()
 
     const agentDataDir = path.join(os.homedir(), `.hermes-${slug}`)
 
