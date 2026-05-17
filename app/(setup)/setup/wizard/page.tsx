@@ -62,11 +62,11 @@ const PROVIDER_OPTIONS = [
 ]
 
 const MODEL_SUGGESTIONS: Record<string, string[]> = {
-  anthropic: ['claude-sonnet-4', 'claude-haiku-4.5'],
-  openrouter: ['anthropic/claude-sonnet-4', 'openai/gpt-4o'],
-  ollama: ['qwen2.5:14b', 'qwen2.5-coder:32b'],
-  google: ['gemini-2.5-flash'],
-  bedrock: ['anthropic.claude-sonnet-4-v2'],
+  anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-6'],
+  openrouter: ['anthropic/claude-sonnet-4-6', 'anthropic/claude-opus-4-6', 'openai/gpt-4o'],
+  ollama: ['qwen3:8b', 'qwen3:32b', 'llama3.3:70b'],
+  google: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+  bedrock: ['anthropic.claude-sonnet-4-6-v1', 'anthropic.claude-haiku-4-5-v1'],
 }
 
 const PROVIDER_KEY_MAP: Record<string, string | null> = {
