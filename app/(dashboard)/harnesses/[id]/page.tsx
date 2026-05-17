@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useState } from 'react'
+import { use, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useApi } from '@/lib/hooks/use-api'
 import { StatusDot } from '@/components/shared/status-dot'
@@ -206,69 +206,25 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         </TabsContent>
 
         <TabsContent value="models" className="mt-4">
-          <div className="space-y-4">
-            {/* Current config */}
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
-              <h3 className="font-medium text-sm">Current Model Config</h3>
-              {modelConfig ? (
-                <>
-                  <Row label="Provider" value={modelConfig.provider || 'not set'} />
-                  <Row label="Primary model" value={modelConfig.primary || 'not set'} mono />
-                  {modelConfig.models.length > 1 && (
-                    <div className="space-y-1">
-                      <span className="text-xs text-muted-foreground">Fallback chain:</span>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {modelConfig.models.map((m, i) => (
-                          <span key={m} className="text-xs font-mono px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                            {i === 0 ? '① ' : `${i + 1}. `}{m}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">No config.yaml found for this harness.</p>
-              )}
-            </div>
-
-            {/* Edit form */}
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
-              <h3 className="font-medium text-sm">Update Model</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Provider</label>
-                  <select
-                    value={modelProvider || modelConfig?.provider || ''}
-                    onChange={(e) => setModelProvider(e.target.value)}
-                    className="w-full text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
-                  >
-                    <option value="">Select provider…</option>
-                    {MODEL_PROVIDERS.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Model name</label>
-                  <input
-                    type="text"
-                    value={modelName || (modelProvider ? '' : modelConfig?.primary ?? '')}
-                    onChange={(e) => setModelName(e.target.value)}
-                    placeholder="e.g. anthropic/claude-opus-4.7"
-                    className="w-full text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)] font-mono"
-                  />
-                </div>
-              </div>
-              <Button
-                size="sm"
-                onClick={saveModelConfig}
-                disabled={modelSaving}
-              >
-                {modelSaving ? 'Saving…' : 'Save'}
-              </Button>
-            </div>
-          </div>
+          <ModelCascadeEditor
+            models={modelConfig?.models ?? harness.models ?? []}
+            provider={modelConfig?.provider ?? ''}
+            onSave={async (models) => {
+              setModelSaving(true)
+              try {
+                const res = await fetch(`/api/harnesses/${id}/models`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ provider: models.length > 0 ? (modelConfig?.provider || 'anthropic') : '', model: models[0] || '', cascade: models }),
+                })
+                if (!res.ok) { toast.error('Failed to save'); return }
+                toast.success('Model cascade saved')
+                refetchModels()
+              } catch { toast.error('Failed to save') }
+              finally { setModelSaving(false) }
+            }}
+            saving={modelSaving}
+          />
         </TabsContent>
 
         <TabsContent value="surfaces" className="mt-4">
@@ -437,6 +393,130 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+function ModelCascadeEditor({
+  models: initialModels,
+  provider,
+  onSave,
+  saving,
+}: {
+  models: string[]
+  provider: string
+  onSave: (models: string[]) => void
+  saving: boolean
+}) {
+  const [cascade, setCascade] = useState<string[]>(initialModels.length > 0 ? initialModels : [])
+  const [newModel, setNewModel] = useState('')
+
+  // Sync when data loads
+  useEffect(() => {
+    if (initialModels.length > 0 && cascade.length === 0) {
+      setCascade(initialModels)
+    }
+  }, [initialModels])
+
+  function addModel() {
+    const m = newModel.trim()
+    if (!m || cascade.includes(m)) return
+    setCascade([...cascade, m])
+    setNewModel('')
+  }
+
+  function removeModel(index: number) {
+    setCascade(cascade.filter((_, i) => i !== index))
+  }
+
+  function moveUp(index: number) {
+    if (index === 0) return
+    const next = [...cascade]
+    ;[next[index - 1], next[index]] = [next[index], next[index - 1]]
+    setCascade(next)
+  }
+
+  function moveDown(index: number) {
+    if (index >= cascade.length - 1) return
+    const next = [...cascade]
+    ;[next[index], next[index + 1]] = [next[index + 1], next[index]]
+    setCascade(next)
+  }
+
+  const isDirty = JSON.stringify(cascade) !== JSON.stringify(initialModels)
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-medium text-sm">Model Cascade</h3>
+          <span className="text-xs text-muted-foreground">Primary at top, fallbacks below</span>
+        </div>
+
+        {cascade.length === 0 ? (
+          <p className="text-sm text-muted-foreground italic">No models configured. Add one below.</p>
+        ) : (
+          <div className="space-y-1">
+            {cascade.map((model, i) => (
+              <div
+                key={`${model}-${i}`}
+                className={`flex items-center gap-2 p-2 rounded-md border ${i === 0 ? 'border-[var(--accent)] bg-[var(--accent)]/5' : 'border-[var(--border)]'}`}
+              >
+                <span className="text-xs text-muted-foreground w-5 text-center font-medium">
+                  {i === 0 ? '1' : i + 1}
+                </span>
+                <span className="flex-1 text-sm font-mono">{model}</span>
+                <div className="flex gap-0.5">
+                  <button
+                    onClick={() => moveUp(i)}
+                    disabled={i === 0}
+                    className="text-xs px-1.5 py-0.5 rounded hover:bg-muted disabled:opacity-30"
+                    title="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    onClick={() => moveDown(i)}
+                    disabled={i >= cascade.length - 1}
+                    className="text-xs px-1.5 py-0.5 rounded hover:bg-muted disabled:opacity-30"
+                    title="Move down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    onClick={() => removeModel(i)}
+                    className="text-xs px-1.5 py-0.5 rounded hover:bg-[var(--danger)]/10 text-[var(--danger)]"
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add model */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newModel}
+            onChange={(e) => setNewModel(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addModel()}
+            placeholder="Model name (e.g. claude-sonnet-4-6)"
+            className="flex-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--bg)] font-mono"
+          />
+          <Button size="sm" variant="outline" onClick={addModel} disabled={!newModel.trim()}>
+            Add
+          </Button>
+        </div>
+
+        {isDirty && (
+          <Button size="sm" onClick={() => onSave(cascade)} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Cascade'}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

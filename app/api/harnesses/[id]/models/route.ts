@@ -42,16 +42,20 @@ export async function PUT(
     return NextResponse.json({ error: 'Harness not found' }, { status: 404 })
   }
 
-  let body: { provider?: string; model?: string }
+  let body: { provider?: string; model?: string; cascade?: string[] }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { provider, model } = body
-  if (!provider || !model) {
-    return NextResponse.json({ error: 'provider and model are required' }, { status: 400 })
+  // Support both single model and cascade array
+  const cascade = body.cascade ?? (body.model ? [body.model] : [])
+  const provider = body.provider || ''
+  const primary = cascade[0] || ''
+
+  if (cascade.length === 0) {
+    return NextResponse.json({ error: 'At least one model is required' }, { status: 400 })
   }
 
   const containerName = harness.serviceName
@@ -62,70 +66,60 @@ export async function PUT(
   const dataDir = guessDataDir(harness.serviceName ?? harness.name, containerName)
   const configPath = path.join(dataDir, 'config.yaml')
 
+  // Build the model section of config.yaml
+  const modelLines = ['model:']
+  if (provider) modelLines.push(`  provider: ${provider}`)
+  modelLines.push(`  default: ${primary}`)
+  if (cascade.length > 1) {
+    modelLines.push(`  fallback:`)
+    for (const m of cascade.slice(1)) {
+      modelLines.push(`    - ${m}`)
+    }
+  }
+
   let content: string
   try {
     content = fs.readFileSync(configPath, 'utf-8')
   } catch {
-    // config.yaml doesn't exist — create a minimal one
-    content = `model:\n  provider: ${provider}\n  default: ${model}\n`
+    // No config.yaml — create one
+    content = modelLines.join('\n') + '\n'
     fs.writeFileSync(configPath, content, 'utf-8')
-    // Also update the in-memory overlay
-    services.harness.updateConfig(id, { models: [model] })
-    return NextResponse.json({ provider, primary: model, models: [model] })
+    services.harness.updateConfig(id, { models: cascade })
+    return NextResponse.json({ provider, primary, models: cascade })
   }
 
-  // Rewrite model section lines in config.yaml
+  // Replace the entire model: section in config.yaml
   const lines = content.split('\n')
-  let inModelSection = false
-  let providerWritten = false
-  let defaultWritten = false
   const updated: string[] = []
+  let inModelSection = false
+  let modelSectionWritten = false
 
   for (const line of lines) {
-    const trimmed = line.trim()
-    if (/^model:/.test(line)) {
+    if (/^model:\s*$/.test(line) || /^model:$/.test(line.trim())) {
+      // Start of model section — replace entirely
       inModelSection = true
-      updated.push(line)
-      continue
-    }
-    if (/^\w/.test(line) && !trimmed.startsWith('#') && !/^model:/.test(line)) {
-      // Exiting model section — inject any missing fields before this line
-      if (inModelSection) {
-        if (!providerWritten) updated.push(`  provider: ${provider}`)
-        if (!defaultWritten) updated.push(`  default: ${model}`)
-        inModelSection = false
+      if (!modelSectionWritten) {
+        updated.push(...modelLines)
+        modelSectionWritten = true
       }
-      updated.push(line)
       continue
     }
-
     if (inModelSection) {
-      if (trimmed.startsWith('provider:')) {
-        updated.push(`  provider: ${provider}`)
-        providerWritten = true
-        continue
-      }
-      if (trimmed.startsWith('default:')) {
-        updated.push(`  default: ${model}`)
-        defaultWritten = true
-        continue
-      }
+      // Skip old model section lines (indented under model:)
+      if (/^\s+\S/.test(line)) continue
+      // Non-indented line = end of model section
+      inModelSection = false
     }
-
     updated.push(line)
   }
 
-  // If we ended while still in model section
-  if (inModelSection) {
-    if (!providerWritten) updated.push(`  provider: ${provider}`)
-    if (!defaultWritten) updated.push(`  default: ${model}`)
+  // If config had no model section at all, append it
+  if (!modelSectionWritten) {
+    updated.push('', ...modelLines)
   }
 
-  const newContent = updated.join('\n')
-  fs.writeFileSync(configPath, newContent, 'utf-8')
+  fs.writeFileSync(configPath, updated.join('\n'), 'utf-8')
+  services.harness.updateConfig(id, { models: cascade })
 
-  // Update overlay so the harness list reflects the new model
-  services.harness.updateConfig(id, { models: [model] })
-
-  return NextResponse.json({ provider, primary: model, models: [model] })
+  return NextResponse.json({ provider, primary, models: cascade })
 }
