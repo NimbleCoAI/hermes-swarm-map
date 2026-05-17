@@ -6,17 +6,9 @@ export async function GET() {
     const { harnesses, error } = services.harness.discover()
 
     if (error && harnesses.length === 0) {
-      // Docker unavailable — fall back to stored overlays and signal the error
+      // Docker unavailable — fall back to stored overlays
       const stored = services.storage.read<unknown[]>('harnesses.json', [])
-      return NextResponse.json(
-        { harnesses: stored, error },
-        { status: 207 }  // partial content
-      )
-    }
-
-    // Success — may include a non-fatal warning (e.g. some files not found)
-    if (error) {
-      return NextResponse.json({ harnesses, error }, { status: 207 })
+      return NextResponse.json(stored)
     }
 
     return NextResponse.json(harnesses)
