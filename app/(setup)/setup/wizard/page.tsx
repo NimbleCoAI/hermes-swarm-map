@@ -24,6 +24,8 @@ type WizardState = {
   mattermostToken: string
   telegramEnabled: boolean
   telegramToken: string
+  signalEnabled: boolean
+  signalPhone: string
   // Step 4
   llmKey: string
   githubToken: string
@@ -42,6 +44,8 @@ const INITIAL_STATE: WizardState = {
   mattermostToken: '',
   telegramEnabled: false,
   telegramToken: '',
+  signalEnabled: false,
+  signalPhone: '',
   llmKey: '',
   githubToken: '',
   braveKey: '',
@@ -134,6 +138,8 @@ export default function WizardPage() {
           mattermostToken: state.mattermostToken,
           telegramEnabled: state.telegramEnabled,
           telegramToken: state.telegramToken,
+          signalEnabled: state.signalEnabled,
+          signalPhone: state.signalPhone,
           llmKey: state.llmKey || undefined,
           githubToken: state.githubToken || undefined,
           braveKey: state.braveKey || undefined,
@@ -356,6 +362,38 @@ export default function WizardPage() {
                 </div>
               )}
             </div>
+
+            {/* Signal */}
+            <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.signalEnabled}
+                  onChange={(e) => update({ signalEnabled: e.target.checked })}
+                  className="accent-[var(--accent)]"
+                />
+                <div>
+                  <div className="font-medium text-sm">Signal</div>
+                  <div className="text-xs text-muted-foreground">Connect via a registered Signal number</div>
+                </div>
+              </label>
+
+              {state.signalEnabled && (
+                <div className="pl-7 space-y-2">
+                  <div>
+                    <FieldLabel>Phone Number (E.164)</FieldLabel>
+                    <Input
+                      value={state.signalPhone}
+                      onChange={(e) => update({ signalPhone: e.target.value })}
+                      placeholder="+15551234567"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    The number must be registered with the signal-cli daemon. Use the Signal setup in the harness Surfaces tab to register a new number.
+                  </p>
+                </div>
+              )}
+            </div>
           </Section>
         )}
 
@@ -459,6 +497,12 @@ export default function WizardPage() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Telegram</span>
                   <span>configured</span>
+                </div>
+              )}
+              {state.signalEnabled && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Signal</span>
+                  <span>{state.signalPhone}</span>
                 </div>
               )}
               <div className="flex justify-between">

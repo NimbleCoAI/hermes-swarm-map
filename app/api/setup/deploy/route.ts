@@ -53,10 +53,11 @@ function generateEnvContent(params: {
   mattermostUrl?: string
   mattermostToken?: string
   telegramToken?: string
+  signalPhone?: string
   githubToken?: string
   braveKey?: string
 }): string {
-  const { name, port, provider, llmKey, mattermostUrl, mattermostToken, telegramToken, githubToken, braveKey } = params
+  const { name, port, provider, llmKey, mattermostUrl, mattermostToken, telegramToken, signalPhone, githubToken, braveKey } = params
 
   const providerKeyMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -92,6 +93,15 @@ function generateEnvContent(params: {
     lines.push(`TELEGRAM_BOT_TOKEN=${telegramToken}`)
   } else {
     lines.push(`# TELEGRAM_BOT_TOKEN=`)
+  }
+  if (signalPhone) {
+    lines.push(`SIGNAL_HTTP_URL=http://host.docker.internal:8080`)
+    lines.push(`SIGNAL_ACCOUNT=${signalPhone}`)
+    lines.push(`SIGNAL_ALLOWED_USERS=*`)
+    lines.push(`SIGNAL_GROUP_ALLOWED_USERS=*`)
+  } else {
+    lines.push(`# SIGNAL_HTTP_URL=http://host.docker.internal:8080`)
+    lines.push(`# SIGNAL_ACCOUNT=`)
   }
 
   if (githubToken || braveKey) {
@@ -137,7 +147,8 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { name, provider, primaryModel, fallbackModel, persona, tier,
       mattermostEnabled, mattermostUrl, mattermostToken,
-      telegramEnabled, telegramToken, llmKey, githubToken, braveKey } = body
+      telegramEnabled, telegramToken, signalEnabled, signalPhone,
+      llmKey, githubToken, braveKey } = body
 
     if (!name || !provider || !primaryModel) {
       return NextResponse.json({ ok: false, error: 'name, provider, and primaryModel are required' }, { status: 400 })
@@ -203,6 +214,7 @@ export async function POST(request: Request) {
       mattermostUrl: mattermostEnabled ? mattermostUrl : undefined,
       mattermostToken: mattermostEnabled ? mattermostToken : undefined,
       telegramToken: telegramEnabled ? telegramToken : undefined,
+      signalPhone: signalEnabled ? signalPhone : undefined,
       githubToken,
       braveKey,
     })
