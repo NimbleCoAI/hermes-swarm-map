@@ -11,8 +11,29 @@ import { SplitButton } from '@/components/shared/split-button'
 import { RiskBar } from '@/components/shared/risk-bar'
 import { TierMix } from '@/components/shared/tier-mix'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { Harness, Tool, Key, MemoryScope } from '@/lib/types'
+import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
 import { toast } from 'sonner'
+import { MessageSquare, Globe, Bot, Hash } from 'lucide-react'
+
+const PLATFORM_ICONS: Record<string, React.ReactNode> = {
+  telegram: <MessageSquare className="h-4 w-4" />,
+  mattermost: <Hash className="h-4 w-4" />,
+  slack: <Hash className="h-4 w-4" />,
+  web: <Globe className="h-4 w-4" />,
+  api: <Bot className="h-4 w-4" />,
+  discord: <MessageSquare className="h-4 w-4" />,
+  signal: <MessageSquare className="h-4 w-4" />,
+}
+
+const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
+  connected: 'bg-[var(--success)]/10 text-[var(--success)]',
+  available: 'bg-muted text-muted-foreground',
+  planned: 'bg-[var(--warning)]/10 text-[var(--warning)]',
+}
+
+const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'google', 'bedrock'] as const
+
+type ModelConfig = { provider: string; primary: string; models: string[] }
 
 type LogsResponse = { logs: string; lines: number }
 
@@ -24,6 +45,13 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const { data: tools } = useApi<Tool[]>('/api/tools')
   const { data: keys } = useApi<Key[]>('/api/keys')
   const { data: memoryScopes } = useApi<MemoryScope[]>('/api/memory-scopes')
+  const { data: surfaces } = useApi<Surface[]>('/api/surfaces')
+  const { data: modelConfig, refetch: refetchModels } = useApi<ModelConfig>(`/api/harnesses/${id}/models`)
+
+  // Model edit state
+  const [modelProvider, setModelProvider] = useState('')
+  const [modelName, setModelName] = useState('')
+  const [modelSaving, setModelSaving] = useState(false)
 
   const [logLines, setLogLines] = useState(100)
   const { data: logsData, loading: logsLoading, refetch: refetchLogs } = useApi<LogsResponse>(
@@ -66,12 +94,44 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function saveModelConfig() {
+    const provider = modelProvider || modelConfig?.provider || ''
+    const model = modelName || modelConfig?.primary || ''
+    if (!provider || !model) {
+      toast.error('Provider and model are required')
+      return
+    }
+    setModelSaving(true)
+    try {
+      const res = await fetch(`/api/harnesses/${id}/models`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Failed to save model config')
+        return
+      }
+      toast.success('Model config saved')
+      setModelProvider('')
+      setModelName('')
+      refetchModels()
+    } catch {
+      toast.error('Failed to save model config')
+    } finally {
+      setModelSaving(false)
+    }
+  }
+
   if (loading) return <p className="text-muted-foreground">Loading...</p>
   if (!harness) return <p className="text-destructive">Harness not found.</p>
 
   const harnessTools = tools?.filter((t) => harness.tools.includes(t.id)) ?? []
   const harnessKeys = keys?.filter((k) => k.assignedTo.includes(harness.id)) ?? []
   const harnessMemory = memoryScopes?.filter((m) => m.members.includes(harness.id)) ?? []
+  const connectedSurfaces = surfaces?.filter((s) => s.harnessIds.includes(harness.id)) ?? []
+  const otherSurfaces = surfaces?.filter((s) => !s.harnessIds.includes(harness.id)) ?? []
 
   return (
     <div>
@@ -109,7 +169,9 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="models">Models</TabsTrigger>
           <TabsTrigger value="tools">Tools ({harnessTools.length})</TabsTrigger>
+          <TabsTrigger value="surfaces">Surfaces ({connectedSurfaces.length})</TabsTrigger>
           <TabsTrigger value="keys">Keys ({harnessKeys.length})</TabsTrigger>
           <TabsTrigger value="memory">Memory ({harnessMemory.length})</TabsTrigger>
           <TabsTrigger value="environment">Environment</TabsTrigger>
@@ -139,6 +201,132 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-xs text-muted-foreground mt-1 font-mono">{harness.health.errorMsg}</p>
                 )}
               </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="models" className="mt-4">
+          <div className="space-y-4">
+            {/* Current config */}
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+              <h3 className="font-medium text-sm">Current Model Config</h3>
+              {modelConfig ? (
+                <>
+                  <Row label="Provider" value={modelConfig.provider || 'not set'} />
+                  <Row label="Primary model" value={modelConfig.primary || 'not set'} mono />
+                  {modelConfig.models.length > 1 && (
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Fallback chain:</span>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {modelConfig.models.map((m, i) => (
+                          <span key={m} className="text-xs font-mono px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                            {i === 0 ? '① ' : `${i + 1}. `}{m}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No config.yaml found for this harness.</p>
+              )}
+            </div>
+
+            {/* Edit form */}
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+              <h3 className="font-medium text-sm">Update Model</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Provider</label>
+                  <select
+                    value={modelProvider || modelConfig?.provider || ''}
+                    onChange={(e) => setModelProvider(e.target.value)}
+                    className="w-full text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
+                  >
+                    <option value="">Select provider…</option>
+                    {MODEL_PROVIDERS.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Model name</label>
+                  <input
+                    type="text"
+                    value={modelName || (modelProvider ? '' : modelConfig?.primary ?? '')}
+                    onChange={(e) => setModelName(e.target.value)}
+                    placeholder="e.g. anthropic/claude-opus-4.7"
+                    className="w-full text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)] font-mono"
+                  />
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={saveModelConfig}
+                disabled={modelSaving}
+              >
+                {modelSaving ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="surfaces" className="mt-4">
+          <div className="space-y-4">
+            {/* Connected surfaces */}
+            {connectedSurfaces.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Connected</h3>
+                {connectedSurfaces.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+                    <div className="flex items-center gap-3">
+                      <span className="text-muted-foreground">
+                        {PLATFORM_ICONS[s.platform.toLowerCase()] ?? <Globe className="h-4 w-4" />}
+                      </span>
+                      <div>
+                        <p className="font-medium text-sm">{s.name}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{s.platform}</p>
+                        {s.config.url && (
+                          <p className="text-xs font-mono text-muted-foreground">{s.config.url}</p>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
+                      {s.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Other surfaces (grayed out) */}
+            {otherSurfaces.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Available</h3>
+                {otherSurfaces.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] opacity-50">
+                    <div className="flex items-center gap-3">
+                      <span className="text-muted-foreground">
+                        {PLATFORM_ICONS[s.platform.toLowerCase()] ?? <Globe className="h-4 w-4" />}
+                      </span>
+                      <div>
+                        <p className="font-medium text-sm">{s.name}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{s.platform}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
+                        {s.status}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Add</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {connectedSurfaces.length === 0 && otherSurfaces.length === 0 && (
+              <p className="text-sm text-muted-foreground">No surfaces found.</p>
             )}
           </div>
         </TabsContent>

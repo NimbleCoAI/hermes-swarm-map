@@ -32,6 +32,94 @@ function stateToStatus(state: string): HarnessStatus {
   }
 }
 
+export function readModelConfig(dataDir: string): string[] {
+  try {
+    const configPath = path.join(dataDir, 'config.yaml')
+    const content = fs.readFileSync(configPath, 'utf-8')
+    const lines = content.split('\n')
+
+    const models: string[] = []
+    let inModelSection = false
+    let inAuxSection = false
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const trimmed = line.trim()
+
+      // Detect top-level sections (no leading spaces)
+      if (/^model:/.test(line)) {
+        inModelSection = true
+        inAuxSection = false
+        continue
+      }
+      if (/^auxiliary:/.test(line)) {
+        inAuxSection = true
+        inModelSection = false
+        continue
+      }
+      // Any new top-level key ends both sections
+      if (/^\w/.test(line) && !trimmed.startsWith('#')) {
+        inModelSection = false
+        inAuxSection = false
+      }
+
+      if (inModelSection) {
+        const defaultMatch = trimmed.match(/^default:\s*(.+)$/)
+        if (defaultMatch) {
+          const val = defaultMatch[1].trim().replace(/^["']|["']$/g, '')
+          if (val && !models.includes(val)) {
+            models.unshift(val) // primary model goes first
+          }
+        }
+        const fallbackMatch = trimmed.match(/^fallback:\s*(.+)$/)
+        if (fallbackMatch) {
+          const val = fallbackMatch[1].trim().replace(/^["']|["']$/g, '')
+          if (val && !models.includes(val)) {
+            models.push(val)
+          }
+        }
+      }
+
+      // Auxiliary models — look for `model:` under nested keys
+      if (inAuxSection) {
+        const modelMatch = trimmed.match(/^model:\s*(.+)$/)
+        if (modelMatch) {
+          const val = modelMatch[1].trim().replace(/^["']|["']$/g, '')
+          if (val && !models.includes(val)) {
+            models.push(val)
+          }
+        }
+      }
+    }
+
+    return models
+  } catch {
+    return []
+  }
+}
+
+export function readModelProvider(dataDir: string): string {
+  try {
+    const configPath = path.join(dataDir, 'config.yaml')
+    const content = fs.readFileSync(configPath, 'utf-8')
+    const lines = content.split('\n')
+
+    let inModelSection = false
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (/^model:/.test(line)) { inModelSection = true; continue }
+      if (/^\w/.test(line) && !trimmed.startsWith('#')) { inModelSection = false }
+      if (inModelSection) {
+        const provMatch = trimmed.match(/^provider:\s*(.+)$/)
+        if (provMatch) return provMatch[1].trim().replace(/^["']|["']$/g, '')
+      }
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 function readSoul(dataDir: string, maxChars = 200): string {
   try {
     const soulPath = path.join(dataDir, 'SOUL.md')
@@ -73,7 +161,7 @@ function getServicesFromComposeFile(composeFile: string): string[] {
 }
 
 // Map service name to the data directory where its SOUL.md lives
-function guessDataDir(serviceName: string, containerName: string): string {
+export function guessDataDir(serviceName: string, containerName: string): string {
   // hermes-personal → ~/.hermes (the default/personal instance)
   // hermes-osint → ~/.hermes-osint
   // seraph-thinker → ~/.hermes-seraph-thinker
@@ -223,7 +311,7 @@ export class HarnessService {
         tier: overlay.tier ?? 'individual',
         platform: overlay.platform ?? 'hermes',
         channel: overlay.channel ?? (port ? `:${port}` : ''),
-        models: overlay.models ?? [],
+        models: overlay.models?.length ? overlay.models : readModelConfig(dataDir),
         costToday: overlay.costToday ?? 0,
         invocations: overlay.invocations ?? 0,
         tools: overlay.tools ?? [],
