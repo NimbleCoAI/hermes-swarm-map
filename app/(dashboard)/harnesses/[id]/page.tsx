@@ -220,13 +220,14 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           <ModelCascadeEditor
             models={modelConfig?.models ?? harness.models ?? []}
             provider={modelConfig?.provider ?? ''}
-            onSave={async (models) => {
+            fallbackProviders={modelConfig?.fallbackProviders ?? []}
+            onSave={async (entries) => {
               setModelSaving(true)
               try {
                 const res = await fetch(`/api/harnesses/${id}/models`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ provider: models.length > 0 ? (modelConfig?.provider || 'anthropic') : '', model: models[0] || '', cascade: models }),
+                  body: JSON.stringify({ fallback_providers: entries }),
                 })
                 if (!res.ok) { toast.error('Failed to save'); return }
                 toast.success('Model cascade saved')
@@ -475,30 +476,59 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
 function ModelCascadeEditor({
   models: initialModels,
-  provider,
+  provider: initialProvider,
+  fallbackProviders: initialFallbackProviders,
   onSave,
   saving,
 }: {
   models: string[]
   provider: string
-  onSave: (models: string[]) => void
+  fallbackProviders: FallbackProviderEntry[]
+  onSave: (entries: FallbackProviderEntry[]) => void
   saving: boolean
 }) {
-  const [cascade, setCascade] = useState<string[]>(initialModels.length > 0 ? initialModels : [])
+  // Build initial cascade from fallbackProviders if available, else from models
+  function buildInitialCascade(): FallbackProviderEntry[] {
+    if (initialFallbackProviders.length > 0) {
+      return initialFallbackProviders.map((fp) => ({
+        provider: fp.provider,
+        model: fp.model,
+        ...(fp.base_url ? { base_url: fp.base_url } : {}),
+      }))
+    }
+    // Fallback: convert string models to entries using the provider
+    return initialModels.map((m) => ({
+      provider: initialProvider || 'anthropic',
+      model: m,
+    }))
+  }
+
+  const [cascade, setCascade] = useState<FallbackProviderEntry[]>(buildInitialCascade)
   const [newModel, setNewModel] = useState('')
+  const [newProvider, setNewProvider] = useState<string>('anthropic')
+  const [newBaseUrl, setNewBaseUrl] = useState('')
 
   // Sync when data loads
   useEffect(() => {
-    if (initialModels.length > 0 && cascade.length === 0) {
-      setCascade(initialModels)
+    const built = buildInitialCascade()
+    if (built.length > 0 && cascade.length === 0) {
+      setCascade(built)
     }
-  }, [initialModels])
+  }, [initialFallbackProviders, initialModels])
+
+  const showBaseUrl = newProvider === 'ollama' || newProvider === 'custom'
 
   function addModel() {
     const m = newModel.trim()
-    if (!m || cascade.includes(m)) return
-    setCascade([...cascade, m])
+    if (!m || !newProvider) return
+    if (cascade.some((e) => e.model === m && e.provider === newProvider)) return
+    const entry: FallbackProviderEntry = { provider: newProvider, model: m }
+    if (showBaseUrl && newBaseUrl.trim()) {
+      entry.base_url = newBaseUrl.trim()
+    }
+    setCascade([...cascade, entry])
     setNewModel('')
+    setNewBaseUrl('')
   }
 
   function removeModel(index: number) {
@@ -519,7 +549,7 @@ function ModelCascadeEditor({
     setCascade(next)
   }
 
-  const isDirty = JSON.stringify(cascade) !== JSON.stringify(initialModels)
+  const isDirty = JSON.stringify(cascade) !== JSON.stringify(buildInitialCascade())
 
   return (
     <div className="space-y-4">
@@ -533,16 +563,28 @@ function ModelCascadeEditor({
           <p className="text-sm text-muted-foreground italic">No models configured. Add one below.</p>
         ) : (
           <div className="space-y-1">
-            {cascade.map((model, i) => (
+            {cascade.map((entry, i) => (
               <div
-                key={`${model}-${i}`}
+                key={`${entry.provider}-${entry.model}-${i}`}
                 className={`flex items-center gap-2 p-2 rounded-md border ${i === 0 ? 'border-[var(--accent)] bg-[var(--accent)]/5' : 'border-[var(--border)]'}`}
               >
                 <span className="text-xs text-muted-foreground w-5 text-center font-medium">
-                  {i === 0 ? '1' : i + 1}
+                  {i + 1}
                 </span>
-                <span className="flex-1 text-sm font-mono">{model}</span>
-                <div className="flex gap-0.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-mono truncate">{entry.model}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium uppercase tracking-wide shrink-0">
+                      {entry.provider}
+                    </span>
+                  </div>
+                  {entry.base_url && (
+                    <p className="text-[11px] font-mono text-muted-foreground mt-0.5 truncate">
+                      {entry.base_url}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-0.5 shrink-0">
                   <button
                     onClick={() => moveUp(i)}
                     disabled={i === 0}
@@ -573,18 +615,39 @@ function ModelCascadeEditor({
         )}
 
         {/* Add model */}
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={newModel}
-            onChange={(e) => setNewModel(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addModel()}
-            placeholder="Model name (e.g. claude-sonnet-4-6)"
-            className="flex-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--bg)] font-mono"
-          />
-          <Button size="sm" variant="outline" onClick={addModel} disabled={!newModel.trim()}>
-            Add
-          </Button>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <select
+              value={newProvider}
+              onChange={(e) => setNewProvider(e.target.value)}
+              className="text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--bg)] w-36"
+            >
+              {MODEL_PROVIDERS.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !showBaseUrl && addModel()}
+              placeholder="Model name (e.g. claude-sonnet-4-6)"
+              className="flex-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--bg)] font-mono"
+            />
+            <Button size="sm" variant="outline" onClick={addModel} disabled={!newModel.trim()}>
+              Add
+            </Button>
+          </div>
+          {showBaseUrl && (
+            <input
+              type="text"
+              value={newBaseUrl}
+              onChange={(e) => setNewBaseUrl(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addModel()}
+              placeholder="Base URL (e.g. http://host.docker.internal:11434/v1)"
+              className="w-full text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--bg)] font-mono"
+            />
+          )}
         </div>
 
         {isDirty && (

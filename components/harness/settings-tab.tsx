@@ -2,10 +2,17 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Shield, Loader2, Save, RotateCw } from 'lucide-react'
+import { Shield, Loader2, Save, RotateCw, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { TagInput } from '@/components/ui/tag-input'
 import type { Surface } from '@/lib/types'
+
+type PairingUser = {
+  userId: string
+  userName: string
+  approvedAt: number
+  platform: string
+}
 
 type SurfaceSettings = {
   allowedUsers: string[]
@@ -39,6 +46,33 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
   const [restarting, setRestarting] = useState(false)
   const [discovering, setDiscovering] = useState<string | null>(null)
   const [discoveredGroups, setDiscoveredGroups] = useState<Array<{id: string; name: string}>>([])
+  const [pairedUsers, setPairedUsers] = useState<PairingUser[]>([])
+
+  useEffect(() => {
+    fetch(`/api/harnesses/${harnessId}/pairing`)
+      .then(res => res.json())
+      .then(data => { if (data.users) setPairedUsers(data.users) })
+      .catch(() => {})
+  }, [harnessId])
+
+  async function revokePairing(platform: string, userId: string) {
+    if (!window.confirm(`Revoke access for ${userId}?`)) return
+    try {
+      const res = await fetch(`/api/harnesses/${harnessId}/pairing`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, userId }),
+      })
+      if (res.ok) {
+        setPairedUsers(prev => prev.filter(u => !(u.platform === platform && u.userId === userId)))
+        toast.success('Access revoked')
+      } else {
+        toast.error('Failed to revoke')
+      }
+    } catch {
+      toast.error('Network error')
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/harnesses/${harnessId}/settings`)
@@ -271,6 +305,38 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
 
             {platform !== 'mattermost' && (
               <p className="text-xs text-muted-foreground italic">Admin roles not enforced on {platform} yet.</p>
+            )}
+
+            {/* Paired users (dynamic approvals) */}
+            {pairedUsers.filter(u => u.platform === platform).length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-[var(--border)]">
+                <div className="flex items-center gap-2">
+                  <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">Dynamically paired users</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {pairedUsers
+                    .filter(u => u.platform === platform)
+                    .map(u => (
+                      <span
+                        key={u.userId}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                      >
+                        {u.userName || u.userId}
+                        <button
+                          onClick={() => revokePairing(platform, u.userId)}
+                          className="hover:text-red-500 transition-colors"
+                          title="Revoke access"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  These users were approved via pairing. Click × to revoke.
+                </p>
+              </div>
             )}
           </div>
         )
