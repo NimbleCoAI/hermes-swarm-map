@@ -10,11 +10,14 @@ const COMMON_PATHS = [
   '~/hermes-agent',
 ]
 
-// The real indicator: compose files that use the Hermes agent image
-const HERMES_IMAGE_PATTERNS = [
-  'nousresearch/hermes-agent',
-  'ghcr.io/nousresearch/hermes-agent',
-  'hermes-agent:',
+// Indicators that a compose file manages Hermes agents
+// (may be built from source, pulled from registry, or use custom image)
+const HERMES_MARKERS = [
+  'command: gateway',           // Hermes gateway command
+  '/opt/data',                  // Hermes data volume mount
+  'x-hermes',                   // YAML extension anchor
+  'nousresearch/hermes-agent',  // Official image
+  'HERMES_REPO_URL',            // Hermes env var
 ]
 
 function expandPath(p: string): string {
@@ -29,8 +32,10 @@ function getComposeFiles(dir: string): string[] {
   }
 }
 
-function hasHermesImage(content: string): boolean {
-  return HERMES_IMAGE_PATTERNS.some(pattern => content.includes(pattern))
+function isHermesCompose(content: string): boolean {
+  // At least 2 markers = high confidence this is a Hermes compose file
+  const hits = HERMES_MARKERS.filter(marker => content.includes(marker))
+  return hits.length >= 2
 }
 
 function countServices(content: string): number {
@@ -51,9 +56,13 @@ function scanDirForHermes(dir: string, displayPath: string): { path: string; com
   for (const file of files) {
     try {
       const content = fs.readFileSync(path.join(dir, file), 'utf-8')
-      if (hasHermesImage(content)) {
+      if (isHermesCompose(content)) {
         hermesFiles++
-        totalAgents += countServices(content)
+        // Count services that have `command: gateway` (actual agents, not infra)
+        const gatewayServices = (content.match(/command:\s*gateway/g) || []).length
+        // Fallback: count services with /opt/data mount
+        const dataServices = (content.match(/\/opt\/data/g) || []).length
+        totalAgents += Math.max(gatewayServices, dataServices)
       }
     } catch {}
   }
@@ -86,6 +95,40 @@ export async function GET() {
       if (result) found.push(result)
     }
   } catch {}
+
+  // If filesystem scan found nothing, try detecting from running Docker containers
+  if (found.length === 0) {
+    try {
+      const { execSync } = await import('child_process')
+      // Find running containers with gateway command or /opt/data mount
+      const psOutput = execSync(
+        'docker ps --format "{{.Names}}\\t{{.Label \\"com.docker.compose.project.config_files\\"}}"',
+        { stdio: 'pipe', timeout: 10000 }
+      ).toString().trim()
+
+      const composePaths = new Set<string>()
+      for (const line of psOutput.split('\n')) {
+        const [name, configFile] = line.split('\t')
+        if (!name || !configFile) continue
+        // Check if this looks like a hermes container (has gateway in command or hermes in name)
+        if (name.includes('hermes') || name.includes('seraph')) {
+          // configFile might be comma-separated
+          for (const cf of configFile.split(',')) {
+            const trimmed = cf.trim()
+            if (trimmed && fs.existsSync(trimmed)) {
+              composePaths.add(path.dirname(trimmed))
+            }
+          }
+        }
+      }
+
+      for (const dir of composePaths) {
+        const displayPath = dir.replace(os.homedir(), '~')
+        const result = scanDirForHermes(dir, displayPath)
+        if (result) found.push(result)
+      }
+    } catch {}
+  }
 
   return NextResponse.json({ paths: found })
 }
