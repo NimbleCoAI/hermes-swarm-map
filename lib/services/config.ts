@@ -118,6 +118,17 @@ export class ConfigService {
       harnessIds: [],
     }
 
+    const signalAcc: SurfaceAccumulator = {
+      surface: {
+        id: 'int_sg',
+        platform: 'signal',
+        name: 'Signal',
+        status: 'planned',
+        config: {},
+      },
+      harnessIds: [],
+    }
+
     for (const name of names) {
       const dataDir = agentDataDir(name)
       const envPath = path.join(dataDir, '.env')
@@ -140,6 +151,16 @@ export class ConfigService {
           telegramAcc.harnessIds.push(harnessId)
         }
       }
+
+      if (env['SIGNAL_ACCOUNT'] && env['SIGNAL_HTTP_URL']) {
+        signalAcc.surface.status = 'connected'
+        if (!signalAcc.surface.config['phone']) {
+          signalAcc.surface.config = { phone: env['SIGNAL_ACCOUNT'], url: env['SIGNAL_HTTP_URL'] }
+        }
+        if (!signalAcc.harnessIds.includes(harnessId)) {
+          signalAcc.harnessIds.push(harnessId)
+        }
+      }
     }
 
     const surfaces: Surface[] = [
@@ -147,7 +168,7 @@ export class ConfigService {
       { ...telegramAcc.surface, harnessIds: telegramAcc.harnessIds },
       // Stub surfaces — not yet connected
       { id: 'int_dc', platform: 'discord', name: 'Discord', status: 'planned', config: {}, harnessIds: [] },
-      { id: 'int_sg', platform: 'signal', name: 'Signal', status: 'planned', config: {}, harnessIds: [] },
+      { ...signalAcc.surface, harnessIds: signalAcc.harnessIds },
     ]
 
     return surfaces

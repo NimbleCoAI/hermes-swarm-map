@@ -43,6 +43,7 @@ const PROVIDER_PATTERNS: ProviderPattern[] = [
   { varPattern: /^GITHUB_TOKEN$|^GITHUB_PAT$/i, provider: 'github', valuePattern: /^gh[pso]_/ },
   { varPattern: /^MATTERMOST_TOKEN$/i, provider: 'mattermost' },
   { varPattern: /^TELEGRAM_BOT_TOKEN$/i, provider: 'telegram' },
+  { varPattern: /^SIGNAL_ACCOUNT$/i, provider: 'signal' },
   { varPattern: /^NOTION_API_KEY$|^NOTION_TOKEN$/i, provider: 'notion', valuePattern: /^secret_/ },
   { varPattern: /^AWS_ACCESS_KEY_ID$/i, provider: 'aws', valuePattern: /^AKIA/ },
   { varPattern: /^AWS_BEARER_TOKEN_BEDROCK$/i, provider: 'aws-bedrock' },
