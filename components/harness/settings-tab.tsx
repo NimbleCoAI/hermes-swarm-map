@@ -35,6 +35,8 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [discovering, setDiscovering] = useState<string | null>(null)
+  const [discoveredGroups, setDiscoveredGroups] = useState<Array<{id: string; name: string}>>([])
 
   useEffect(() => {
     fetch(`/api/harnesses/${harnessId}/settings`)
@@ -84,6 +86,32 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
       toast.error('Network error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function discoverGroups(platform: string) {
+    setDiscovering(platform)
+    setDiscoveredGroups([])
+    try {
+      let url = ''
+      if (platform === 'signal') {
+        const surfaceInfo = connectedSurfaces.find(s => s.platform.toLowerCase() === 'signal')
+        const phone = surfaceInfo?.config?.phone
+        if (!phone) { toast.error('No Signal phone configured'); return }
+        url = `/api/surfaces/signal/groups?phone=${encodeURIComponent(phone)}`
+      } else if (platform === 'mattermost') {
+        const surfaceInfo = connectedSurfaces.find(s => s.platform.toLowerCase() === 'mattermost')
+        const mmUrl = surfaceInfo?.config?.url
+        if (!mmUrl) { toast.error('No Mattermost URL configured'); return }
+        url = `/api/surfaces/mattermost/channels?url=${encodeURIComponent(mmUrl)}&token=from-env`
+      }
+      const res = await fetch(url)
+      const data = await res.json()
+      setDiscoveredGroups(data.groups || data.channels || [])
+    } catch {
+      toast.error('Failed to discover groups')
+    } finally {
+      setDiscovering(null)
     }
   }
 
@@ -172,6 +200,35 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
                 placeholder={`Add ${labels.groups.toLowerCase()}...`}
               />
               <p className="text-xs text-muted-foreground">Leave empty + use * for all groups</p>
+              {(platform === 'signal' || platform === 'mattermost') && (
+                <div className="space-y-2 pt-1">
+                  <button
+                    onClick={() => discoverGroups(platform)}
+                    disabled={discovering === platform}
+                    className="text-xs text-[var(--accent)] hover:underline disabled:opacity-50"
+                  >
+                    {discovering === platform ? 'Discovering...' : 'Discover existing groups →'}
+                  </button>
+                  {discoveredGroups.length > 0 && discovering === null && (
+                    <div className="flex flex-wrap gap-1">
+                      {discoveredGroups
+                        .filter(g => !surf.allowedGroups.includes(g.id))
+                        .map(g => (
+                          <button
+                            key={g.id}
+                            onClick={() => {
+                              updateSurface(platform, 'allowedGroups', [...surf.allowedGroups, g.id])
+                              setDiscoveredGroups(prev => prev.filter(x => x.id !== g.id))
+                            }}
+                            className="text-xs px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
+                          >
+                            + {g.name}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {platform === 'mattermost' && (
