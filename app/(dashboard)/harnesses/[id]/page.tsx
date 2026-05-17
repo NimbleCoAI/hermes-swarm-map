@@ -12,6 +12,9 @@ import { RiskBar } from '@/components/shared/risk-bar'
 import { TierMix } from '@/components/shared/tier-mix'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
+import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
+import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
+import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
 import { toast } from 'sonner'
 import { MessageSquare, Globe, Bot, Hash } from 'lucide-react'
 
@@ -45,8 +48,10 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const { data: tools } = useApi<Tool[]>('/api/tools')
   const { data: keys } = useApi<Key[]>('/api/keys')
   const { data: memoryScopes } = useApi<MemoryScope[]>('/api/memory-scopes')
-  const { data: surfaces } = useApi<Surface[]>('/api/surfaces')
+  const { data: surfaces, refetch: refetchSurfaces } = useApi<Surface[]>('/api/surfaces')
   const { data: modelConfig, refetch: refetchModels } = useApi<ModelConfig>(`/api/harnesses/${id}/models`)
+
+  const [connectDialog, setConnectDialog] = useState<string | null>(null)
 
   // Model edit state
   const [modelProvider, setModelProvider] = useState('')
@@ -260,7 +265,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
               <div className="space-y-2">
                 <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Available</h3>
                 {otherSurfaces.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] opacity-50">
+                  <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] opacity-60 hover:opacity-100 transition-opacity">
                     <div className="flex items-center gap-3">
                       <span className="text-muted-foreground">
                         {PLATFORM_ICONS[s.platform.toLowerCase()] ?? <Globe className="h-4 w-4" />}
@@ -274,7 +279,12 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
                         {s.status}
                       </span>
-                      <span className="text-xs text-muted-foreground">Add</span>
+                      <button
+                        onClick={() => setConnectDialog(s.platform.toLowerCase())}
+                        className="text-xs px-2 py-0.5 rounded-md border border-[var(--border)] hover:bg-muted hover:opacity-100 transition-opacity"
+                      >
+                        Connect
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -393,6 +403,25 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           </div>
         </TabsContent>
       </Tabs>
+
+      <SignalSetupDialog
+        open={connectDialog === 'signal'}
+        onClose={() => setConnectDialog(null)}
+        harnessId={harness.id}
+        onConnected={() => refetchSurfaces()}
+      />
+      <TelegramSetupDialog
+        open={connectDialog === 'telegram'}
+        onClose={() => setConnectDialog(null)}
+        harnessId={harness.id}
+        onConnected={() => refetchSurfaces()}
+      />
+      <MattermostSetupDialog
+        open={connectDialog === 'mattermost'}
+        onClose={() => setConnectDialog(null)}
+        harnessId={harness.id}
+        onConnected={() => refetchSurfaces()}
+      />
     </div>
   )
 }
