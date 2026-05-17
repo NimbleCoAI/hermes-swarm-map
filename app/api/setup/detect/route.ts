@@ -63,16 +63,15 @@ export async function GET() {
       if (found.some(f => expandPath(f.path) === fullPath)) continue
       const composeCount = countComposeFiles(fullPath)
       if (composeCount > 0) {
-        // Check if any compose file mentions hermes
+        // Only include if compose defines hermes-* or seraph-* services with gateway command
         let agentCount = 0
         try {
           const files = fs.readdirSync(fullPath).filter(f => f.startsWith('docker-compose') && f.endsWith('.yml'))
           for (const file of files) {
             const content = fs.readFileSync(path.join(fullPath, file), 'utf-8')
-            if (content.includes('hermes') || content.includes('seraph')) {
-              const matches = content.match(/^\s+(hermes-|seraph-)\w+:/gm)
-              agentCount += matches?.length ?? 0
-            }
+            // Match service definitions (indented service names ending with colon)
+            const matches = content.match(/^\s{2}(hermes-|seraph-)\w+:/gm)
+            agentCount += matches?.length ?? 0
           }
         } catch {}
         if (agentCount > 0) {
