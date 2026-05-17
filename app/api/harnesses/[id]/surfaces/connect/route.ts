@@ -14,7 +14,7 @@ const ENV_MAP: Record<string, (config: Record<string, string>) => Record<string,
     SIGNAL_HTTP_URL: c.url || 'http://host.docker.internal:8080',
     SIGNAL_ACCOUNT: c.phone,
     SIGNAL_ALLOWED_USERS: c.allowedUsers || '*',
-    SIGNAL_GROUP_ALLOWED_USERS: c.groupAllowedUsers || '*',
+    SIGNAL_GROUP_ALLOWED_USERS: c.groupAllowedUsers || '',
   }),
   telegram: (c) => ({
     TELEGRAM_BOT_TOKEN: c.token,
