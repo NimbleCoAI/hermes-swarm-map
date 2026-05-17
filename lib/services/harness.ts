@@ -344,6 +344,22 @@ export class HarnessService {
         ? configuredFiles.map(expandPath)
         : getComposeFilesForDir(hermesDir)
 
+    // Also scan standalone compose files created by Swarm Map
+    const swarmMapDataDir = settings?.dataDir
+      ? expandPath(settings.dataDir)
+      : path.join(os.homedir(), '.hermes-swarm-map')
+    const standaloneDir = path.join(swarmMapDataDir, 'compose')
+    try {
+      const dirs = fs.readdirSync(standaloneDir, { withFileTypes: true })
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue
+        const cf = path.join(standaloneDir, d.name, 'docker-compose.yml')
+        if (fs.existsSync(cf) && !composeFiles.includes(cf)) {
+          composeFiles.push(cf)
+        }
+      }
+    } catch {}
+
     if (composeFiles.length === 0) {
       return { harnesses: [], error: `No docker-compose*.yml files found in ${hermesDir}` }
     }
