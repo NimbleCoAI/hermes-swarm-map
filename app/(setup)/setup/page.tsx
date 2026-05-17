@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 type DetectedPath = {
   path: string
   composeCount: number
+  agentCount: number
 }
 
 export default function SetupWelcomePage() {
@@ -26,7 +27,12 @@ export default function SetupWelcomePage() {
     if (!selected) return
     setImporting(true)
     try {
-      await fetch('/api/setup/complete', { method: 'POST' })
+      // Save the hermes dir to settings
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hermesDir: selected, onboarded: true }),
+      })
       router.push('/')
     } catch {
       setImporting(false)
@@ -46,7 +52,7 @@ export default function SetupWelcomePage() {
           <div>
             <h2 className="font-semibold text-base">I have Hermes agents running</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Auto-detected directories — select one to connect.
+              Point Swarm Map at your hermes-swarm directory.
             </p>
           </div>
 
@@ -74,9 +80,9 @@ export default function SetupWelcomePage() {
                     />
                     <span className="font-mono text-sm">{d.path}</span>
                   </div>
-                  {d.composeCount > 0 && (
-                    <span className="text-xs text-muted-foreground">{d.composeCount} compose file{d.composeCount !== 1 ? 's' : ''}</span>
-                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {d.composeCount} compose file{d.composeCount !== 1 ? 's' : ''} · {d.agentCount} agent{d.agentCount !== 1 ? 's' : ''}
+                  </span>
                 </label>
               ))}
             </div>

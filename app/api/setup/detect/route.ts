@@ -30,34 +30,54 @@ function isHermesDir(dir: string): boolean {
 }
 
 export async function GET() {
-  const found: Array<{ path: string; composeCount: number }> = []
+  const found: Array<{ path: string; composeCount: number; agentCount: number }> = []
 
-  // Scan common paths
+  // Scan common paths — only include dirs with compose files
   for (const p of COMMON_PATHS) {
     const expanded = expandPath(p)
-    if (fs.existsSync(expanded) && isHermesDir(expanded)) {
-      found.push({
-        path: p,
-        composeCount: countComposeFiles(expanded),
-      })
+    if (!fs.existsSync(expanded)) continue
+    const composeCount = countComposeFiles(expanded)
+    if (composeCount > 0) {
+      // Count hermes services in compose files
+      let agentCount = 0
+      try {
+        const files = fs.readdirSync(expanded).filter(f => f.startsWith('docker-compose') && f.endsWith('.yml'))
+        for (const file of files) {
+          const content = fs.readFileSync(path.join(expanded, file), 'utf-8')
+          const matches = content.match(/^\s+(hermes-|seraph-)\w+:/gm)
+          agentCount += matches?.length ?? 0
+        }
+      } catch {}
+      found.push({ path: p, composeCount, agentCount })
     }
   }
 
-  // Also scan home for .hermes-* directories
-  const home = os.homedir()
+  // Also scan ~/Documents/GitHub for any dir with docker-compose + hermes services
+  const ghDir = path.join(os.homedir(), 'Documents', 'GitHub')
   try {
-    const entries = fs.readdirSync(home, { withFileTypes: true })
+    const entries = fs.readdirSync(ghDir, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      if (!entry.name.startsWith('.hermes')) continue
-      const fullPath = path.join(home, entry.name)
-      const tildePath = fullPath.replace(home, '~')
-      if (found.some((f) => expandPath(f.path) === fullPath)) continue
-      if (isHermesDir(fullPath)) {
-        found.push({
-          path: tildePath,
-          composeCount: countComposeFiles(fullPath),
-        })
+      const fullPath = path.join(ghDir, entry.name)
+      const tildePath = `~/Documents/GitHub/${entry.name}`
+      if (found.some(f => expandPath(f.path) === fullPath)) continue
+      const composeCount = countComposeFiles(fullPath)
+      if (composeCount > 0) {
+        // Check if any compose file mentions hermes
+        let agentCount = 0
+        try {
+          const files = fs.readdirSync(fullPath).filter(f => f.startsWith('docker-compose') && f.endsWith('.yml'))
+          for (const file of files) {
+            const content = fs.readFileSync(path.join(fullPath, file), 'utf-8')
+            if (content.includes('hermes') || content.includes('seraph')) {
+              const matches = content.match(/^\s+(hermes-|seraph-)\w+:/gm)
+              agentCount += matches?.length ?? 0
+            }
+          }
+        } catch {}
+        if (agentCount > 0) {
+          found.push({ path: tildePath, composeCount, agentCount })
+        }
       }
     }
   } catch {}
