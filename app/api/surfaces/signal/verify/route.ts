@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { promisify } from 'util'
 
-const execAsync = promisify(exec)
-const CONTAINER = process.env.SIGNAL_CONTAINER || 'signal-cli-daemon'
+const SIGNAL_API = process.env.SIGNAL_API_URL || 'http://localhost:8080'
 
 export async function POST(request: Request) {
   const { phone, code, displayName } = await request.json() as {
@@ -21,23 +18,32 @@ export async function POST(request: Request) {
   const cleanCode = code.replace(/[- ]/g, '')
 
   try {
-    await execAsync(
-      `docker exec ${CONTAINER} signal-cli -a ${phone} verify ${cleanCode}`,
-      { timeout: 30000 }
-    )
+    // Verify via bbernhard REST API
+    const verifyRes = await fetch(`${SIGNAL_API}/v1/register/${encodeURIComponent(phone)}/verify/${cleanCode}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(30000),
+    })
 
+    if (!verifyRes.ok) {
+      const text = await verifyRes.text()
+      let data: { error?: string } = {}
+      try { data = JSON.parse(text) } catch { data = { error: text } }
+      return NextResponse.json({ success: false, error: data.error || 'Verification failed' }, { status: verifyRes.status })
+    }
+
+    // Set display name if provided
     if (displayName) {
-      await execAsync(
-        `docker exec ${CONTAINER} signal-cli -a ${phone} updateProfile --given-name '${displayName.replace(/'/g, "'\\''")}'`,
-        { timeout: 15000 }
-      ).catch(() => {})
+      await fetch(`${SIGNAL_API}/v1/profiles/${encodeURIComponent(phone)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: displayName }),
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => {})
     }
 
     return NextResponse.json({ success: true })
   } catch (error: unknown) {
-    const err = error as { stderr?: string; message?: string }
-    const output = (err.stderr || '') + (err.message || '')
-    const match = output.match(/Failed to verify: (.+)/)?.[1] || 'Verification failed'
-    return NextResponse.json({ success: false, error: match }, { status: 500 })
+    const msg = error instanceof Error ? error.message : 'Verification failed'
+    return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 }
