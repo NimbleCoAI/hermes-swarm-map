@@ -56,6 +56,12 @@ export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Pro
       if (data.success) {
         setStep('verify')
       } else if (data.needsCaptcha) {
+        // If we already submitted a captcha and it failed, show the error
+        // on the captcha step so the user knows to try a new one
+        if (captcha) {
+          setError(data.error || 'Captcha failed — try a new one')
+          setCaptchaToken('')
+        }
         setStep('captcha')
       } else {
         setError(data.error || 'Registration failed')
@@ -199,6 +205,9 @@ export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Pro
                 <li>Paste the full URL below</li>
               </ol>
             </div>
+            {error && (
+              <p className="text-sm text-[var(--danger)] font-medium">{error}</p>
+            )}
             <div className="space-y-1">
               <label className="text-sm font-medium">Captcha Token</label>
               <textarea
@@ -215,8 +224,9 @@ export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Pro
               </button>
               <button
                 onClick={() => {
-                  const token = captchaToken.replace(/^signalcaptcha:\/\//, '')
-                  handleRegister(token)
+                  // Pass the token as-is — signal-cli handles both formats
+                  // (with and without signalcaptcha:// prefix)
+                  handleRegister(captchaToken.trim())
                 }}
                 disabled={!captchaToken || loading}
                 className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
