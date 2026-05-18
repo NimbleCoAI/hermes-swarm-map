@@ -19,7 +19,11 @@ export async function POST(request: Request) {
     const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 })
     const output = (stderr || '') + (stdout || '')
 
-    if (output.toLowerCase().includes('captcha')) {
+    if (output.toLowerCase().includes('invalid captcha')) {
+      return NextResponse.json({ success: false, needsCaptcha: true, error: 'Invalid captcha token — please solve a new captcha and try again' })
+    }
+
+    if (output.toLowerCase().includes('captcha required') || (output.toLowerCase().includes('captcha') && !captcha)) {
       return NextResponse.json({ success: false, needsCaptcha: true, error: 'Captcha required — solve at https://signalcaptchas.org/registration/generate.html and paste the token' })
     }
 
@@ -37,7 +41,11 @@ export async function POST(request: Request) {
     const err = error as { stderr?: string; stdout?: string; message?: string }
     const output = (err.stderr || '') + (err.stdout || '') + (err.message || '')
 
-    if (output.toLowerCase().includes('captcha')) {
+    if (output.toLowerCase().includes('invalid captcha')) {
+      return NextResponse.json({ success: false, needsCaptcha: true, error: 'Invalid captcha token — please solve a new captcha and try again' })
+    }
+
+    if (output.toLowerCase().includes('captcha required') || (output.toLowerCase().includes('captcha') && !captcha)) {
       return NextResponse.json({ success: false, needsCaptcha: true, error: 'Captcha required — solve at https://signalcaptchas.org/registration/generate.html and paste the token' })
     }
 
