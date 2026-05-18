@@ -224,9 +224,9 @@ export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Pro
               </button>
               <button
                 onClick={() => {
-                  // Pass the token as-is — signal-cli handles both formats
-                  // (with and without signalcaptcha:// prefix)
-                  handleRegister(captchaToken.trim())
+                  // Strip signalcaptcha:// prefix — signal-cli expects the token without it
+                  const token = captchaToken.trim().replace(/^signalcaptcha:\/\//, '')
+                  handleRegister(token)
                 }}
                 disabled={!captchaToken || loading}
                 className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
