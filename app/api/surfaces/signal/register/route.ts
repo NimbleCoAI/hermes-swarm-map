@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   }
 
   const captchaArg = captcha ? ` --captcha '${captcha.replace(/'/g, "'\\''")}'` : ''
-  const cmd = `docker exec ${CONTAINER} signal-cli --config /data -a ${phone} register${captchaArg}`
+  const cmd = `docker exec ${CONTAINER} signal-cli --config /home/.local/share/signal-cli -a ${phone} register${captchaArg}`
 
   try {
     const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 })

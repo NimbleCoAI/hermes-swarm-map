@@ -23,7 +23,7 @@ export async function POST(request: Request) {
 
   try {
     const { stdout, stderr } = await execAsync(
-      `docker exec ${CONTAINER} signal-cli --config /data -a ${phone} verify ${cleanCode}`,
+      `docker exec ${CONTAINER} signal-cli --config /home/.local/share/signal-cli -a ${phone} verify ${cleanCode}`,
       { timeout: 30000 }
     )
     const output = (stderr || '') + (stdout || '')
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
     if (displayName) {
       await execAsync(
-        `docker exec ${CONTAINER} signal-cli --config /data -a ${phone} updateProfile --given-name '${displayName.replace(/'/g, "'\\''")}'`,
+        `docker exec ${CONTAINER} signal-cli --config /home/.local/share/signal-cli -a ${phone} updateProfile --given-name '${displayName.replace(/'/g, "'\\''")}'`,
         { timeout: 15000 }
       ).catch(() => {})
     }
