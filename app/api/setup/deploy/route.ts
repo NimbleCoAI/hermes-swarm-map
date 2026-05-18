@@ -97,8 +97,8 @@ function generateEnvContent(params: {
   if (signalPhone) {
     lines.push(`SIGNAL_HTTP_URL=http://host.docker.internal:8080`)
     lines.push(`SIGNAL_ACCOUNT=${signalPhone}`)
-    lines.push(`# SIGNAL_ALLOWED_USERS= (add phone numbers, or * for all)`)
-    lines.push(`# SIGNAL_GROUP_ALLOWED_USERS= (add group IDs here, or * for all)`)
+    lines.push(`# SIGNAL_ALLOWED_USERS= (empty = no DMs; add phone numbers to allow, or * for all)`)
+    lines.push(`# SIGNAL_GROUP_ALLOWED_USERS= (empty = no groups; add group IDs to allow, or * for all)`)
   } else {
     lines.push(`# SIGNAL_HTTP_URL=http://host.docker.internal:8080`)
     lines.push(`# SIGNAL_ACCOUNT=`)

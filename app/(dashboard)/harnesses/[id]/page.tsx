@@ -18,7 +18,33 @@ import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-di
 import { EditSurfaceDialog } from '@/components/surfaces/edit-surface-dialog'
 import { SettingsTab } from '@/components/harness/settings-tab'
 import { toast } from 'sonner'
-import { MessageSquare, Globe, Bot, Hash, Pencil } from 'lucide-react'
+import { MessageSquare, Globe, Bot, Hash, Pencil, ChevronDown, ChevronRight, Shield, Loader2, Save, RotateCw, Users, X } from 'lucide-react'
+import { TagInput } from '@/components/ui/tag-input'
+
+type PairingUser = {
+  userId: string
+  userName: string
+  approvedAt: number
+  platform: string
+}
+
+type SurfaceSettings = {
+  allowedUsers: string[]
+  allowedGroups: string[]
+  adminUsers: string[]
+  allowAll: boolean
+}
+
+type Settings = {
+  dmPolicy: 'approved-only' | 'allow-all'
+  surfaces: Record<string, SurfaceSettings>
+}
+
+const PLATFORM_LABELS: Record<string, { users: string; groups: string }> = {
+  signal: { users: 'Phone numbers (E.164)', groups: 'Group IDs' },
+  telegram: { users: 'User IDs', groups: 'Chat IDs' },
+  mattermost: { users: 'Usernames', groups: 'Channel names' },
+}
 
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
   telegram: <MessageSquare className="h-4 w-4" />,
@@ -62,6 +88,147 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const [modelProvider, setModelProvider] = useState('')
   const [modelName, setModelName] = useState('')
   const [modelSaving, setModelSaving] = useState(false)
+
+  // Surface settings state
+  const [surfaceSettings, setSurfaceSettings] = useState<Settings | null>(null)
+  const [settingsLoading, setSettingsLoading] = useState(true)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [settingsRestarting, setSettingsRestarting] = useState(false)
+  const [discovering, setDiscovering] = useState<string | null>(null)
+  const [discoveredGroups, setDiscoveredGroups] = useState<Array<{id: string; name: string}>>([])
+  const [pairedUsers, setPairedUsers] = useState<PairingUser[]>([])
+  const [expandedSettings, setExpandedSettings] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    fetch(`/api/harnesses/${id}/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) setSurfaceSettings(data)
+        setSettingsLoading(false)
+      })
+      .catch(() => setSettingsLoading(false))
+  }, [id])
+
+  useEffect(() => {
+    fetch(`/api/harnesses/${id}/pairing`)
+      .then(res => res.json())
+      .then(data => { if (data.users) setPairedUsers(data.users) })
+      .catch(() => {})
+  }, [id])
+
+  function updateSurfaceSetting(platform: string, field: keyof SurfaceSettings, value: string[] | boolean) {
+    if (!surfaceSettings) return
+    setSurfaceSettings({
+      ...surfaceSettings,
+      surfaces: {
+        ...surfaceSettings.surfaces,
+        [platform]: { ...surfaceSettings.surfaces[platform], [field]: value },
+      },
+    })
+    setSettingsDirty(true)
+    setSettingsSaved(false)
+  }
+
+  function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
+    if (!surfaceSettings) return
+    setSurfaceSettings({ ...surfaceSettings, dmPolicy: policy })
+    setSettingsDirty(true)
+    setSettingsSaved(false)
+  }
+
+  async function handleSettingsSave() {
+    if (!surfaceSettings) return
+    setSettingsSaving(true)
+    try {
+      const res = await fetch(`/api/harnesses/${id}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(surfaceSettings),
+      })
+      const data = await res.json()
+      if (data.success) {
+        toast.success('Settings saved. Restart agent to apply.')
+        setSettingsDirty(false)
+        setSettingsSaved(true)
+      } else {
+        toast.error(data.error || 'Failed to save')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
+
+  async function handleSettingsRestart() {
+    setSettingsRestarting(true)
+    try {
+      const res = await fetch(`/api/harnesses/${id}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'quick' }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Harness restarted')
+        setSettingsSaved(false)
+        refetch()
+      } else {
+        toast.error(data.error || 'Restart failed')
+      }
+    } catch {
+      toast.error('Restart failed')
+    } finally {
+      setSettingsRestarting(false)
+    }
+  }
+
+  async function revokePairing(platform: string, userId: string) {
+    if (!window.confirm(`Revoke access for ${userId}?`)) return
+    try {
+      const res = await fetch(`/api/harnesses/${id}/pairing`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, userId }),
+      })
+      if (res.ok) {
+        setPairedUsers(prev => prev.filter(u => !(u.platform === platform && u.userId === userId)))
+        toast.success('Access revoked')
+      } else {
+        toast.error('Failed to revoke')
+      }
+    } catch {
+      toast.error('Network error')
+    }
+  }
+
+  async function discoverGroups(platform: string, connSurfaces: Surface[]) {
+    setDiscovering(platform)
+    setDiscoveredGroups([])
+    try {
+      let url = ''
+      if (platform === 'signal') {
+        const surfaceInfo = connSurfaces.find(s => s.platform.toLowerCase() === 'signal')
+        const phone = surfaceInfo?.config?.phone
+        if (!phone) { toast.error('No Signal phone configured'); return }
+        url = `/api/surfaces/signal/groups?phone=${encodeURIComponent(phone)}`
+      } else if (platform === 'mattermost') {
+        const surfaceInfo = connSurfaces.find(s => s.platform.toLowerCase() === 'mattermost')
+        const mmUrl = surfaceInfo?.config?.url
+        if (!mmUrl) { toast.error('No Mattermost URL configured'); return }
+        url = `/api/surfaces/mattermost/channels?url=${encodeURIComponent(mmUrl)}&token=from-env`
+      }
+      const res = await fetch(url)
+      const data = await res.json()
+      setDiscoveredGroups(data.groups || data.channels || [])
+    } catch {
+      toast.error('Failed to discover groups')
+    } finally {
+      setDiscovering(null)
+    }
+  }
 
   const [logLines, setLogLines] = useState(100)
   const { data: logsData, loading: logsLoading, refetch: refetchLogs } = useApi<LogsResponse>(
@@ -241,58 +408,219 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
         <TabsContent value="surfaces" className="mt-4">
           <div className="space-y-4">
-            {/* Connected surfaces */}
+            {/* DM Policy — once above all surfaces */}
+            {connectedSurfaces.length > 0 && surfaceSettings && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-muted-foreground" />
+                  <h3 className="font-medium text-sm">DM Access Policy</h3>
+                </div>
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="dmPolicy"
+                      checked={surfaceSettings.dmPolicy === 'approved-only'}
+                      onChange={() => updateDmPolicy('approved-only')}
+                      className="accent-[var(--accent)]"
+                    />
+                    Approved users only
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="dmPolicy"
+                      checked={surfaceSettings.dmPolicy === 'allow-all'}
+                      onChange={() => updateDmPolicy('allow-all')}
+                      className="accent-[var(--accent)]"
+                    />
+                    Allow all
+                  </label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {surfaceSettings.dmPolicy === 'approved-only'
+                    ? 'Only users in the approved list below can DM this agent.'
+                    : 'Anyone can DM this agent. Use with caution.'}
+                </p>
+              </div>
+            )}
+
+            {/* Connected surfaces with inline settings */}
             {connectedSurfaces.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Connected</h3>
-                {connectedSurfaces.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-                    <div className="flex items-center gap-3">
-                      <span className="text-muted-foreground">
-                        {PLATFORM_ICONS[s.platform.toLowerCase()] ?? <Globe className="h-4 w-4" />}
-                      </span>
-                      <div>
-                        <p className="font-medium text-sm">{s.name}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{s.platform}</p>
-                        {s.config.url && (
-                          <p className="text-xs font-mono text-muted-foreground">{s.config.url}</p>
-                        )}
+                {connectedSurfaces.map((s) => {
+                  const platform = s.platform.toLowerCase()
+                  const surf = surfaceSettings?.surfaces[platform]
+                  const labels = PLATFORM_LABELS[platform] || { users: 'Users', groups: 'Groups' }
+                  const isExpanded = expandedSettings[s.id] ?? false
+                  const platformPairedUsers = pairedUsers.filter(u => u.platform === platform)
+
+                  return (
+                    <div key={s.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+                      {/* Surface header row */}
+                      <div className="flex items-center justify-between p-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-muted-foreground">
+                            {PLATFORM_ICONS[platform] ?? <Globe className="h-4 w-4" />}
+                          </span>
+                          <div>
+                            <p className="font-medium text-sm">{s.name}</p>
+                            <p className="text-xs text-muted-foreground capitalize">{s.platform}</p>
+                            {s.config.url && (
+                              <p className="text-xs font-mono text-muted-foreground">{s.config.url}</p>
+                            )}
+                            {s.config.phone && (
+                              <p className="text-xs font-mono text-muted-foreground">{s.config.phone}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
+                            {s.status}
+                          </span>
+                          {surf && (
+                            <button
+                              onClick={() => setExpandedSettings(prev => ({ ...prev, [s.id]: !prev[s.id] }))}
+                              className="text-xs px-2 py-1 rounded-md border border-[var(--border)] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors flex items-center gap-1"
+                              title="Surface settings"
+                            >
+                              {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                              <span>Settings</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setEditSurface(s)}
+                            className="text-xs px-2 py-1 rounded-md border border-[var(--border)] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            title="Edit config"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Disconnect ${s.name}? This will remove its configuration.`)) return
+                              try {
+                                const res = await fetch(`/api/harnesses/${id}/surfaces/disconnect`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ platform }),
+                                })
+                                if (!res.ok) throw new Error('Failed')
+                                toast.success(`${s.name} disconnected`)
+                                refetchSurfaces()
+                              } catch {
+                                toast.error(`Failed to disconnect ${s.name}`)
+                              }
+                            }}
+                            className="text-xs px-2 py-1 rounded-md border border-red-500/50 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
+                          >
+                            Disconnect
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Expandable settings section */}
+                      {isExpanded && surf && (
+                        <div className="border-t border-[var(--border)] p-4 space-y-4 bg-[var(--bg)]/50">
+                          {surfaceSettings?.dmPolicy === 'approved-only' && (
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
+                              <TagInput
+                                values={surf.allowedUsers}
+                                onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
+                                placeholder={`Add ${labels.users.toLowerCase()}...`}
+                              />
+                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-muted-foreground">Approved {labels.groups}</label>
+                            <TagInput
+                              values={surf.allowedGroups}
+                              onChange={(v) => updateSurfaceSetting(platform, 'allowedGroups', v)}
+                              placeholder={`Add ${labels.groups.toLowerCase()}...`}
+                            />
+                            <p className="text-xs text-muted-foreground">Leave empty + use * for all groups</p>
+                            {(platform === 'signal' || platform === 'mattermost') && (
+                              <div className="space-y-2 pt-1">
+                                <button
+                                  onClick={() => discoverGroups(platform, connectedSurfaces)}
+                                  disabled={discovering === platform}
+                                  className="text-xs text-[var(--accent)] hover:underline disabled:opacity-50"
+                                >
+                                  {discovering === platform ? 'Discovering...' : 'Discover existing groups \u2192'}
+                                </button>
+                                {discoveredGroups.length > 0 && discovering === null && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {discoveredGroups
+                                      .filter(g => !surf.allowedGroups.includes(g.id))
+                                      .map(g => (
+                                        <button
+                                          key={g.id}
+                                          onClick={() => {
+                                            updateSurfaceSetting(platform, 'allowedGroups', [...surf.allowedGroups, g.id])
+                                            setDiscoveredGroups(prev => prev.filter(x => x.id !== g.id))
+                                          }}
+                                          className="text-xs px-2 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
+                                        >
+                                          + {g.name}
+                                        </button>
+                                      ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {platform === 'mattermost' && (
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-muted-foreground">Admin Users</label>
+                              <TagInput
+                                values={surf.adminUsers}
+                                onChange={(v) => updateSurfaceSetting(platform, 'adminUsers', v)}
+                                placeholder="Add admin usernames..."
+                              />
+                            </div>
+                          )}
+
+                          {platform !== 'mattermost' && (
+                            <p className="text-xs text-muted-foreground italic">Admin roles not enforced on {platform} yet.</p>
+                          )}
+
+                          {/* Paired users (dynamic approvals) */}
+                          {platformPairedUsers.length > 0 && (
+                            <div className="space-y-2 pt-2 border-t border-[var(--border)]">
+                              <div className="flex items-center gap-2">
+                                <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-xs font-medium text-muted-foreground">Dynamically paired users</span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {platformPairedUsers.map(u => (
+                                  <span
+                                    key={u.userId}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                                  >
+                                    {u.userName || u.userId}
+                                    <button
+                                      onClick={() => revokePairing(platform, u.userId)}
+                                      className="hover:text-red-500 transition-colors"
+                                      title="Revoke access"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                These users were approved via pairing. Click x to revoke.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${SURFACE_STATUS_STYLES[s.status]}`}>
-                        {s.status}
-                      </span>
-                      <button
-                        onClick={() => setEditSurface(s)}
-                        className="text-xs px-2 py-1 rounded-md border border-[var(--border)] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        title="Edit config"
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm(`Disconnect ${s.name}? This will remove its configuration.`)) return
-                          try {
-                            const res = await fetch(`/api/harnesses/${id}/surfaces/disconnect`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ platform: s.platform.toLowerCase() }),
-                            })
-                            if (!res.ok) throw new Error('Failed')
-                            toast.success(`${s.name} disconnected`)
-                            refetchSurfaces()
-                          } catch {
-                            toast.error(`Failed to disconnect ${s.name}`)
-                          }
-                        }}
-                        className="text-xs px-2 py-1 rounded-md border border-red-500/50 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
@@ -324,6 +652,32 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
             {connectedSurfaces.length === 0 && otherSurfaces.length === 0 && (
               <p className="text-sm text-muted-foreground">No surfaces found.</p>
+            )}
+
+            {/* Save + Restart buttons */}
+            {(settingsDirty || settingsSaved) && (
+              <div className="flex justify-end gap-2">
+                {settingsDirty && (
+                  <button
+                    onClick={handleSettingsSave}
+                    disabled={settingsSaving}
+                    className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    {settingsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save Settings
+                  </button>
+                )}
+                {settingsSaved && !settingsDirty && (
+                  <button
+                    onClick={handleSettingsRestart}
+                    disabled={settingsRestarting}
+                    className="flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface)] disabled:opacity-50"
+                  >
+                    {settingsRestarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+                    Restart to apply
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </TabsContent>
@@ -435,10 +789,25 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         </TabsContent>
 
         <TabsContent value="settings" className="mt-4">
-          <SettingsTab
-            harnessId={harness.id}
-            connectedSurfaces={connectedSurfaces}
-          />
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Per-surface settings (allowed users, groups, admin users, pairing) have moved into each surface card.
+            </p>
+            <p className="text-sm">
+              Go to the{' '}
+              <button
+                onClick={() => {
+                  const tabEl = document.querySelector('[data-state="active"][role="tabpanel"]')
+                  const surfaceTrigger = document.querySelector('[value="surfaces"]') as HTMLElement | null
+                  surfaceTrigger?.click()
+                }}
+                className="text-[var(--accent)] hover:underline font-medium"
+              >
+                Surfaces tab
+              </button>
+              {' '}and expand "Settings" on each connected surface.
+            </p>
+          </div>
         </TabsContent>
       </Tabs>
 
