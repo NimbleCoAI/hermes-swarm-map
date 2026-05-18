@@ -33,22 +33,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: match }, { status: 400 })
     }
 
-    // Confirm registration via JSON-RPC
-    try {
-      const rpcRes = await fetch(`${SIGNAL_API}/api/v1/rpc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', method: 'listAccounts', id: '1' }),
-        signal: AbortSignal.timeout(5000),
-      })
-      const rpcData = await rpcRes.json()
-      const registered = Array.isArray(rpcData.result) &&
-        rpcData.result.some((a: { number?: string }) => a.number === phone)
-      if (!registered) {
-        return NextResponse.json({ success: false, error: 'Verification appeared to succeed but account not found in daemon. Try again.' }, { status: 500 })
+    // Restart daemon so it picks up the newly registered account
+    // (docker exec registers outside the running daemon process)
+    await execAsync(`docker restart ${CONTAINER}`, { timeout: 30000 }).catch(() => {})
+
+    // Wait for daemon to come back up
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      try {
+        const rpcRes = await fetch(`${SIGNAL_API}/api/v1/rpc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'listAccounts', id: '1' }),
+          signal: AbortSignal.timeout(3000),
+        })
+        const rpcData = await rpcRes.json()
+        const registered = Array.isArray(rpcData.result) &&
+          rpcData.result.some((a: { number?: string }) => a.number === phone)
+        if (registered) break
+      } catch {
+        // Daemon still restarting, retry
       }
-    } catch {
-      // Non-fatal
     }
 
     if (displayName) {
