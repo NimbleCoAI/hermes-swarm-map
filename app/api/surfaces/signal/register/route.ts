@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server'
-import { exec } from 'child_process'
-import { promisify } from 'util'
 
-const execAsync = promisify(exec)
-const CONTAINER = process.env.SIGNAL_CONTAINER || 'signal-cli-daemon'
+const SIGNAL_API = process.env.SIGNAL_API_URL || 'http://localhost:8080'
 
 export async function POST(request: Request) {
   const { phone, captcha } = await request.json() as { phone: string; captcha?: string }
@@ -12,41 +9,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: 'Invalid phone number (E.164 format required)' }, { status: 400 })
   }
 
-  const captchaArg = captcha ? ` --captcha '${captcha.replace(/'/g, "'\\''")}'` : ''
-  const cmd = `docker exec ${CONTAINER} signal-cli -a ${phone} register${captchaArg}`
-
   try {
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 })
-    const output = (stderr || '') + (stdout || '')
+    const body: Record<string, unknown> = { use_voice: false }
+    if (captcha) body.captcha = captcha
 
-    // signal-cli sometimes exits 0 even on failure — check output for errors
-    if (output.toLowerCase().includes('captcha')) {
+    const res = await fetch(`${SIGNAL_API}/v1/register/${encodeURIComponent(phone)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    if (res.ok) {
+      return NextResponse.json({ success: true })
+    }
+
+    const text = await res.text()
+    let data: { error?: string } = {}
+    try { data = JSON.parse(text) } catch { data = { error: text } }
+    const error = data.error || text
+
+    if (error.toLowerCase().includes('captcha')) {
       return NextResponse.json({ success: false, needsCaptcha: true, error: 'Captcha required — solve at https://signalcaptchas.org/registration/generate.html and paste the token' })
     }
 
-    if (output.toLowerCase().includes('rate limit') || output.includes('429')) {
+    if (error.toLowerCase().includes('rate limit') || res.status === 429) {
       return NextResponse.json({ success: false, error: 'Rate limited by Signal. Wait a few minutes and try again.' }, { status: 429 })
     }
 
-    if (output.includes('Failed to register')) {
-      const match = output.match(/Failed to register: (.+)/)?.[1]
-      return NextResponse.json({ success: false, error: match || 'Registration failed' }, { status: 500 })
-    }
-
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: false, error: error || 'Registration failed' }, { status: res.status })
   } catch (error: unknown) {
-    const err = error as { stderr?: string; stdout?: string; message?: string }
-    const output = (err.stderr || '') + (err.stdout || '') + (err.message || '')
-
-    if (output.toLowerCase().includes('captcha')) {
-      return NextResponse.json({ success: false, needsCaptcha: true, error: 'Captcha required — solve at https://signalcaptchas.org/registration/generate.html and paste the token' })
-    }
-
-    if (output.toLowerCase().includes('rate limit') || output.includes('429')) {
-      return NextResponse.json({ success: false, error: 'Rate limited by Signal. Wait a few minutes and try again.' }, { status: 429 })
-    }
-
-    const match = output.match(/Failed to register: (.+)/)?.[1] || output.split('\n').pop()
-    return NextResponse.json({ success: false, error: match || 'Registration failed' }, { status: 500 })
+    const msg = error instanceof Error ? error.message : 'Registration failed'
+    return NextResponse.json({ success: false, error: msg }, { status: 500 })
   }
 }
