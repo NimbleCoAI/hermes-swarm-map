@@ -11,22 +11,29 @@ export async function GET(request: Request) {
   }
 
   try {
-    const res = await fetch(`${SIGNAL_API}/v1/groups/${encodeURIComponent(phone)}`, {
+    const rpcRes = await fetch(`${SIGNAL_API}/api/v1/rpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'listGroups',
+        id: '1',
+        params: { account: phone },
+      }),
       signal: AbortSignal.timeout(15000),
     })
 
-    if (!res.ok) {
-      const text = await res.text()
-      return NextResponse.json({ error: text || 'Failed to list groups', groups: [] }, { status: res.status })
+    const rpcData = await rpcRes.json()
+
+    if (rpcData.error) {
+      return NextResponse.json({ error: rpcData.error.message || 'Failed to list groups', groups: [] }, { status: 500 })
     }
 
-    const data = await res.json()
-    // bbernhard returns array of group objects with id, name, etc.
-    const groups = Array.isArray(data)
-      ? data.map((g: { id?: string; internal_id?: string; name?: string; blocked?: boolean }) => ({
-          id: g.id || g.internal_id || '',
+    const groups = Array.isArray(rpcData.result)
+      ? rpcData.result.map((g: { id?: string; name?: string; isBlocked?: boolean; isMember?: boolean }) => ({
+          id: g.id || '',
           name: g.name || 'Unknown',
-          active: !g.blocked,
+          active: g.isMember !== false && !g.isBlocked,
         }))
       : []
 

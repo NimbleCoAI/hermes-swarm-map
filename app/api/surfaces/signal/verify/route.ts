@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
+import { exec } from 'child_process'
+import { promisify } from 'util'
 
+const execAsync = promisify(exec)
+const CONTAINER = process.env.SIGNAL_CONTAINER || 'signal-cli-daemon'
 const SIGNAL_API = process.env.SIGNAL_API_URL || 'http://localhost:8080'
 
 export async function POST(request: Request) {
@@ -18,32 +22,47 @@ export async function POST(request: Request) {
   const cleanCode = code.replace(/[- ]/g, '')
 
   try {
-    // Verify via bbernhard REST API
-    const verifyRes = await fetch(`${SIGNAL_API}/v1/register/${encodeURIComponent(phone)}/verify/${cleanCode}`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(30000),
-    })
+    const { stdout, stderr } = await execAsync(
+      `docker exec ${CONTAINER} signal-cli --config /data -a ${phone} verify ${cleanCode}`,
+      { timeout: 30000 }
+    )
+    const output = (stderr || '') + (stdout || '')
 
-    if (!verifyRes.ok) {
-      const text = await verifyRes.text()
-      let data: { error?: string } = {}
-      try { data = JSON.parse(text) } catch { data = { error: text } }
-      return NextResponse.json({ success: false, error: data.error || 'Verification failed' }, { status: verifyRes.status })
+    if (output.includes('Failed to verify') || output.includes('Invalid verification code')) {
+      const match = output.match(/Failed to verify: (.+)/)?.[1] || 'Verification failed'
+      return NextResponse.json({ success: false, error: match }, { status: 400 })
     }
 
-    // Set display name if provided
-    if (displayName) {
-      await fetch(`${SIGNAL_API}/v1/profiles/${encodeURIComponent(phone)}`, {
-        method: 'PUT',
+    // Confirm registration via JSON-RPC
+    try {
+      const rpcRes = await fetch(`${SIGNAL_API}/api/v1/rpc`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: displayName }),
-        signal: AbortSignal.timeout(15000),
-      }).catch(() => {})
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'listAccounts', id: '1' }),
+        signal: AbortSignal.timeout(5000),
+      })
+      const rpcData = await rpcRes.json()
+      const registered = Array.isArray(rpcData.result) &&
+        rpcData.result.some((a: { number?: string }) => a.number === phone)
+      if (!registered) {
+        return NextResponse.json({ success: false, error: 'Verification appeared to succeed but account not found in daemon. Try again.' }, { status: 500 })
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    if (displayName) {
+      await execAsync(
+        `docker exec ${CONTAINER} signal-cli --config /data -a ${phone} updateProfile --given-name '${displayName.replace(/'/g, "'\\''")}'`,
+        { timeout: 15000 }
+      ).catch(() => {})
     }
 
     return NextResponse.json({ success: true })
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Verification failed'
-    return NextResponse.json({ success: false, error: msg }, { status: 500 })
+    const err = error as { stderr?: string; stdout?: string; message?: string }
+    const output = (err.stderr || '') + (err.stdout || '') + (err.message || '')
+    const match = output.match(/Failed to verify: (.+)/)?.[1] || 'Verification failed'
+    return NextResponse.json({ success: false, error: match }, { status: 500 })
   }
 }

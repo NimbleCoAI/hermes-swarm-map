@@ -1,0 +1,15 @@
+services:
+  signal-cli-daemon:
+    build: .
+    container_name: signal-cli-daemon
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${HOME}/.hermes-swarm/signal-data:/data
+    networks:
+      - hermes-net
+
+networks:
+  hermes-net:
+    external: true

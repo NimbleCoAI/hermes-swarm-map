@@ -4,32 +4,26 @@ const SIGNAL_API = process.env.SIGNAL_API_URL || 'http://localhost:8080'
 
 export async function GET() {
   try {
-    // Check daemon health via bbernhard REST API
-    const aboutRes = await fetch(`${SIGNAL_API}/v1/about`, {
+    const healthRes = await fetch(`${SIGNAL_API}/api/v1/check`, {
       signal: AbortSignal.timeout(3000),
     })
-    const healthy = aboutRes.ok
+    const healthy = healthRes.ok
 
-    // List registered accounts
     let accounts: string[] = []
     if (healthy) {
-      const accountsRes = await fetch(`${SIGNAL_API}/v1/accounts`, {
+      const rpcRes = await fetch(`${SIGNAL_API}/api/v1/rpc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'listAccounts', id: '1' }),
         signal: AbortSignal.timeout(3000),
       })
-      if (accountsRes.ok) {
-        const data = await accountsRes.json()
-        // bbernhard returns array of account objects or phone strings
-        accounts = Array.isArray(data)
-          ? data.map((a: string | { number?: string }) => typeof a === 'string' ? a : a.number || '')
-          : []
+      const rpcData = await rpcRes.json()
+      if (Array.isArray(rpcData.result)) {
+        accounts = rpcData.result.map((a: { number?: string }) => a.number || '')
       }
     }
 
-    return NextResponse.json({
-      healthy,
-      url: SIGNAL_API,
-      accounts,
-    })
+    return NextResponse.json({ healthy, url: SIGNAL_API, accounts })
   } catch {
     return NextResponse.json({ healthy: false, url: SIGNAL_API, accounts: [] })
   }
