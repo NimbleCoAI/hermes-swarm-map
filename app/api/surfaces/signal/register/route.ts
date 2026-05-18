@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const CONTAINER = process.env.SIGNAL_CONTAINER || 'signal-cli-daemon'
 
 export async function POST(request: Request) {
@@ -12,11 +12,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: 'Invalid phone number (E.164 format required)' }, { status: 400 })
   }
 
-  const captchaArg = captcha ? ` --captcha '${captcha.replace(/'/g, "'\\''")}'` : ''
-  const cmd = `docker exec ${CONTAINER} signal-cli --config /home/.local/share/signal-cli -a ${phone} register${captchaArg}`
+  // Use execFile (no shell) to avoid escaping issues with long captcha tokens
+  const args = ['exec', CONTAINER, 'signal-cli', '--config', '/home/.local/share/signal-cli', '-a', phone, 'register']
+  if (captcha) args.push('--captcha', captcha)
 
   try {
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 })
+    const { stdout, stderr } = await execFileAsync('docker', args, { timeout: 30000 })
     const output = (stderr || '') + (stdout || '')
 
     if (output.toLowerCase().includes('invalid captcha')) {
