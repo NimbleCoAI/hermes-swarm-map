@@ -1,16 +1,11 @@
-FROM eclipse-temurin:25-jre-noble
+FROM bbernhard/signal-cli-rest-api:0.199-dev
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
-
-ARG SIGNAL_CLI_VERSION=0.14.3
-RUN curl -L "https://github.com/AsamK/signal-cli/releases/download/v${SIGNAL_CLI_VERSION}/signal-cli-${SIGNAL_CLI_VERSION}.tar.gz" \
-    | tar -xz -C /opt \
-    && ln -s /opt/signal-cli-${SIGNAL_CLI_VERSION}/bin/signal-cli /usr/local/bin/signal-cli
-
-VOLUME /data
-EXPOSE 8080
+# Override bbernhard's default REST API entrypoint to run
+# signal-cli in native HTTP daemon mode (SSE + JSON-RPC).
+# This gives us real-time message delivery and full feature support
+# while using bbernhard's image which bundles libsignal-client correctly.
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -sf http://localhost:8080/api/v1/check || exit 1
 
-ENTRYPOINT ["signal-cli", "--config", "/data", "daemon", "--http", "0.0.0.0:8080"]
+ENTRYPOINT ["signal-cli", "--config", "/home/.local/share/signal-cli", "daemon", "--http", "0.0.0.0:8080"]
