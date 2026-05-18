@@ -27,15 +27,17 @@
 
 - [x] **Sane defaults** — DMs disabled, groups empty by default. Only admins can approve.
 
-- [ ] **Pairing store visibility** — read `~/.hermes-{name}/pairing/{platform}-approved.json`, show dynamically-approved users alongside static allowlist, allow revoking
+- [x] **Pairing store visibility** — read `~/.hermes-{name}/pairing/{platform}-approved.json`, show dynamically-approved users alongside static allowlist, allow revoking (inline in surface cards)
 
 - [ ] **Register Signal on Mac Mini** — need to re-register +19498344611 (or new number) from the Mac Mini's daemon since accounts aren't transferable
 
-- [ ] **Restart from settings** — after settings save, offer restart button (not just toast)
+- [x] **Restart from settings** — after settings save, offer restart button (inline in Surfaces tab)
 
-- [ ] **Disconnect surface** — remove env vars, move surface back to "Available"
+- [x] **Disconnect surface** — remove env vars, move surface back to "Available"
 
-- [ ] **Connected surface config editing** — edit existing surface config (change token, URL) without disconnecting/reconnecting
+- [x] **Connected surface config editing** — edit existing surface config (change token, URL) without disconnecting/reconnecting
+
+- [x] **Per-surface inline settings** — moved all settings into expandable sections within each surface card (Surfaces tab), phone number displayed on Signal cards, DM defaults to approved-only
 
 ## P1 — Important, next sprint
 
@@ -45,11 +47,11 @@
   - Mattermost: username → user ID via `/api/v4/users/username/{name}`
   - Display both (human-readable + UUID) in the admin UI
 
-- [ ] **Pairing store visibility** — read `~/.hermes-{name}/pairing/{platform}-approved.json`, show dynamically-approved users alongside static allowlist, allow revoking
+- [x] **Pairing store visibility** — (done, inline in surface cards)
 
-- [ ] **Connected surface config editing** — edit existing surface config (change token, URL) without disconnecting/reconnecting
+- [x] **Connected surface config editing** — (done, edit dialog per surface)
 
-- [ ] **Disconnect surface** — remove env vars, move surface back to "Available"
+- [x] **Disconnect surface** — (done, disconnect button per surface)
 
 - [ ] **Tier-based defaults** — when tier is `public`/`orgpublic`, default DM policy to "allow-all"; when `individual`, default to approved-only. Suggested, not enforced.
 
