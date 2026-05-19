@@ -46,8 +46,14 @@ type SurfaceSettings = {
   allowAll: boolean
 }
 
+// Env var names for group invite policy per platform
+const GROUP_INVITE_VARS: Record<string, string> = {
+  signal: 'SIGNAL_GROUP_INVITE_POLICY',
+}
+
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
+  groupInvitePolicy: 'approved-only' | 'allow-all'
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -85,8 +91,19 @@ export async function GET(
     }
   }
 
+  // Read group invite policy — check any platform's env var (Signal is primary)
+  let groupInvitePolicy: 'approved-only' | 'allow-all' = 'approved-only'
+  for (const varName of Object.values(GROUP_INVITE_VARS)) {
+    const val = env[varName]
+    if (val === 'allow-all') {
+      groupInvitePolicy = 'allow-all'
+      break
+    }
+  }
+
   const response: SettingsResponse = {
     dmPolicy: hasAllowAll ? 'allow-all' : 'approved-only',
+    groupInvitePolicy,
     surfaces,
   }
 
@@ -142,6 +159,17 @@ export async function PUT(
       } else {
         content = content.trimEnd() + `\n${vars.admins}=${adminsValue}\n`
       }
+    }
+  }
+
+  // Group invite policy — write per-platform env vars
+  const groupInviteValue = body.groupInvitePolicy || 'approved-only'
+  for (const [, varName] of Object.entries(GROUP_INVITE_VARS)) {
+    const regex = new RegExp(`^${varName}=.*$`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${groupInviteValue}`)
+    } else {
+      content = content.trimEnd() + `\n${varName}=${groupInviteValue}\n`
     }
   }
 

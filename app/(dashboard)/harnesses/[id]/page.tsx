@@ -565,16 +565,19 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                       {/* Expandable settings section */}
                       {isExpanded && surf && (
                         <div className="border-t border-[var(--border)] p-4 space-y-4 bg-[var(--bg)]/50">
-                          {surfaceSettings?.dmPolicy === 'approved-only' && (
-                            <div className="space-y-1">
-                              <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
-                              <TagInput
-                                values={surf.allowedUsers}
-                                onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
-                                placeholder={`Add ${labels.users.toLowerCase()}...`}
-                              />
-                            </div>
-                          )}
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
+                            <TagInput
+                              values={surf.allowedUsers}
+                              onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
+                              placeholder={`Add ${labels.users.toLowerCase()}...`}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              {surfaceSettings?.dmPolicy === 'approved-only'
+                                ? 'Controls who can DM this agent and add it to groups.'
+                                : 'DMs are open. This list still controls who can add the agent to groups.'}
+                            </p>
+                          </div>
 
                           <div className="space-y-1">
                             <label className="text-xs font-medium text-muted-foreground">Approved {labels.groups}</label>
