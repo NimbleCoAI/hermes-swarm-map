@@ -90,44 +90,10 @@ export class ConfigService {
   listSurfaces(harnessNames?: string[]): Surface[] {
     const names = harnessNames ?? DEFAULT_HARNESS_NAMES
 
-    // Collect env data per harness
-    type SurfaceAccumulator = {
-      surface: Omit<Surface, 'harnessIds'>
-      harnessIds: string[]
-    }
-
-    const mattermostAcc: SurfaceAccumulator = {
-      surface: {
-        id: 'int_mm',
-        platform: 'mattermost',
-        name: 'Mattermost',
-        status: 'planned',
-        config: {},
-      },
-      harnessIds: [],
-    }
-
-    const telegramAcc: SurfaceAccumulator = {
-      surface: {
-        id: 'int_tg',
-        platform: 'telegram',
-        name: 'Telegram',
-        status: 'planned',
-        config: {},
-      },
-      harnessIds: [],
-    }
-
-    const signalAcc: SurfaceAccumulator = {
-      surface: {
-        id: 'int_sg',
-        platform: 'signal',
-        name: 'Signal',
-        status: 'planned',
-        config: {},
-      },
-      harnessIds: [],
-    }
+    // Per-harness surfaces — each harness owns its own surface instances.
+    // No cross-harness leaking of phone numbers, tokens, or URLs.
+    const surfaces: Surface[] = []
+    const seenPlatforms = new Set<string>()
 
     for (const name of names) {
       const dataDir = agentDataDir(name)
@@ -136,40 +102,65 @@ export class ConfigService {
       const harnessId = `h_${name.replace(/-/g, '_')}`
 
       if (env['MATTERMOST_TOKEN'] || env['MATTERMOST_URL']) {
-        mattermostAcc.surface.status = 'connected'
-        if (env['MATTERMOST_URL'] && !mattermostAcc.surface.config['url']) {
-          mattermostAcc.surface.config = { url: env['MATTERMOST_URL'] }
-        }
-        if (!mattermostAcc.harnessIds.includes(harnessId)) {
-          mattermostAcc.harnessIds.push(harnessId)
-        }
+        seenPlatforms.add('mattermost')
+        surfaces.push({
+          id: `int_mm_${name}`,
+          platform: 'mattermost',
+          name: 'Mattermost',
+          status: 'connected',
+          config: { url: env['MATTERMOST_URL'] || '' },
+          harnessIds: [harnessId],
+        })
       }
 
       if (env['TELEGRAM_BOT_TOKEN']) {
-        telegramAcc.surface.status = 'connected'
-        if (!telegramAcc.harnessIds.includes(harnessId)) {
-          telegramAcc.harnessIds.push(harnessId)
-        }
+        seenPlatforms.add('telegram')
+        surfaces.push({
+          id: `int_tg_${name}`,
+          platform: 'telegram',
+          name: 'Telegram',
+          status: 'connected',
+          config: {},
+          harnessIds: [harnessId],
+        })
       }
 
       if (env['SIGNAL_ACCOUNT'] && env['SIGNAL_HTTP_URL']) {
-        signalAcc.surface.status = 'connected'
-        if (!signalAcc.surface.config['phone']) {
-          signalAcc.surface.config = { phone: env['SIGNAL_ACCOUNT'], url: env['SIGNAL_HTTP_URL'] }
-        }
-        if (!signalAcc.harnessIds.includes(harnessId)) {
-          signalAcc.harnessIds.push(harnessId)
-        }
+        seenPlatforms.add('signal')
+        surfaces.push({
+          id: `int_sg_${name}`,
+          platform: 'signal',
+          name: 'Signal',
+          status: 'connected',
+          config: { phone: env['SIGNAL_ACCOUNT'], url: env['SIGNAL_HTTP_URL'] },
+          harnessIds: [harnessId],
+        })
       }
     }
 
-    const surfaces: Surface[] = [
-      { ...mattermostAcc.surface, harnessIds: mattermostAcc.harnessIds },
-      { ...telegramAcc.surface, harnessIds: telegramAcc.harnessIds },
-      // Stub surfaces — not yet connected
-      { id: 'int_dc', platform: 'discord', name: 'Discord', status: 'planned', config: {}, harnessIds: [] },
-      { ...signalAcc.surface, harnessIds: signalAcc.harnessIds },
-    ]
+    // Add available (not yet connected) platform stubs for platforms
+    // that at least one harness uses, so the "Available" section shows them
+    // for harnesses that haven't connected yet.
+    if (seenPlatforms.has('mattermost')) {
+      surfaces.push({ id: 'int_mm_available', platform: 'mattermost', name: 'Mattermost', status: 'available', config: {}, harnessIds: [] })
+    } else {
+      surfaces.push({ id: 'int_mm', platform: 'mattermost', name: 'Mattermost', status: 'planned', config: {}, harnessIds: [] })
+    }
+
+    if (seenPlatforms.has('telegram')) {
+      surfaces.push({ id: 'int_tg_available', platform: 'telegram', name: 'Telegram', status: 'available', config: {}, harnessIds: [] })
+    } else {
+      surfaces.push({ id: 'int_tg', platform: 'telegram', name: 'Telegram', status: 'planned', config: {}, harnessIds: [] })
+    }
+
+    if (seenPlatforms.has('signal')) {
+      surfaces.push({ id: 'int_sg_available', platform: 'signal', name: 'Signal', status: 'available', config: {}, harnessIds: [] })
+    } else {
+      surfaces.push({ id: 'int_sg', platform: 'signal', name: 'Signal', status: 'planned', config: {}, harnessIds: [] })
+    }
+
+    // Discord stub — not yet implemented
+    surfaces.push({ id: 'int_dc', platform: 'discord', name: 'Discord', status: 'planned', config: {}, harnessIds: [] })
 
     return surfaces
   }
