@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { buildSettingsEnvValue } from '@/lib/env-helpers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -112,27 +113,23 @@ export async function PUT(
     const settings = body.surfaces[platform]
     if (!settings) continue
 
-    // Users
-    const usersValue = body.dmPolicy === 'allow-all' || settings.allowAll
-      ? '*'
-      : settings.allowedUsers.length > 0
-        ? settings.allowedUsers.join(',')
-        : '*'
+    // Users — empty string = no one allowed (secure default), * = allow all
+    const usersValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, settings.allowedUsers)
     const usersRegex = new RegExp(`^${vars.users}=.*$`, 'm')
     if (usersRegex.test(content)) {
       content = content.replace(usersRegex, `${vars.users}=${usersValue}`)
-    } else if (settings.allowedUsers.length > 0 || body.dmPolicy === 'allow-all') {
+    } else {
       content = content.trimEnd() + `\n${vars.users}=${usersValue}\n`
     }
 
-    // Groups
+    // Groups — empty string = no groups allowed, * = all groups
     const groupsValue = settings.allowedGroups.length > 0
       ? settings.allowedGroups.join(',')
-      : '*'
+      : ''
     const groupsRegex = new RegExp(`^${vars.groups}=.*$`, 'm')
     if (groupsRegex.test(content)) {
       content = content.replace(groupsRegex, `${vars.groups}=${groupsValue}`)
-    } else if (settings.allowedGroups.length > 0) {
+    } else {
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
 

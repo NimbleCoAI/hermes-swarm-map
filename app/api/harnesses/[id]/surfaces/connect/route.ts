@@ -2,27 +2,12 @@ import { NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { buildConnectEnvVars, mergeEnvVars, ensurePolicyDefaults } from '@/lib/env-helpers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
   if (name === 'personal') return path.join(os.homedir(), '.hermes')
   return path.join(os.homedir(), `.hermes-${name}`)
-}
-
-const ENV_MAP: Record<string, (config: Record<string, string>) => Record<string, string>> = {
-  signal: (c) => ({
-    SIGNAL_HTTP_URL: c.url || 'http://host.docker.internal:8080',
-    SIGNAL_ACCOUNT: c.phone,
-    SIGNAL_ALLOWED_USERS: c.allowedUsers || '',
-    SIGNAL_GROUP_ALLOWED_USERS: c.groupAllowedUsers || '',
-  }),
-  telegram: (c) => ({
-    TELEGRAM_BOT_TOKEN: c.token,
-  }),
-  mattermost: (c) => ({
-    MATTERMOST_URL: c.url,
-    MATTERMOST_TOKEN: c.token,
-  }),
 }
 
 export async function POST(
@@ -37,12 +22,11 @@ export async function POST(
     return NextResponse.json({ error: 'Missing platform or config' }, { status: 400 })
   }
 
-  const mapper = ENV_MAP[platform]
-  if (!mapper) {
+  const envVars = buildConnectEnvVars(platform, config)
+  if (Object.keys(envVars).length === 0) {
     return NextResponse.json({ error: `Unknown platform: ${platform}` }, { status: 400 })
   }
 
-  const envVars = mapper(config)
   const dataDir = agentDataDir(id)
   const envPath = path.join(dataDir, '.env')
 
@@ -52,14 +36,12 @@ export async function POST(
 
   let content = fs.readFileSync(envPath, 'utf-8')
 
-  for (const [key, value] of Object.entries(envVars)) {
-    const regex = new RegExp(`^${key}=.*$`, 'm')
-    if (regex.test(content)) {
-      content = content.replace(regex, `${key}=${value}`)
-    } else {
-      content = content.trimEnd() + `\n${key}=${value}\n`
-    }
-  }
+  // Only write connection-specific vars (URL, token, account).
+  // Never touch policy vars (ALLOWED_USERS, GROUP_ALLOWED_USERS).
+  content = mergeEnvVars(content, envVars)
+
+  // Ensure policy defaults exist for new connections (empty = approved-only).
+  content = ensurePolicyDefaults(content, platform)
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
 
