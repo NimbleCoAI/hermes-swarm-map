@@ -56,12 +56,11 @@ export async function POST(request: Request) {
       }
     }
 
-    if (displayName) {
-      await execAsync(
-        `docker exec ${CONTAINER} signal-cli --config /home/.local/share/signal-cli -a ${phone} updateProfile --given-name '${displayName.replace(/'/g, "'\\''")}'`,
-        { timeout: 15000 }
-      ).catch(() => {})
-    }
+    const profileName = displayName || 'Hermes Agent'
+    await execAsync(
+      `docker exec ${CONTAINER} signal-cli --config /home/.local/share/signal-cli -a ${phone} updateProfile --given-name '${profileName.replace(/'/g, "'\\''")}'`,
+      { timeout: 15000 }
+    ).catch(() => {})
 
     return NextResponse.json({ success: true })
   } catch (error: unknown) {

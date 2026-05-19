@@ -11,16 +11,17 @@ type Props = {
   open: boolean
   onClose: () => void
   harnessId: string
+  harnessName?: string
   onConnected: () => void
 }
 
-export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Props) {
+export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onConnected }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [step, setStep] = useState<Step>('phone')
   const [phone, setPhone] = useState('')
   const [captchaToken, setCaptchaToken] = useState('')
   const [verifyCode, setVerifyCode] = useState('')
-  const [displayName, setDisplayName] = useState('')
+  const [displayName, setDisplayName] = useState(harnessName || '')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [hasExistingNumber, setHasExistingNumber] = useState(false)
@@ -35,7 +36,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Pro
       setPhone('')
       setCaptchaToken('')
       setVerifyCode('')
-      setDisplayName('')
+      setDisplayName(harnessName || '')
       setError('')
       setLoading(false)
       setHasExistingNumber(false)
@@ -255,12 +256,12 @@ export function SignalSetupDialog({ open, onClose, harnessId, onConnected }: Pro
               />
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium">Display Name (optional)</label>
+              <label className="text-sm font-medium">Display Name</label>
               <input
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Hermes Agent"
+                placeholder="Signal profile name"
                 className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
               />
             </div>

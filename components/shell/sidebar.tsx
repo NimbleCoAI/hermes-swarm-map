@@ -4,18 +4,19 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Bot, MessageSquare, Wrench, KeyRound,
-  Brain, Users, ScrollText, Settings,
+  Brain, Users, ScrollText, Settings, Plug,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 const icons: Record<string, LucideIcon> = {
   LayoutDashboard, Bot, MessageSquare, Wrench, KeyRound,
-  Brain, Users, ScrollText, Settings,
+  Brain, Users, ScrollText, Settings, Plug,
 }
 
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/', icon: 'LayoutDashboard' },
   { label: 'Harnesses', href: '/harnesses', icon: 'Bot' },
+  { label: 'Surfaces', href: '/surfaces', icon: 'Plug' },
   { label: 'Tools', href: '/tools', icon: 'Wrench' },
   { label: 'Keys', href: '/keys', icon: 'KeyRound' },
   { label: 'Memory', href: '/memory', icon: 'Brain' },
