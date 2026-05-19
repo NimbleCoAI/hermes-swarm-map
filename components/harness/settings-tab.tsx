@@ -242,16 +242,15 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
               )}
             </div>
 
-            {settings.dmPolicy === 'approved-only' && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
-                <TagInput
-                  values={surf.allowedUsers}
-                  onChange={(v) => updateSurface(platform, 'allowedUsers', v)}
-                  placeholder={`Add ${labels.users.toLowerCase()}...`}
-                />
-              </div>
-            )}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Approved Users ({labels.users})</label>
+              <TagInput
+                values={surf.allowedUsers}
+                onChange={(v) => updateSurface(platform, 'allowedUsers', v)}
+                placeholder={`Add ${labels.users.toLowerCase()}...`}
+              />
+              <p className="text-xs text-muted-foreground">Controls who can DM this agent and add it to groups</p>
+            </div>
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Approved {labels.groups}</label>
