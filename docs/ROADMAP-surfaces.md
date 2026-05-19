@@ -29,7 +29,7 @@
 
 - [x] **Pairing store visibility** — read `~/.hermes-{name}/pairing/{platform}-approved.json`, show dynamically-approved users alongside static allowlist, allow revoking (inline in surface cards)
 
-- [ ] **Register Signal on Mac Mini** — need to re-register +19498344611 (or new number) from the Mac Mini's daemon since accounts aren't transferable
+- [ ] **Register Signal on Mac Mini** — need to re-register +1XXXXXXXXXX (or new number) from the Mac Mini's daemon since accounts aren't transferable
 
 - [x] **Restart from settings** — after settings save, offer restart button (inline in Surfaces tab)
 

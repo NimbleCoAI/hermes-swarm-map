@@ -20,14 +20,14 @@ storage.write('settings.json', {
 // Harnesses are discovered live from Docker.
 // harnesses.json stores user-configured overlays (tier, platform, channel, etc.)
 storage.write('harnesses.json', [
-  { id: 'h_personal', tier: 'individual', platform: 'mattermost', channel: 'sanctum' },
-  { id: 'h_osint', tier: 'team', platform: 'mattermost', channel: 'sanctum' },
-  { id: 'h_cyborg', tier: 'team', platform: 'mattermost', channel: 'team-ops' },
-  { id: 'h_cryptids', tier: 'org', platform: 'telegram', channel: '@nimble_cryptid' },
-  { id: 'h_egregore', tier: 'orgpublic', platform: 'telegram', channel: '@egregore_bot' },
-  { id: 'h_seraph_thinker', tier: 'org', platform: 'hermes', channel: ':8692' },
-  { id: 'h_seraph_doer', tier: 'org', platform: 'hermes', channel: ':8702' },
-  { id: 'h_seraph_generalist', tier: 'org', platform: 'hermes', channel: ':8712' },
+  { id: 'h_personal', tier: 'individual', platform: 'mattermost', channel: 'general' },
+  { id: 'h_research', tier: 'team', platform: 'mattermost', channel: 'research' },
+  { id: 'h_ops', tier: 'team', platform: 'mattermost', channel: 'team-ops' },
+  { id: 'h_notifications', tier: 'org', platform: 'telegram', channel: '@example_notify_bot' },
+  { id: 'h_public', tier: 'orgpublic', platform: 'telegram', channel: '@example_public_bot' },
+  { id: 'h_thinker', tier: 'org', platform: 'hermes', channel: ':8692' },
+  { id: 'h_doer', tier: 'org', platform: 'hermes', channel: ':8702' },
+  { id: 'h_generalist', tier: 'org', platform: 'hermes', channel: ':8712' },
 ])
 
 // Models — static config (not discovered)
@@ -40,7 +40,7 @@ storage.write('models.json', [
 
 // People — static admin config
 storage.write('people.json', [
-  { id: 'p_juniper', handle: '@juniper', role: 'admin', surfaces: ['int_mm', 'int_tg'] },
+  { id: 'p_admin', handle: '@admin', role: 'admin', surfaces: ['int_mm', 'int_tg'] },
 ])
 
 // Tools, keys, surfaces, memory-scopes are discovered live — no seed data needed.
