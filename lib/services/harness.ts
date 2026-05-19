@@ -712,7 +712,7 @@ export class HarnessService {
     return duplicate
   }
 
-  createOverlay(input: { name: string; tier?: HabitatTier; platform?: string; channel?: string; models?: string[] }): Partial<Harness> {
+  createOverlay(input: { name: string; tier?: HabitatTier; platform?: string; channel?: string; models?: string[]; tools?: string[] }): Partial<Harness> {
     const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
 
     // Check for duplicate name
@@ -754,7 +754,7 @@ export class HarnessService {
       platform: input.platform ?? 'hermes',
       channel: input.channel ?? `:${port}`,
       models: input.models ?? ['claude-sonnet-4-5'],
-      tools: [],
+      tools: input.tools ?? [],
       composeFile: composePath,
       serviceName: `hermes-${input.name}`,
     }

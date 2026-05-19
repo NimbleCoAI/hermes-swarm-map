@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useApi } from '@/lib/hooks/use-api'
 import { StatusDot } from '@/components/shared/status-dot'
 import { TierBadge } from '@/components/shared/tier-badge'
+import { TierSelect } from '@/components/shared/tier-select'
 import { CacheStatePill } from '@/components/shared/cache-state-pill'
 import { Button } from '@/components/ui/button'
 import { SplitButton } from '@/components/shared/split-button'
 import { RiskBar } from '@/components/shared/risk-bar'
 import { TierMix } from '@/components/shared/tier-mix'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { Harness, Tool, Key, MemoryScope, Surface } from '@/lib/types'
+import type { Harness, HabitatTier, Tool, Key, MemoryScope, Surface } from '@/lib/types'
 import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
 import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
 import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
@@ -20,6 +21,8 @@ import { SettingsTab } from '@/components/harness/settings-tab'
 import { toast } from 'sonner'
 import { MessageSquare, Globe, Bot, Hash, Pencil, ChevronDown, ChevronRight, Shield, Loader2, Save, RotateCw, Users, X } from 'lucide-react'
 import { TagInput } from '@/components/ui/tag-input'
+import { Switch } from '@/components/ui/switch'
+import { TIER_LABELS } from '@/lib/constants'
 
 type PairingUser = {
   userId: string
@@ -83,6 +86,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
   const [connectDialog, setConnectDialog] = useState<string | null>(null)
   const [editSurface, setEditSurface] = useState<Surface | null>(null)
+  const [tierOverride, setTierOverride] = useState<HabitatTier | null>(null)
 
   // Model edit state
   const [modelProvider, setModelProvider] = useState('')
@@ -100,6 +104,39 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const [discoveredGroups, setDiscoveredGroups] = useState<Array<{id: string; name: string}>>([])
   const [pairedUsers, setPairedUsers] = useState<PairingUser[]>([])
   const [expandedSettings, setExpandedSettings] = useState<Record<string, boolean>>({})
+
+  // Tool toggle state
+  const [toolsSaving, setToolsSaving] = useState(false)
+
+  async function toggleTool(toolId: string, enabled: boolean) {
+    if (!harness) return
+    const current = new Set(harness.tools)
+    if (enabled) {
+      current.add(toolId)
+    } else {
+      current.delete(toolId)
+    }
+    const newTools = Array.from(current)
+    setToolsSaving(true)
+    try {
+      const res = await fetch(`/api/harnesses/${id}/tools`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tools: newTools }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Failed to update tools')
+        return
+      }
+      refetch()
+      toast.success(enabled ? 'Tool enabled' : 'Tool disabled')
+    } catch {
+      toast.error('Failed to update tools')
+    } finally {
+      setToolsSaving(false)
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/harnesses/${id}/settings`)
@@ -305,6 +342,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   if (!harness) return <p className="text-destructive">Harness not found.</p>
 
   const harnessTools = tools?.filter((t) => harness.tools.includes(t.id)) ?? []
+  const allTools = tools ?? []
   const harnessKeys = keys?.filter((k) => k.assignedTo.includes(harness.id)) ?? []
   const harnessMemory = memoryScopes?.filter((m) => m.members.includes(harness.id)) ?? []
   const connectedSurfaces = surfaces?.filter((s) => s.harnessIds.includes(harness.id)) ?? []
@@ -319,7 +357,12 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           <div>
             <h2 className="text-2xl font-semibold">{harness.name}</h2>
             <div className="flex items-center gap-2 mt-1">
-              <TierBadge tier={harness.tier} />
+              <TierSelect
+                harnessId={harness.id}
+                currentTier={tierOverride ?? harness.tier}
+                tools={harnessTools}
+                onTierChanged={(newTier) => setTierOverride(newTier)}
+              />
               <span className="text-sm text-muted-foreground">{harness.persona}</span>
               {harness.cacheState && (
                 <CacheStatePill state={harness.cacheState} age={harness.cacheAge} />
@@ -347,7 +390,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="models">Models</TabsTrigger>
-          <TabsTrigger value="tools">Tools ({harnessTools.length})</TabsTrigger>
+          <TabsTrigger value="tools">Tools ({harnessTools.length}/{allTools.length})</TabsTrigger>
           <TabsTrigger value="surfaces">Surfaces ({connectedSurfaces.length})</TabsTrigger>
           <TabsTrigger value="keys">Keys ({harnessKeys.length})</TabsTrigger>
           <TabsTrigger value="memory">Memory ({harnessMemory.length})</TabsTrigger>
@@ -687,30 +730,52 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">
+                  <th className="w-12 px-4 py-3">On</th>
                   <th className="text-left px-4 py-3">Tool</th>
                   <th className="text-left px-4 py-3">Source</th>
                   <th className="text-left px-4 py-3">Risk</th>
+                  <th className="text-left px-4 py-3">Tiers</th>
                   <th className="text-left px-4 py-3">Reviewed</th>
                 </tr>
               </thead>
               <tbody>
-                {harnessTools.map((t) => (
-                  <tr key={t.id} className="border-b border-[var(--border)] last:border-0">
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-muted-foreground">{t.description}</div>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">{t.source}</td>
-                    <td className="px-4 py-3"><RiskBar level={t.risk} /></td>
-                    <td className="px-4 py-3">
-                      <span className={t.reviewed ? 'text-[var(--success)]' : 'text-muted-foreground'}>
-                        {t.reviewed ? 'Yes' : 'Pending'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {harnessTools.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground text-sm">No tools assigned.</td></tr>
+                {allTools.map((t) => {
+                  const enabled = harness.tools.includes(t.id)
+                  const tierAllowed = t.allowedTiers.includes(harness.tier)
+                  return (
+                    <tr key={t.id} className={`border-b border-[var(--border)] last:border-0 ${!tierAllowed ? 'opacity-50' : ''}`}>
+                      <td className="px-4 py-3">
+                        <Switch
+                          checked={enabled}
+                          onCheckedChange={(checked) => toggleTool(t.id, checked)}
+                          disabled={toolsSaving || !tierAllowed}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{t.name}</div>
+                        <div className="text-xs text-muted-foreground">{t.description}</div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{t.source}</td>
+                      <td className="px-4 py-3"><RiskBar level={t.risk} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {t.allowedTiers.map((tier) => (
+                            <span key={tier} className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                              {TIER_LABELS[tier]}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={t.reviewed ? 'text-[var(--success)]' : 'text-muted-foreground'}>
+                          {t.reviewed ? 'Yes' : 'Pending'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {allTools.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground text-sm">No tools discovered.</td></tr>
                 )}
               </tbody>
             </table>
@@ -815,6 +880,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         open={connectDialog === 'signal'}
         onClose={() => setConnectDialog(null)}
         harnessId={harness.id}
+        harnessName={harness.name}
         onConnected={() => refetchSurfaces()}
       />
       <TelegramSetupDialog
