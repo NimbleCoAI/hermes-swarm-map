@@ -124,4 +124,4 @@ API keys are encrypted at rest. The encryption key is machine-local at `~/.herme
 
 ## License
 
-MIT
+AGPL
