@@ -629,10 +629,6 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                             </div>
                           )}
 
-                          {platform !== 'mattermost' && (
-                            <p className="text-xs text-muted-foreground italic">Admin roles not enforced on {platform} yet.</p>
-                          )}
-
                           {/* Paired users (dynamic approvals) */}
                           {platformPairedUsers.length > 0 && (
                             <div className="space-y-2 pt-2 border-t border-[var(--border)]">

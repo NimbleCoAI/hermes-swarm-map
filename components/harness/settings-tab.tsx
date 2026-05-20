@@ -366,9 +366,6 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
               </div>
             )}
 
-            {platform !== 'mattermost' && (
-              <p className="text-xs text-muted-foreground italic">Admin roles not enforced on {platform} yet.</p>
-            )}
 
             {/* Paired users (dynamic approvals) */}
             {pairedUsers.filter(u => u.platform === platform).length > 0 && (
