@@ -138,6 +138,8 @@ ${sourceBlock}
         target: 8642
     volumes:
       - ${agentDataDir}:/opt/data
+      - ${path.join(os.homedir(), 'Documents/GitHub/google-mcp')}:/opt/google-mcp:ro
+      - ${agentDataDir}/google-tokens:/opt/google/tokens
     command: gateway
 
 networks:
