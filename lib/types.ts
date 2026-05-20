@@ -104,4 +104,6 @@ export type Settings = {
   composeFiles: string[]  // explicit list of compose files; empty = auto-scan hermesDir
   onboarded?: boolean
   useLocalBuild?: boolean  // Build from hermesDir instead of pulling upstream image
+  localApiEnabled?: boolean  // Expose harnesses at a local API endpoint
+  localApiPort?: number  // Port for the local API (default 8600)
 }

@@ -16,6 +16,14 @@ export const TIER_LABELS: Record<HabitatTier, string> = {
   public: 'Public',
 }
 
+export const TIER_DESCRIPTIONS: Record<HabitatTier, string> = {
+  individual: 'Single-user agent with private scope',
+  team: 'Shared within a small team',
+  org: 'Available to the entire organization',
+  orgpublic: 'Org-managed but publicly accessible',
+  public: 'Open access, no restrictions',
+}
+
 export const TIER_ORDER: HabitatTier[] = [
   'individual', 'team', 'org', 'orgpublic', 'public',
 ]

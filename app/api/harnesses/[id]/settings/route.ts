@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { buildSettingsEnvValue } from '@/lib/env-helpers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -45,8 +46,14 @@ type SurfaceSettings = {
   allowAll: boolean
 }
 
+// Env var names for group invite policy per platform
+const GROUP_INVITE_VARS: Record<string, string> = {
+  signal: 'SIGNAL_GROUP_INVITE_POLICY',
+}
+
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
+  groupInvitePolicy: 'approved-only' | 'allow-all'
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -84,8 +91,19 @@ export async function GET(
     }
   }
 
+  // Read group invite policy — check any platform's env var (Signal is primary)
+  let groupInvitePolicy: 'approved-only' | 'allow-all' = 'approved-only'
+  for (const varName of Object.values(GROUP_INVITE_VARS)) {
+    const val = env[varName]
+    if (val === 'allow-all') {
+      groupInvitePolicy = 'allow-all'
+      break
+    }
+  }
+
   const response: SettingsResponse = {
     dmPolicy: hasAllowAll ? 'allow-all' : 'approved-only',
+    groupInvitePolicy,
     surfaces,
   }
 
@@ -112,27 +130,23 @@ export async function PUT(
     const settings = body.surfaces[platform]
     if (!settings) continue
 
-    // Users
-    const usersValue = body.dmPolicy === 'allow-all' || settings.allowAll
-      ? '*'
-      : settings.allowedUsers.length > 0
-        ? settings.allowedUsers.join(',')
-        : '*'
+    // Users — empty string = no one allowed (secure default), * = allow all
+    const usersValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, settings.allowedUsers)
     const usersRegex = new RegExp(`^${vars.users}=.*$`, 'm')
     if (usersRegex.test(content)) {
       content = content.replace(usersRegex, `${vars.users}=${usersValue}`)
-    } else if (settings.allowedUsers.length > 0 || body.dmPolicy === 'allow-all') {
+    } else {
       content = content.trimEnd() + `\n${vars.users}=${usersValue}\n`
     }
 
-    // Groups
+    // Groups — empty string = no groups allowed, * = all groups
     const groupsValue = settings.allowedGroups.length > 0
       ? settings.allowedGroups.join(',')
-      : '*'
+      : ''
     const groupsRegex = new RegExp(`^${vars.groups}=.*$`, 'm')
     if (groupsRegex.test(content)) {
       content = content.replace(groupsRegex, `${vars.groups}=${groupsValue}`)
-    } else if (settings.allowedGroups.length > 0) {
+    } else {
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
 
@@ -145,6 +159,17 @@ export async function PUT(
       } else {
         content = content.trimEnd() + `\n${vars.admins}=${adminsValue}\n`
       }
+    }
+  }
+
+  // Group invite policy — write per-platform env vars
+  const groupInviteValue = body.groupInvitePolicy || 'approved-only'
+  for (const [, varName] of Object.entries(GROUP_INVITE_VARS)) {
+    const regex = new RegExp(`^${varName}=.*$`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${groupInviteValue}`)
+    } else {
+      content = content.trimEnd() + `\n${varName}=${groupInviteValue}\n`
     }
   }
 

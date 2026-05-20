@@ -152,6 +152,28 @@ function discoverTools(harnessNames: string[]): Map<string, { tool: Tool; harnes
   return registry
 }
 
+// Maximum risk level allowed per tier for default tool assignment
+const TIER_MAX_RISK: Record<HabitatTier, number> = {
+  individual: 2,  // safe + low
+  team: 3,        // safe + low + medium
+  org: 5,         // all risk levels
+  orgpublic: 2,   // conservative (public-facing)
+  public: 1,      // minimal (safe only)
+}
+
+/**
+ * Returns tool IDs that should be assigned by default for a given tier.
+ * A tool is included if:
+ *   1. Its risk level is within the tier's max risk threshold
+ *   2. Its allowedTiers includes this tier
+ */
+export function getDefaultToolsForTier(tier: HabitatTier, allTools: Tool[]): string[] {
+  const maxRisk = TIER_MAX_RISK[tier] ?? 2
+  return allTools
+    .filter((t) => t.risk <= maxRisk && t.allowedTiers.includes(tier))
+    .map((t) => t.id)
+}
+
 export class ToolsService {
   constructor(private storage: Storage) {}
 

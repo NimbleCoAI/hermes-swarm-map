@@ -23,6 +23,7 @@ type SurfaceSettings = {
 
 type Settings = {
   dmPolicy: 'approved-only' | 'allow-all'
+  groupInvitePolicy: 'approved-only' | 'allow-all'
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -104,6 +105,13 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
     setSaved(false)
   }
 
+  function updateGroupInvitePolicy(policy: 'approved-only' | 'allow-all') {
+    if (!settings) return
+    setSettings({ ...settings, groupInvitePolicy: policy })
+    setDirty(true)
+    setSaved(false)
+  }
+
   async function handleSave() {
     if (!settings) return
     setSaving(true)
@@ -115,9 +123,30 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
       })
       const data = await res.json()
       if (data.success) {
-        toast.success('Settings saved. Restart agent to apply.')
+        // Auto-restart with rebuild mode so the container picks up .env changes
+        toast.success('Settings saved. Restarting agent...')
         setDirty(false)
-        setSaved(true)
+        setSaved(false)
+        setRestarting(true)
+        try {
+          const restartRes = await fetch(`/api/harnesses/${harnessId}/restart`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'rebuild' }),
+          })
+          if (restartRes.ok) {
+            toast.success('Agent restarted with new settings')
+          } else {
+            const restartData = await restartRes.json()
+            toast.error(restartData.error || 'Restart failed — restart manually')
+            setSaved(true) // Show manual restart button as fallback
+          }
+        } catch {
+          toast.error('Restart failed — restart manually')
+          setSaved(true)
+        } finally {
+          setRestarting(false)
+        }
       } else {
         toast.error(data.error || 'Failed to save')
       }
@@ -134,7 +163,7 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
       const res = await fetch(`/api/harnesses/${harnessId}/restart`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'quick' }),
+        body: JSON.stringify({ mode: 'rebuild' }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -219,7 +248,42 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
         <p className="text-xs text-muted-foreground">
           {settings.dmPolicy === 'approved-only'
             ? 'Only users in the approved list below can DM this agent.'
-            : 'Anyone can DM this agent. Use with caution.'}
+            : 'Anyone can DM this agent. Approved users list still controls who can add this agent to groups.'}
+        </p>
+      </div>
+
+      {/* Group Invite Policy */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Group Invite Policy</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="groupInvitePolicy"
+              checked={settings.groupInvitePolicy === 'approved-only'}
+              onChange={() => updateGroupInvitePolicy('approved-only')}
+              className="accent-[var(--accent)]"
+            />
+            Approved users only
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="groupInvitePolicy"
+              checked={settings.groupInvitePolicy === 'allow-all'}
+              onChange={() => updateGroupInvitePolicy('allow-all')}
+              className="accent-[var(--accent)]"
+            />
+            Allow all
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.groupInvitePolicy === 'approved-only'
+            ? 'Only approved users can add this agent to groups.'
+            : 'Anyone can add this agent to groups.'}
         </p>
       </div>
 
@@ -242,16 +306,15 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
               )}
             </div>
 
-            {settings.dmPolicy === 'approved-only' && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
-                <TagInput
-                  values={surf.allowedUsers}
-                  onChange={(v) => updateSurface(platform, 'allowedUsers', v)}
-                  placeholder={`Add ${labels.users.toLowerCase()}...`}
-                />
-              </div>
-            )}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Approved Users ({labels.users})</label>
+              <TagInput
+                values={surf.allowedUsers}
+                onChange={(v) => updateSurface(platform, 'allowedUsers', v)}
+                placeholder={`Add ${labels.users.toLowerCase()}...`}
+              />
+              <p className="text-xs text-muted-foreground">Controls who can DM this agent and add it to groups</p>
+            </div>
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Approved {labels.groups}</label>
@@ -303,9 +366,6 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
               </div>
             )}
 
-            {platform !== 'mattermost' && (
-              <p className="text-xs text-muted-foreground italic">Admin roles not enforced on {platform} yet.</p>
-            )}
 
             {/* Paired users (dynamic approvals) */}
             {pairedUsers.filter(u => u.platform === platform).length > 0 && (
