@@ -7,6 +7,14 @@ services:
       - "8080:8080"
     volumes:
       - ${HOME}/.hermes-swarm/signal-data:/home/.local/share/signal-cli
+      # Agent data dirs mounted at host paths so signal-cli can read attachments
+      # (agents translate container paths to host paths before sending to signal-cli)
+      - ${HOME}/.hermes:${HOME}/.hermes:ro
+      - ${HOME}/.hermes-cyborg:${HOME}/.hermes-cyborg:ro
+      - ${HOME}/.hermes-osint:${HOME}/.hermes-osint:ro
+      - ${HOME}/.hermes-cryptids:${HOME}/.hermes-cryptids:ro
+      - ${HOME}/.hermes-egregore:${HOME}/.hermes-egregore:ro
+      - ${HOME}/.hermes-evil-duck:${HOME}/.hermes-evil-duck:ro
     networks:
       - hermes-net
 
