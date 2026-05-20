@@ -7,6 +7,7 @@ import type { Storage } from './storage'
 import type { DockerService } from './docker'
 import type { AuditService } from './audit'
 import type { ConfigService } from './config'
+import { getCostToday } from './usage'
 
 const HARNESSES_FILE = 'harnesses.json'
 
@@ -564,7 +565,7 @@ export class HarnessService {
         platform: overlay.platform ?? 'hermes',
         channel: overlay.channel ?? (port ? `:${port}` : ''),
         models: overlay.models?.length ? overlay.models : readModelConfig(dataDir),
-        costToday: overlay.costToday ?? 0,
+        costToday: getCostToday(id),
         invocations: overlay.invocations ?? 0,
         tools: overlay.tools ?? [],
         ...(overlay.health ? { health: overlay.health } : {}),

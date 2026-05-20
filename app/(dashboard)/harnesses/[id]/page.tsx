@@ -73,6 +73,43 @@ type ModelConfig = { provider: string; primary: string; models: string[]; fallba
 
 type LogsResponse = { logs: string; lines: number }
 
+type UsageByModel = {
+  model: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+  cost: number
+  sessionCount: number
+  costStatus: 'estimated' | 'unknown'
+}
+
+type UsageSession = {
+  sessionId: string
+  model: string
+  startedAt: number
+  endedAt: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+  estimatedCostUsd: number
+  costStatus: 'estimated' | 'unknown'
+}
+
+type UsageData = {
+  costToday: number
+  costWeek: number
+  costMonth: number
+  totalTokensToday: number
+  sessionCountToday: number
+  costStatus: 'estimated' | 'partial' | 'unknown'
+  byModel: UsageByModel[]
+  recentSessions: UsageSession[]
+}
+
 export default function HarnessDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
@@ -83,6 +120,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const { data: memoryScopes } = useApi<MemoryScope[]>('/api/memory-scopes')
   const { data: surfaces, refetch: refetchSurfaces } = useApi<Surface[]>('/api/surfaces')
   const { data: modelConfig, refetch: refetchModels } = useApi<ModelConfig>(`/api/harnesses/${id}/models`)
+  const { data: usageData } = useApi<UsageData>(`/api/harnesses/${id}/usage`)
 
   const [connectDialog, setConnectDialog] = useState<string | null>(null)
   const [editSurface, setEditSurface] = useState<Surface | null>(null)
@@ -389,6 +427,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="usage">Usage</TabsTrigger>
           <TabsTrigger value="models">Models</TabsTrigger>
           <TabsTrigger value="tools">Tools ({harnessTools.length}/{allTools.length})</TabsTrigger>
           <TabsTrigger value="surfaces">Surfaces ({connectedSurfaces.length})</TabsTrigger>
@@ -410,8 +449,10 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
               <h3 className="font-medium text-sm">Usage</h3>
-              <Row label="Invocations" value={harness.invocations} />
-              <Row label="Cost today" value={`$${harness.costToday.toFixed(2)}`} />
+              <Row label="Sessions today" value={usageData?.sessionCountToday ?? 0} />
+              <Row label="Cost today" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costToday ?? harness.costToday).toFixed(2)}`} />
+              <Row label="Cost this week" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costWeek ?? 0).toFixed(2)}`} />
+              <Row label="Cost this month" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costMonth ?? 0).toFixed(2)}`} />
               <Row label="CPU" value={`${harness.cpu}%`} />
               <Row label="Memory" value={`${harness.mem}%`} />
             </div>
@@ -422,6 +463,119 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                   <p className="text-xs text-muted-foreground mt-1 font-mono">{harness.health.errorMsg}</p>
                 )}
               </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="usage" className="mt-4">
+          <div className="space-y-4">
+            {/* Cost summary cards */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Today</p>
+                <p className="text-2xl font-semibold mt-1">
+                  {usageData?.costStatus === 'estimated' ? '~' : ''}${(usageData?.costToday ?? 0).toFixed(2)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">{usageData?.sessionCountToday ?? 0} sessions</p>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">This Week</p>
+                <p className="text-2xl font-semibold mt-1">
+                  {usageData?.costStatus === 'estimated' ? '~' : ''}${(usageData?.costWeek ?? 0).toFixed(2)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">This Month</p>
+                <p className="text-2xl font-semibold mt-1">
+                  {usageData?.costStatus === 'estimated' ? '~' : ''}${(usageData?.costMonth ?? 0).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            {/* Per-model breakdown */}
+            {usageData && usageData.byModel.length > 0 && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+                <div className="p-4 border-b border-[var(--border)]">
+                  <h3 className="font-medium text-sm">Cost by Model (Today)</h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">
+                      <th className="text-left px-4 py-2">Model</th>
+                      <th className="text-right px-4 py-2">Input</th>
+                      <th className="text-right px-4 py-2">Output</th>
+                      <th className="text-right px-4 py-2">Cache R</th>
+                      <th className="text-right px-4 py-2">Cache W</th>
+                      <th className="text-right px-4 py-2">Sessions</th>
+                      <th className="text-right px-4 py-2">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usageData.byModel.map((m) => (
+                      <tr key={m.model} className="border-b border-[var(--border)] last:border-0">
+                        <td className="px-4 py-2 font-mono text-xs">{m.model}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">{formatTokens(m.inputTokens)}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">{formatTokens(m.outputTokens)}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">{formatTokens(m.cacheReadTokens)}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">{formatTokens(m.cacheWriteTokens)}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">{m.sessionCount}</td>
+                        <td className="px-4 py-2 text-right font-medium">
+                          {m.costStatus === 'estimated' ? '~' : ''}${m.cost.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Recent sessions */}
+            {usageData && usageData.recentSessions.length > 0 && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+                <div className="p-4 border-b border-[var(--border)]">
+                  <h3 className="font-medium text-sm">Recent Sessions</h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">
+                      <th className="text-left px-4 py-2">Time</th>
+                      <th className="text-left px-4 py-2">Model</th>
+                      <th className="text-right px-4 py-2">Tokens</th>
+                      <th className="text-right px-4 py-2">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usageData.recentSessions.map((s) => (
+                      <tr key={s.sessionId} className="border-b border-[var(--border)] last:border-0">
+                        <td className="px-4 py-2 text-xs text-muted-foreground">
+                          {new Date(s.startedAt * 1000).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 font-mono text-xs">{s.model}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">
+                          {formatTokens(s.inputTokens + s.outputTokens + s.cacheReadTokens + s.cacheWriteTokens + s.reasoningTokens)}
+                        </td>
+                        <td className="px-4 py-2 text-right font-medium">
+                          {s.costStatus === 'estimated' ? '~' : ''}${s.estimatedCostUsd.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {!usageData && (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+                <p className="text-sm text-muted-foreground">No usage data available. The agent may not have a state.db yet.</p>
+              </div>
+            )}
+
+            {usageData?.costStatus && (
+              <p className="text-xs text-muted-foreground">
+                {usageData.costStatus === 'estimated' && 'Costs are estimates based on published model pricing.'}
+                {usageData.costStatus === 'partial' && 'Some models have unknown pricing. Costs are partially estimated.'}
+                {usageData.costStatus === 'unknown' && 'Model pricing not available. Token counts are shown but costs cannot be estimated.'}
+              </p>
             )}
           </div>
         </TabsContent>
@@ -1092,6 +1246,12 @@ function ModelCascadeEditor({
       </div>
     </div>
   )
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
 }
 
 function Row({ label, value, mono }: { label: string; value: string | number; mono?: boolean }) {
