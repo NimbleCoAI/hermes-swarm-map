@@ -11,9 +11,9 @@ function agentDataDir(harnessId: string): string {
 }
 
 // Env var names that map to permission settings, per platform
-const PLATFORM_VARS: Record<string, { users: string; groups: string; admins?: string }> = {
-  signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS' },
-  telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS' },
+const PLATFORM_VARS: Record<string, { users: string; groups: string; admins: string }> = {
+  signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS', admins: 'SIGNAL_ADMIN_USERS' },
+  telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS', admins: 'TELEGRAM_ADMIN_USERS' },
   mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS', admins: 'MATTERMOST_ADMIN_USERS' },
 }
 
@@ -51,9 +51,21 @@ const GROUP_INVITE_VARS: Record<string, string> = {
   signal: 'SIGNAL_GROUP_INVITE_POLICY',
 }
 
+// Env var names for mention-gating per platform
+const MENTION_GATING_VARS: Record<string, string> = {
+  signal: 'SIGNAL_REQUIRE_MENTION',
+  telegram: 'TELEGRAM_REQUIRE_MENTION',
+  mattermost: 'MATTERMOST_REQUIRE_MENTION',
+}
+
+// Global env var for command approval restriction
+const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
+
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
   groupInvitePolicy: 'approved-only' | 'allow-all'
+  mentionGating: boolean
+  commandApprovalAdminOnly: boolean
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -78,7 +90,7 @@ export async function GET(
   for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
     const usersRaw = env[vars.users]
     const groupsRaw = env[vars.groups]
-    const adminsRaw = vars.admins ? env[vars.admins] : undefined
+    const adminsRaw = env[vars.admins]
 
     const allowAll = usersRaw === '*'
     if (allowAll) hasAllowAll = true
@@ -86,7 +98,7 @@ export async function GET(
     surfaces[platform] = {
       allowedUsers: parseCommaList(usersRaw),
       allowedGroups: parseCommaList(groupsRaw),
-      adminUsers: adminsRaw ? parseCommaList(adminsRaw) : [],
+      adminUsers: parseCommaList(adminsRaw),
       allowAll,
     }
   }
@@ -101,9 +113,24 @@ export async function GET(
     }
   }
 
+  // Read mention-gating — default true (require mention) unless any platform explicitly set to 'false'
+  let mentionGating = true
+  for (const varName of Object.values(MENTION_GATING_VARS)) {
+    const val = env[varName]
+    if (val === 'false') {
+      mentionGating = false
+      break
+    }
+  }
+
+  // Read command approval setting — default true (admin-only) unless explicitly 'false'
+  const commandApprovalAdminOnly = env[COMMAND_APPROVAL_VAR] !== 'false'
+
   const response: SettingsResponse = {
     dmPolicy: hasAllowAll ? 'allow-all' : 'approved-only',
     groupInvitePolicy,
+    mentionGating,
+    commandApprovalAdminOnly,
     surfaces,
   }
 
@@ -150,15 +177,15 @@ export async function PUT(
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
 
-    // Admins (Mattermost only currently)
-    if (vars.admins && settings.adminUsers.length > 0) {
-      const adminsValue = settings.adminUsers.join(',')
-      const adminsRegex = new RegExp(`^${vars.admins}=.*$`, 'm')
-      if (adminsRegex.test(content)) {
-        content = content.replace(adminsRegex, `${vars.admins}=${adminsValue}`)
-      } else {
-        content = content.trimEnd() + `\n${vars.admins}=${adminsValue}\n`
-      }
+    // Admins
+    const adminsValue = settings.adminUsers.length > 0
+      ? settings.adminUsers.join(',')
+      : ''
+    const adminsRegex = new RegExp(`^${vars.admins}=.*$`, 'm')
+    if (adminsRegex.test(content)) {
+      content = content.replace(adminsRegex, `${vars.admins}=${adminsValue}`)
+    } else {
+      content = content.trimEnd() + `\n${vars.admins}=${adminsValue}\n`
     }
   }
 
@@ -171,6 +198,26 @@ export async function PUT(
     } else {
       content = content.trimEnd() + `\n${varName}=${groupInviteValue}\n`
     }
+  }
+
+  // Mention-gating — write per-platform env vars
+  const mentionGatingValue = body.mentionGating !== false ? 'true' : 'false'
+  for (const [, varName] of Object.entries(MENTION_GATING_VARS)) {
+    const regex = new RegExp(`^${varName}=.*$`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${mentionGatingValue}`)
+    } else {
+      content = content.trimEnd() + `\n${varName}=${mentionGatingValue}\n`
+    }
+  }
+
+  // Command approval — write global env var
+  const commandApprovalValue = body.commandApprovalAdminOnly !== false ? 'true' : 'false'
+  const commandApprovalRegex = new RegExp(`^${COMMAND_APPROVAL_VAR}=.*$`, 'm')
+  if (commandApprovalRegex.test(content)) {
+    content = content.replace(commandApprovalRegex, `${COMMAND_APPROVAL_VAR}=${commandApprovalValue}`)
+  } else {
+    content = content.trimEnd() + `\n${COMMAND_APPROVAL_VAR}=${commandApprovalValue}\n`
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
