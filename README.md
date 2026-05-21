@@ -117,6 +117,7 @@ Copy `.env.example` to `.env` and set:
 |---|---|---|
 | `HERMES_DIR` | — | Path to your existing Hermes docker-compose files |
 | `DATA_DIR` | `~/.hermes-swarm-map` | Config, keys, audit logs, standalone compose files |
+| `PORT` | `3002` | Port for the Swarm Map UI. Production: pinned to 3002. Dev: auto-increments from 3000 if occupied. |
 
 API keys are encrypted at rest. The encryption key is machine-local at `~/.hermes-swarm-map/.key`.
 

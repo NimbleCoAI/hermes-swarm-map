@@ -13,6 +13,18 @@ PROJECT_NAME="hermes-swarm-map"
 DEFAULT_PORT="${PORT:-3000}"
 MAX_PORT=$((DEFAULT_PORT + 10))
 
+# In production, pin to the configured port — don't auto-increment.
+# Production convention is PORT=3002 (set in .env or environment).
+if [ "${NODE_ENV:-}" = "production" ]; then
+  if lsof -ti :"$DEFAULT_PORT" >/dev/null 2>&1; then
+    echo "ERROR: Port $DEFAULT_PORT is occupied and NODE_ENV=production — refusing to auto-increment." >&2
+    echo "Kill the process on port $DEFAULT_PORT or choose a different port." >&2
+    exit 1
+  fi
+  echo "Starting Swarm Map (production) on http://localhost:$DEFAULT_PORT"
+  exec npx next start --port "$DEFAULT_PORT" --hostname 0.0.0.0
+fi
+
 # Kill only our own zombie processes on a port
 kill_own_zombies() {
   local port=$1

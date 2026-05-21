@@ -104,6 +104,12 @@ function generateEnvContent(params: {
     lines.push(`# SIGNAL_ACCOUNT=`)
   }
 
+  // Swarm Map policy URL — allows agents to query their own harness config
+  const hsmPort = process.env.PORT || '3002'
+  lines.push('')
+  lines.push(`# Swarm Map policy endpoint`)
+  lines.push(`SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}`)
+
   if (githubToken || braveKey) {
     lines.push('')
     lines.push('# Optional integrations')
