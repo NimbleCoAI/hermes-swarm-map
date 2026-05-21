@@ -373,6 +373,11 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
         </p>
       </div>
 
+      {/* Admin note */}
+      <p className="text-xs text-muted-foreground px-1">
+        Admin users are managed per-surface in the Surfaces tab.
+      </p>
+
       {/* Per-surface cards */}
       {activePlatforms.map(platform => {
         const surf = settings.surfaces[platform]
@@ -440,21 +445,6 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
                 </div>
               )}
             </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">
-                Admin Users ({PLATFORM_LABELS[platform]?.users || 'IDs'})
-              </label>
-              <TagInput
-                values={surf.adminUsers}
-                onChange={(v) => updateSurface(platform, 'adminUsers', v)}
-                placeholder={`Add admin ${(PLATFORM_LABELS[platform]?.users || 'IDs').toLowerCase()}...`}
-              />
-              <p className="text-xs text-muted-foreground">
-                Admins can DM regardless of policy, approve commands, and manage global memory.
-              </p>
-            </div>
-
 
             {/* Paired users (dynamic approvals) */}
             {pairedUsers.filter(u => u.platform === platform).length > 0 && (

@@ -610,43 +610,6 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
         <TabsContent value="surfaces" className="mt-4">
           <div className="space-y-4">
-            {/* DM Policy — once above all surfaces */}
-            {connectedSurfaces.length > 0 && surfaceSettings && (
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-muted-foreground" />
-                  <h3 className="font-medium text-sm">DM Access Policy</h3>
-                </div>
-                <div className="flex gap-3">
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="radio"
-                      name="dmPolicy"
-                      checked={surfaceSettings.dmPolicy === 'approved-only'}
-                      onChange={() => updateDmPolicy('approved-only')}
-                      className="accent-[var(--accent)]"
-                    />
-                    Approved users only
-                  </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input
-                      type="radio"
-                      name="dmPolicy"
-                      checked={surfaceSettings.dmPolicy === 'allow-all'}
-                      onChange={() => updateDmPolicy('allow-all')}
-                      className="accent-[var(--accent)]"
-                    />
-                    Allow all
-                  </label>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {surfaceSettings.dmPolicy === 'approved-only'
-                    ? 'Only users in the approved list below can DM this agent.'
-                    : 'Anyone can DM this agent. Use with caution.'}
-                </p>
-              </div>
-            )}
-
             {/* Connected surfaces with inline settings */}
             {connectedSurfaces.length > 0 && (
               <div className="space-y-2">
@@ -1012,25 +975,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         </TabsContent>
 
         <TabsContent value="settings" className="mt-4">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6 text-center space-y-2">
-            <p className="text-sm text-muted-foreground">
-              Per-surface settings (allowed users, groups, admin users, pairing) have moved into each surface card.
-            </p>
-            <p className="text-sm">
-              Go to the{' '}
-              <button
-                onClick={() => {
-                  const tabEl = document.querySelector('[data-state="active"][role="tabpanel"]')
-                  const surfaceTrigger = document.querySelector('[value="surfaces"]') as HTMLElement | null
-                  surfaceTrigger?.click()
-                }}
-                className="text-[var(--accent)] hover:underline font-medium"
-              >
-                Surfaces tab
-              </button>
-              {' '}and expand "Settings" on each connected surface.
-            </p>
-          </div>
+          <SettingsTab harnessId={harness.id} connectedSurfaces={connectedSurfaces} />
         </TabsContent>
       </Tabs>
 

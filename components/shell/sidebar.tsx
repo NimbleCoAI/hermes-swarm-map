@@ -16,7 +16,7 @@ const icons: Record<string, LucideIcon> = {
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/', icon: 'LayoutDashboard' },
   { label: 'Harnesses', href: '/harnesses', icon: 'Bot' },
-  { label: 'Surfaces', href: '/surfaces', icon: 'Plug' },
+  // { label: 'Surfaces', href: '/surfaces', icon: 'Plug' },
   { label: 'Tools', href: '/tools', icon: 'Wrench' },
   { label: 'Keys', href: '/keys', icon: 'KeyRound' },
   { label: 'Memory', href: '/memory', icon: 'Brain' },
