@@ -82,7 +82,8 @@ ${sourceBlock}
       - published: ${port}
         target: 8642
     volumes:
-      - ${agentDataDir}:/root/.hermes
+      - ${agentDataDir}:/opt/data
+    command: gateway
 
 networks:
   default:
