@@ -95,10 +95,12 @@ export async function GET(
     const allowAll = usersRaw === '*'
     if (allowAll) hasAllowAll = true
 
+    // Admins = allowed users (unified identity at team/org trust level)
+    const users = parseCommaList(usersRaw)
     surfaces[platform] = {
-      allowedUsers: parseCommaList(usersRaw),
+      allowedUsers: users,
       allowedGroups: parseCommaList(groupsRaw),
-      adminUsers: parseCommaList(adminsRaw),
+      adminUsers: users,
       allowAll,
     }
   }
@@ -177,10 +179,8 @@ export async function PUT(
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
 
-    // Admins
-    const adminsValue = settings.adminUsers.length > 0
-      ? settings.adminUsers.join(',')
-      : ''
+    // Admins = same as allowed users (unified identity)
+    const adminsValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, settings.allowedUsers)
     const adminsRegex = new RegExp(`^${vars.admins}=.*$`, 'm')
     if (adminsRegex.test(content)) {
       content = content.replace(adminsRegex, `${vars.admins}=${adminsValue}`)

@@ -688,16 +688,14 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                       {isExpanded && surf && (
                         <div className="border-t border-[var(--border)] p-4 space-y-4 bg-[var(--bg)]/50">
                           <div className="space-y-1">
-                            <label className="text-xs font-medium text-muted-foreground">{labels.users}</label>
+                            <label className="text-xs font-medium text-muted-foreground">Admins ({labels.users})</label>
                             <TagInput
                               values={surf.allowedUsers}
                               onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
                               placeholder={`Add ${labels.users.toLowerCase()}...`}
                             />
                             <p className="text-xs text-muted-foreground">
-                              {surfaceSettings?.dmPolicy === 'approved-only'
-                                ? 'Controls who can DM this agent and add it to groups.'
-                                : 'DMs are open. This list still controls who can add the agent to groups.'}
+                              Admins can DM, add bot to groups, approve commands, and access global memory.
                             </p>
                           </div>
 
@@ -739,17 +737,6 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                               </div>
                             )}
                           </div>
-
-                          {platform === 'mattermost' && (
-                            <div className="space-y-1">
-                              <label className="text-xs font-medium text-muted-foreground">Admin Users</label>
-                              <TagInput
-                                values={surf.adminUsers}
-                                onChange={(v) => updateSurfaceSetting(platform, 'adminUsers', v)}
-                                placeholder="Add admin usernames..."
-                              />
-                            </div>
-                          )}
 
                           {/* Paired users (dynamic approvals) */}
                           {platformPairedUsers.length > 0 && (
