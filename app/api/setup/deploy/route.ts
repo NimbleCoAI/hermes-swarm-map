@@ -142,8 +142,12 @@ ${sourceBlock}
     ports:
       - published: ${port}
         target: 8642
+      - published: 8095
+        target: 8095   # Google OAuth callback (google-mcp auth flow)
     volumes:
       - ${agentDataDir}:/opt/data
+      - ${path.join(os.homedir(), 'Documents/GitHub/google-mcp')}:/opt/google-mcp:ro
+      - ${agentDataDir}/google-tokens:/opt/google/tokens
     command: gateway
 
 networks:
