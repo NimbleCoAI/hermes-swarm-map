@@ -384,7 +384,12 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const harnessKeys = keys?.filter((k) => k.assignedTo.includes(harness.id)) ?? []
   const harnessMemory = memoryScopes?.filter((m) => m.members.includes(harness.id)) ?? []
   const connectedSurfaces = surfaces?.filter((s) => s.harnessIds.includes(harness.id)) ?? []
-  const otherSurfaces = surfaces?.filter((s) => !s.harnessIds.includes(harness.id)) ?? []
+  const connectedPlatforms = new Set(connectedSurfaces.map((s) => s.platform))
+  const otherSurfaces = surfaces?.filter((s) =>
+    !s.harnessIds.includes(harness.id) &&
+    (s.status === 'available' || s.status === 'planned') &&
+    !connectedPlatforms.has(s.platform)
+  ) ?? []
 
   return (
     <div>
