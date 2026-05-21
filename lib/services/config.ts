@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: Settings = {
   dataDir: '~/.hermes-swarm-map',
   theme: 'light',
   composeFiles: [],
+  useLocalBuild: true,
 }
 
 // Agent data directory mapping

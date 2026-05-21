@@ -15,6 +15,7 @@ storage.write('settings.json', {
   theme: 'light',
   composeFiles: [],
   onboarded: true,
+  useLocalBuild: true,
 })
 
 // Harnesses are discovered live from Docker.
