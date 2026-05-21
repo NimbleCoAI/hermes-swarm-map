@@ -39,9 +39,15 @@ A compose service is identified as a Hermes agent by matching **2+ markers**:
 
 This works for both Docker Hub images and locally-built agents.
 
-### Port Allocation
+### Swarm Map Port Convention
 
-Never hardcode ports. The deploy service queries Docker directly (`docker ps --format '{{.Ports}}'`) for all used ports, then picks the next available in the Hermes range (base 8642, step 10).
+The Swarm Map UI runs on **port 3002** in production (pinned — `bin/dev.sh` refuses to auto-increment when `NODE_ENV=production`). In dev mode, it defaults to 3000 and auto-increments if occupied. The port is set via the `PORT` env var.
+
+When agents are created, `SWARM_MAP_POLICY_URL=http://host.docker.internal:${PORT}` is injected into their `.env` so they can query their own harness config via the HSM API.
+
+### Agent Port Allocation
+
+Never hardcode agent ports. The deploy service queries Docker directly (`docker ps --format '{{.Ports}}'`) for all used ports, then picks the next available in the Hermes range (base 8642, step 10).
 
 ### Image Fallback
 
