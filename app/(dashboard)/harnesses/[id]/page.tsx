@@ -46,7 +46,7 @@ type Settings = {
 const PLATFORM_LABELS: Record<string, { users: string; groups: string }> = {
   signal: { users: 'Phone numbers (E.164)', groups: 'Group IDs' },
   telegram: { users: 'User IDs', groups: 'Chat IDs' },
-  mattermost: { users: 'Usernames', groups: 'Channel names' },
+  mattermost: { users: 'User IDs', groups: 'Channel IDs' },
 }
 
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
