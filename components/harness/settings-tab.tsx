@@ -24,6 +24,8 @@ type SurfaceSettings = {
 type Settings = {
   dmPolicy: 'approved-only' | 'allow-all'
   groupInvitePolicy: 'approved-only' | 'allow-all'
+  mentionGating: boolean
+  commandApprovalAdminOnly: boolean
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -108,6 +110,20 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
   function updateGroupInvitePolicy(policy: 'approved-only' | 'allow-all') {
     if (!settings) return
     setSettings({ ...settings, groupInvitePolicy: policy })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateMentionGating(enabled: boolean) {
+    if (!settings) return
+    setSettings({ ...settings, mentionGating: enabled })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateCommandApproval(adminOnly: boolean) {
+    if (!settings) return
+    setSettings({ ...settings, commandApprovalAdminOnly: adminOnly })
     setDirty(true)
     setSaved(false)
   }
@@ -287,6 +303,76 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
         </p>
       </div>
 
+      {/* Mention-Gating */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Group Mention-Gating</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="mentionGating"
+              checked={settings.mentionGating === true}
+              onChange={() => updateMentionGating(true)}
+              className="accent-[var(--accent)]"
+            />
+            Require @mention
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="mentionGating"
+              checked={settings.mentionGating === false}
+              onChange={() => updateMentionGating(false)}
+              className="accent-[var(--accent)]"
+            />
+            Respond to all messages
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.mentionGating
+            ? 'Agent only responds when @mentioned, replied to, or a /command is used in groups. Observes other messages silently.'
+            : 'Agent responds to all messages in approved groups.'}
+        </p>
+      </div>
+
+      {/* Command Approval */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Command Approval</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="commandApproval"
+              checked={settings.commandApprovalAdminOnly === true}
+              onChange={() => updateCommandApproval(true)}
+              className="accent-[var(--accent)]"
+            />
+            Admins only
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="commandApproval"
+              checked={settings.commandApprovalAdminOnly === false}
+              onChange={() => updateCommandApproval(false)}
+              className="accent-[var(--accent)]"
+            />
+            Any user
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.commandApprovalAdminOnly
+            ? 'Only admin users can /approve or /deny dangerous commands.'
+            : 'Any user can approve or deny commands. Use with caution.'}
+        </p>
+      </div>
+
       {/* Per-surface cards */}
       {activePlatforms.map(platform => {
         const surf = settings.surfaces[platform]
@@ -355,16 +441,19 @@ export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
               )}
             </div>
 
-            {platform === 'mattermost' && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Admin Users</label>
-                <TagInput
-                  values={surf.adminUsers}
-                  onChange={(v) => updateSurface(platform, 'adminUsers', v)}
-                  placeholder="Add admin usernames..."
-                />
-              </div>
-            )}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Admin Users ({PLATFORM_LABELS[platform]?.users || 'IDs'})
+              </label>
+              <TagInput
+                values={surf.adminUsers}
+                onChange={(v) => updateSurface(platform, 'adminUsers', v)}
+                placeholder={`Add admin ${(PLATFORM_LABELS[platform]?.users || 'IDs').toLowerCase()}...`}
+              />
+              <p className="text-xs text-muted-foreground">
+                Admins can DM regardless of policy, approve commands, and manage global memory.
+              </p>
+            </div>
 
 
             {/* Paired users (dynamic approvals) */}
