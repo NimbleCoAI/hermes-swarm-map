@@ -57,8 +57,9 @@ const MENTION_GATING_VARS: Record<string, string> = {
   mattermost: 'MATTERMOST_REQUIRE_MENTION',
 }
 
-// Global env var for command approval restriction
+// Global env vars for policy settings
 const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
+const DM_POLICY_VAR = 'HERMES_DM_POLICY'
 
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
@@ -84,15 +85,11 @@ export async function GET(
   const env = parseEnvFile(envPath)
   const surfaces: Record<string, SurfaceSettings> = {}
 
-  // Determine if any platform has allow-all
-  let hasAllowAll = false
-
   for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
     const usersRaw = env[vars.users]
     const groupsRaw = env[vars.groups]
 
     const allowAll = usersRaw === '*'
-    if (allowAll) hasAllowAll = true
 
     const users = parseCommaList(usersRaw)
     surfaces[platform] = {
@@ -129,8 +126,11 @@ export async function GET(
   // Memory scope — default 'channel' (per-chat isolation)
   const memoryScope: 'channel' | 'global' = env['HERMES_MEMORY_SCOPE'] === 'global' ? 'global' : 'channel'
 
+  // DM policy — stored as its own env var, not derived from per-platform wildcards
+  const dmPolicy: 'approved-only' | 'allow-all' = env[DM_POLICY_VAR] === 'allow-all' ? 'allow-all' : 'approved-only'
+
   const response: SettingsResponse = {
-    dmPolicy: hasAllowAll ? 'allow-all' : 'approved-only',
+    dmPolicy,
     groupInvitePolicy,
     mentionGating,
     commandApprovalAdminOnly,
@@ -212,6 +212,15 @@ export async function PUT(
     content = content.replace(commandApprovalRegex, `${COMMAND_APPROVAL_VAR}=${commandApprovalValue}`)
   } else {
     content = content.trimEnd() + `\n${COMMAND_APPROVAL_VAR}=${commandApprovalValue}\n`
+  }
+
+  // DM policy — stored as its own env var so it persists correctly
+  const dmPolicyValue = body.dmPolicy || 'approved-only'
+  const dmPolicyRegex = new RegExp(`^${DM_POLICY_VAR}=.*$`, 'm')
+  if (dmPolicyRegex.test(content)) {
+    content = content.replace(dmPolicyRegex, `${DM_POLICY_VAR}=${dmPolicyValue}`)
+  } else {
+    content = content.trimEnd() + `\n${DM_POLICY_VAR}=${dmPolicyValue}\n`
   }
 
   // Memory scope
