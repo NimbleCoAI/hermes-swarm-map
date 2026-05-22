@@ -66,6 +66,7 @@ type SettingsResponse = {
   groupInvitePolicy: 'approved-only' | 'allow-all'
   mentionGating: boolean
   commandApprovalAdminOnly: boolean
+  memoryScope: 'channel' | 'global'
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -128,11 +129,15 @@ export async function GET(
   // Read command approval setting — default true (admin-only) unless explicitly 'false'
   const commandApprovalAdminOnly = env[COMMAND_APPROVAL_VAR] !== 'false'
 
+  // Memory scope — default 'channel' (per-chat isolation)
+  const memoryScope: 'channel' | 'global' = env['HERMES_MEMORY_SCOPE'] === 'global' ? 'global' : 'channel'
+
   const response: SettingsResponse = {
     dmPolicy: hasAllowAll ? 'allow-all' : 'approved-only',
     groupInvitePolicy,
     mentionGating,
     commandApprovalAdminOnly,
+    memoryScope,
     surfaces,
   }
 
@@ -218,6 +223,15 @@ export async function PUT(
     content = content.replace(commandApprovalRegex, `${COMMAND_APPROVAL_VAR}=${commandApprovalValue}`)
   } else {
     content = content.trimEnd() + `\n${COMMAND_APPROVAL_VAR}=${commandApprovalValue}\n`
+  }
+
+  // Memory scope
+  const memoryScopeValue = body.memoryScope === 'global' ? 'global' : 'channel'
+  const memoryScopeRegex = /^HERMES_MEMORY_SCOPE=.*$/m
+  if (memoryScopeRegex.test(content)) {
+    content = content.replace(memoryScopeRegex, `HERMES_MEMORY_SCOPE=${memoryScopeValue}`)
+  } else {
+    content = content.trimEnd() + `\nHERMES_MEMORY_SCOPE=${memoryScopeValue}\n`
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
