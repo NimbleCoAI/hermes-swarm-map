@@ -99,11 +99,13 @@ export function buildSettingsEnvValue(
   surfaceAllowAll: boolean,
   users: string[]
 ): string {
-  if (dmPolicy === 'allow-all' || surfaceAllowAll) {
-    return '*'
-  }
+  // Explicit users override allowAll — if someone added specific admins,
+  // they want those people, not wildcard open access.
   if (users.length > 0) {
     return users.join(',')
+  }
+  if (dmPolicy === 'allow-all' || surfaceAllowAll) {
+    return '*'
   }
   return ''
 }
