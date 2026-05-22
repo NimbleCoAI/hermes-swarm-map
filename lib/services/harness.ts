@@ -128,6 +128,11 @@ API_SERVER_PORT=${port}
 # Swarm Map policy endpoint
 SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}
 
+# Agent identity & memory
+HERMES_MEMORY_SCOPE=channel
+HERMES_AGENT_NAME=${name}
+HERMES_HOME_CHANNEL=
+
 # Platform integration (uncomment as needed)
 # MATTERMOST_TOKEN=
 # MATTERMOST_URL=

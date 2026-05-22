@@ -110,6 +110,13 @@ function generateEnvContent(params: {
   lines.push(`# Swarm Map policy endpoint`)
   lines.push(`SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}`)
 
+  // Baseline agent identity & memory scoping
+  lines.push('')
+  lines.push(`# Agent identity & memory`)
+  lines.push(`HERMES_MEMORY_SCOPE=channel`)
+  lines.push(`HERMES_AGENT_NAME=${name}`)
+  lines.push(`HERMES_HOME_CHANNEL=`)
+
   if (githubToken || braveKey) {
     lines.push('')
     lines.push('# Optional integrations')
