@@ -64,8 +64,8 @@ function nextAvailablePort(composeBaseDir: string): number {
 }
 
 // Generate a standalone docker-compose.yml for a new agent
-function generateStandaloneCompose(agentName: string, port: number, agentDataDir: string, imageOrBuild?: { image: string } | { build: string }): string {
-  const resolved = imageOrBuild ?? { image: 'nousresearch/hermes-agent:latest' }
+function generateStandaloneCompose(agentName: string, port: number, agentDataDir: string, imageOrBuild?: { image: string } | { build: string }, defaultImage?: string): string {
+  const resolved = imageOrBuild ?? { image: defaultImage || 'nousresearch/hermes-agent:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
@@ -706,7 +706,7 @@ export class HarnessService {
     fs.mkdirSync(agentComposeDir, { recursive: true })
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
-      fs.writeFileSync(composePath, generateStandaloneCompose(newName, port, newDataDir, resolveImageOrBuild(settings)), 'utf-8')
+      fs.writeFileSync(composePath, generateStandaloneCompose(newName, port, newDataDir, resolveImageOrBuild(settings), settings?.defaultImage), 'utf-8')
     }
 
     const duplicate: Partial<Harness> = {
@@ -762,7 +762,7 @@ export class HarnessService {
     fs.mkdirSync(agentComposeDir, { recursive: true })
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
-      fs.writeFileSync(composePath, generateStandaloneCompose(input.name, port, agentDir, resolveImageOrBuild(settings)), 'utf-8')
+      fs.writeFileSync(composePath, generateStandaloneCompose(input.name, port, agentDir, resolveImageOrBuild(settings), settings?.defaultImage), 'utf-8')
     }
 
     const overlay: Partial<Harness> = {

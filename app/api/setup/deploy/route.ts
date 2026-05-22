@@ -208,7 +208,7 @@ export async function POST(request: Request) {
       }
     } else {
       // Try pulling from Docker Hub first; if that fails (auth, network), check for local builds
-      let hermesImage = 'nousresearch/hermes-agent:latest'
+      let hermesImage = settings.defaultImage || 'nousresearch/hermes-agent:latest'
       const pullResult = services.docker.pullImage(hermesImage)
       if (!pullResult.ok) {
         // Fallback: look for locally-built hermes images (from hermes-swarm build)

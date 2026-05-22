@@ -103,6 +103,7 @@ export type Settings = {
   theme: 'light' | 'dark'
   composeFiles: string[]  // explicit list of compose files; empty = auto-scan hermesDir
   onboarded?: boolean
+  defaultImage?: string  // Default Docker image for new agents (default: nousresearch/hermes-agent:latest)
   useLocalBuild?: boolean  // Build from hermesDir instead of pulling upstream image
   localApiEnabled?: boolean  // Expose harnesses at a local API endpoint
   localApiPort?: number  // Port for the local API (default 8600)
