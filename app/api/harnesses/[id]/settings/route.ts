@@ -11,10 +11,10 @@ function agentDataDir(harnessId: string): string {
 }
 
 // Env var names that map to permission settings, per platform
-const PLATFORM_VARS: Record<string, { users: string; groups: string; admins: string }> = {
-  signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS', admins: 'SIGNAL_ADMIN_USERS' },
-  telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS', admins: 'TELEGRAM_ADMIN_USERS' },
-  mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS', admins: 'MATTERMOST_ADMIN_USERS' },
+const PLATFORM_VARS: Record<string, { users: string; groups: string }> = {
+  signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS' },
+  telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS' },
+  mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS' },
 }
 
 function parseEnvFile(envPath: string): Record<string, string> {
@@ -42,7 +42,6 @@ function parseCommaList(value: string | undefined): string[] {
 type SurfaceSettings = {
   allowedUsers: string[]
   allowedGroups: string[]
-  adminUsers: string[]
   allowAll: boolean
 }
 
@@ -91,17 +90,14 @@ export async function GET(
   for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
     const usersRaw = env[vars.users]
     const groupsRaw = env[vars.groups]
-    const adminsRaw = env[vars.admins]
 
     const allowAll = usersRaw === '*'
     if (allowAll) hasAllowAll = true
 
-    // Admins = allowed users (unified identity at team/org trust level)
     const users = parseCommaList(usersRaw)
     surfaces[platform] = {
       allowedUsers: users,
       allowedGroups: parseCommaList(groupsRaw),
-      adminUsers: users,
       allowAll,
     }
   }
@@ -184,14 +180,6 @@ export async function PUT(
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
 
-    // Admins = same as allowed users (unified identity)
-    const adminsValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, settings.allowedUsers)
-    const adminsRegex = new RegExp(`^${vars.admins}=.*$`, 'm')
-    if (adminsRegex.test(content)) {
-      content = content.replace(adminsRegex, `${vars.admins}=${adminsValue}`)
-    } else {
-      content = content.trimEnd() + `\n${vars.admins}=${adminsValue}\n`
-    }
   }
 
   // Group invite policy — write per-platform env vars
