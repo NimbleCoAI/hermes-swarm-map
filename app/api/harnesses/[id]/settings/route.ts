@@ -43,6 +43,7 @@ type SurfaceSettings = {
   allowedUsers: string[]
   allowedGroups: string[]
   allowAll: boolean
+  allowAllGroups: boolean
 }
 
 // Env var names for group invite policy per platform
@@ -90,6 +91,7 @@ export async function GET(
     const groupsRaw = env[vars.groups]
 
     const allowAll = usersRaw === '*'
+    const allowAllGroups = groupsRaw === '*'
 
     const users = parseCommaList(usersRaw)
     surfaces[platform] = {
@@ -97,6 +99,7 @@ export async function GET(
       adminUsers: users,  // backward compat — old plugins read this field
       allowedGroups: parseCommaList(groupsRaw),
       allowAll,
+      allowAllGroups,
     }
   }
 
@@ -170,10 +173,10 @@ export async function PUT(
       content = content.trimEnd() + `\n${vars.users}=${usersValue}\n`
     }
 
-    // Groups — empty string = no groups allowed, * = all groups
+    // Groups — explicit list takes priority, then allowAllGroups → *, else empty
     const groupsValue = settings.allowedGroups.length > 0
       ? settings.allowedGroups.join(',')
-      : ''
+      : settings.allowAllGroups ? '*' : ''
     const groupsRegex = new RegExp(`^${vars.groups}=.*$`, 'm')
     if (groupsRegex.test(content)) {
       content = content.replace(groupsRegex, `${vars.groups}=${groupsValue}`)
