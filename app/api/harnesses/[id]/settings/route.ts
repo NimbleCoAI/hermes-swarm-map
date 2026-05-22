@@ -97,6 +97,7 @@ export async function GET(
     const users = parseCommaList(usersRaw)
     surfaces[platform] = {
       allowedUsers: users,
+      adminUsers: users,  // backward compat — old plugins read this field
       allowedGroups: parseCommaList(groupsRaw),
       allowAll,
     }
