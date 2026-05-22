@@ -149,6 +149,13 @@ ${sourceBlock}
       - ${path.join(os.homedir(), 'Documents/GitHub/google-mcp')}:/opt/google-mcp:ro
       - ${agentDataDir}/google-tokens:/opt/google/tokens
     command: gateway
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SYS_CHROOT
 
 networks:
   default:

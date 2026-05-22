@@ -84,6 +84,13 @@ ${sourceBlock}
     volumes:
       - ${agentDataDir}:/opt/data
     command: gateway
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SYS_CHROOT
 
 networks:
   default:
