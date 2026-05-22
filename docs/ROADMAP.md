@@ -38,6 +38,7 @@ HSM is the management plane for multi-tenant Hermes. It configures, deploys, mon
 ### Should Ship
 
 - [ ] **Capability gating & binding** — the final settings dimension. Completes the security model alongside admin identity, memory scoping, and command approval. See [Capability Gating](#capability-gating) below.
+- [ ] **Per-context people memory** — the agent remembers things about each person it interacts with, scoped to the right context (channel, DM, or global depending on settings). When someone messages, the agent has their history. When someone is @mentioned, the agent recalls what it knows about them. Includes clear prompting so the agent knows who it's talking to and who's being referenced. Scoping follows the same channel/global toggle — in channel mode, what you tell the agent in one group isn't visible in another unless explicitly shared.
 - [ ] **Admin search hook** — memory reads default to channel scope, require explicit `--global` for cross-channel search. Backend done (context_id scoping), needs UI toggle + gateway read-path enforcement.
 - [ ] **Cross-scope memory control** — toggle: "Can non-admins query memory from other conversations?" Admin gets prompt, non-admin gets blocked. Needs Hermes code changes.
 - [ ] **Audit log for permission changes** — track who changed what, when. HSM already has audit service scaffolding.
