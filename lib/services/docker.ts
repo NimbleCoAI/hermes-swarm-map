@@ -1,4 +1,4 @@
-import { execSync } from 'child_process'
+import { execSync, spawn } from 'child_process'
 import type { RestartMode } from '@/lib/types'
 
 type ContainerInfo = {
@@ -179,29 +179,38 @@ export class DockerService {
   }
 
   restart(composeFile: string, service: string, mode: RestartMode, projectName?: string): void {
-    const opts = { stdio: 'pipe' as const, timeout: 120000 }
     const projectFlag = projectName ? `-p ${projectName} ` : ''
 
     switch (mode) {
       case 'quick':
-        execSync(`docker compose ${projectFlag}-f ${composeFile} restart ${service}`, opts)
-        break
-      case 'rebuild':
         execSync(
-          `docker compose ${projectFlag}-f ${composeFile} up -d --build --force-recreate ${service}`,
-          opts
+          `docker compose ${projectFlag}-f ${composeFile} restart ${service}`,
+          { stdio: 'pipe', timeout: 30000 }
         )
         break
-      case 'purge':
-        execSync(
-          `docker compose ${projectFlag}-f ${composeFile} build --no-cache ${service}`,
-          opts
-        )
-        execSync(
-          `docker compose ${projectFlag}-f ${composeFile} up -d --force-recreate ${service}`,
-          opts
-        )
+      case 'rebuild': {
+        // Fire-and-forget: Docker builds can exceed any reasonable timeout.
+        // The container will come up on its own when the build finishes.
+        const args = ['compose', ...projectFlag.trim().split(' ').filter(Boolean),
+          '-f', composeFile, 'up', '-d', '--build', '--force-recreate', service]
+        const child = spawn('docker', args, { stdio: 'ignore', detached: true })
+        child.unref()
         break
+      }
+      case 'purge': {
+        // Two-step rebuild: build --no-cache, then bring up. Both fire-and-forget
+        // via a shell so they run sequentially without blocking the caller.
+        const buildCmd =
+          `docker compose ${projectFlag}-f ${composeFile} build --no-cache ${service}`
+        const upCmd =
+          `docker compose ${projectFlag}-f ${composeFile} up -d --force-recreate ${service}`
+        const child = spawn('sh', ['-c', `${buildCmd} && ${upCmd}`], {
+          stdio: 'ignore',
+          detached: true,
+        })
+        child.unref()
+        break
+      }
     }
   }
 

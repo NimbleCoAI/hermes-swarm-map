@@ -3,10 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DockerService } from '../docker'
 
 const mockExecSync = vi.hoisted(() => vi.fn())
+const mockSpawn = vi.hoisted(() => vi.fn())
 
 vi.mock('child_process', () => ({
-  default: { execSync: mockExecSync },
+  default: { execSync: mockExecSync, spawn: mockSpawn },
   execSync: mockExecSync,
+  spawn: mockSpawn,
 }))
 
 describe('DockerService', () => {
@@ -14,6 +16,9 @@ describe('DockerService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // Default spawn mock returns a fake child process
+    const fakeChild = { unref: vi.fn() }
+    mockSpawn.mockReturnValue(fakeChild)
     docker = new DockerService()
   })
 
@@ -58,20 +63,26 @@ describe('DockerService', () => {
     )
   })
 
-  it('restarts a service in rebuild mode', () => {
-    mockExecSync.mockReturnValueOnce(Buffer.from(''))
+  it('restarts a service in rebuild mode (fire-and-forget via spawn)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'rebuild')
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.stringContaining('docker compose -f /path/compose.yml up -d --build --force-recreate audrey'),
-      expect.any(Object)
+    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--build', '--force-recreate', 'audrey']),
+      expect.objectContaining({ detached: true, stdio: 'ignore' })
     )
+    // unref() must be called so the process outlives the caller
+    expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
-  it('restarts a service in purge mode', () => {
-    mockExecSync
-      .mockReturnValueOnce(Buffer.from(''))
-      .mockReturnValueOnce(Buffer.from(''))
+  it('restarts a service in purge mode (fire-and-forget via spawn)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'purge')
-    expect(mockExecSync).toHaveBeenCalledTimes(2)
+    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'sh',
+      expect.arrayContaining(['-c', expect.stringContaining('--no-cache audrey')]),
+      expect.objectContaining({ detached: true, stdio: 'ignore' })
+    )
+    expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 })
