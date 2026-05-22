@@ -1,12 +1,43 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 import fs from 'fs'
+import { cp } from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { execSync } from 'child_process'
 
 const BASE_PORT = 8642
 const PORT_STEP = 10
+
+// Template directories for baseline plugins and hooks
+const TEMPLATE_PLUGINS = ['swarm_map_policy']
+const TEMPLATE_HOOKS = ['lifecycle-notify']
+
+/**
+ * Install baseline plugins and hooks from infra/templates/ into an agent's data directory.
+ * Gracefully skips if templates directory doesn't exist (e.g. running from upstream image).
+ */
+async function installBaselineTemplates(agentDataDir: string): Promise<void> {
+  const templatesDir = path.join(process.cwd(), 'infra', 'templates')
+
+  // Install plugins
+  const pluginTemplatesDir = path.join(templatesDir, 'plugins')
+  for (const pluginName of TEMPLATE_PLUGINS) {
+    const srcDir = path.join(pluginTemplatesDir, pluginName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'plugins', pluginName)
+    await cp(srcDir, destDir, { recursive: true })
+  }
+
+  // Install hooks
+  const hookTemplatesDir = path.join(templatesDir, 'hooks')
+  for (const hookName of TEMPLATE_HOOKS) {
+    const srcDir = path.join(hookTemplatesDir, hookName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'hooks', hookName)
+    await cp(srcDir, destDir, { recursive: true })
+  }
+}
 
 function slugify(name: string): string {
   return name
@@ -273,6 +304,9 @@ export async function POST(request: Request) {
 
     // Create memories directory
     fs.mkdirSync(path.join(agentDataDir, 'memories'), { recursive: true })
+
+    // Install baseline plugins and hooks from templates
+    await installBaselineTemplates(agentDataDir)
 
     // Generate standalone compose
     const agentComposeDir = path.join(composeBaseDir, slug)

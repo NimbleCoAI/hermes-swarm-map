@@ -98,6 +98,37 @@ networks:
 `
 }
 
+// Template directories for baseline plugins and hooks installed into every new agent
+const TEMPLATE_PLUGINS = ['swarm_map_policy']
+const TEMPLATE_HOOKS = ['lifecycle-notify']
+
+/**
+ * Install baseline plugins and hooks from infra/templates/ into an agent's data directory.
+ * Uses synchronous fs for compatibility with scaffoldAgentDir.
+ * Gracefully skips if templates directory doesn't exist.
+ */
+function installBaselineTemplates(agentDataDir: string): void {
+  const templatesDir = path.join(process.cwd(), 'infra', 'templates')
+
+  // Install plugins
+  const pluginTemplatesDir = path.join(templatesDir, 'plugins')
+  for (const pluginName of TEMPLATE_PLUGINS) {
+    const srcDir = path.join(pluginTemplatesDir, pluginName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'plugins', pluginName)
+    copyDirRecursive(srcDir, destDir)
+  }
+
+  // Install hooks
+  const hookTemplatesDir = path.join(templatesDir, 'hooks')
+  for (const hookName of TEMPLATE_HOOKS) {
+    const srcDir = path.join(hookTemplatesDir, hookName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'hooks', hookName)
+    copyDirRecursive(srcDir, destDir)
+  }
+}
+
 // Recursively copy a directory
 function copyDirRecursive(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true })
@@ -161,6 +192,9 @@ HERMES_HOME_CHANNEL=
 
   // memories directory
   fs.mkdirSync(path.join(dataDir, 'memories'), { recursive: true })
+
+  // Install baseline plugins and hooks from templates
+  installBaselineTemplates(dataDir)
 }
 
 function expandPath(p: string): string {
