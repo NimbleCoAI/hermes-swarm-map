@@ -37,12 +37,84 @@ HSM is the management plane for multi-tenant Hermes. It configures, deploys, mon
 
 ### Should Ship
 
-- [ ] **Tier-based tool permissions** — sane defaults per tier (individual=all, team=restricted, org=curated, public=minimal). Admin can override per-harness. Diff view showing deviations from tier baseline.
+- [ ] **Capability gating & binding** — the final settings dimension. Completes the security model alongside admin identity, memory scoping, and command approval. See [Capability Gating](#capability-gating) below.
 - [ ] **Admin search hook** — memory reads default to channel scope, require explicit `--global` for cross-channel search. Backend done (context_id scoping), needs UI toggle + gateway read-path enforcement.
 - [ ] **Cross-scope memory control** — toggle: "Can non-admins query memory from other conversations?" Admin gets prompt, non-admin gets blocked. Needs Hermes code changes.
 - [ ] **Audit log for permission changes** — track who changed what, when. HSM already has audit service scaffolding.
 - [ ] **Bulk user management** — import/export admin lists (CSV, JSON).
 - [ ] **Auto-approve on admin invite** — when admin adds bot to group, auto-add to allowed groups. Telegram/Mattermost only (Signal lacks group-join events).
+
+---
+
+### Capability Gating
+
+This is the big one — controls what each agent can do and who can trigger what. It's a "should ship V1, could slip to V2" item because the concept is right but the implementation touches multiple systems.
+
+**Core idea:** Every capability (tool, skill, plugin, env key) has a risk level. Habitat tiers set defaults. Admins customize per-harness. Non-admins get a restricted subset.
+
+#### 1. Risk Classification
+
+Every capability gets a risk level:
+
+| Risk | Examples | Default |
+|------|----------|---------|
+| **safe** | web search, calculator, memory read | Everyone |
+| **moderate** | file read, code execution (sandboxed), API calls | Admin in public tiers, everyone in team/individual |
+| **dangerous** | shell access, file write, credential access, self-improvement | Admin only, all tiers |
+| **critical** | propose_improvement, raw system commands, env modification | Admin + explicit approval |
+
+Risk levels are properties of the capabilities themselves, not per-harness config. HSM maintains a registry.
+
+#### 2. Tier Defaults
+
+Each habitat tier gets a default capability profile:
+
+| Tier | safe | moderate | dangerous | critical |
+|------|------|----------|-----------|----------|
+| `individual` | all | all | all | admin |
+| `team` | all | all | admin | admin+approval |
+| `org` | all | admin | admin | disabled |
+| `orgpublic` | all | restricted | disabled | disabled |
+| `public` | curated | disabled | disabled | disabled |
+
+These are **defaults** — the starting point when an agent is created at a given tier. Not enforced ceilings.
+
+#### 3. Per-Harness Override
+
+Settings tab gets a "Capabilities" section where admins can:
+- See current capability profile (inherited from tier)
+- Toggle individual capabilities on/off
+- See diff from tier baseline ("3 capabilities added, 1 removed vs team defaults")
+- Set admin-only vs everyone for each capability
+
+#### 4. Admin vs Non-Admin Gating
+
+Two-level access per capability:
+- **Available to everyone** — any user in an approved group can trigger it
+- **Admin only** — only admins can trigger it
+
+This is the tool-level equivalent of the command approval toggle. Non-admins trying to use an admin-gated tool get a clear rejection ("This tool requires admin access").
+
+#### 5. Capability Binding (Import/Share)
+
+Capabilities aren't just built-in — they can be bound to harnesses from external sources:
+
+- **Tools** — from Hermes upstream, custom plugins, MCP servers
+- **Skills** — from skill directories, shared across harnesses
+- **Plugins** — installed per-harness or shared
+- **Env keys** — API keys, service credentials bound to specific harnesses
+- **MCP servers** — external tool providers connected per-harness
+
+HSM needs a "capability library" where capabilities are registered once, then bound to harnesses. When someone adds a new MCP server or API key, they import it to HSM, then assign it to the harnesses that should have it. This prevents credential sprawl and makes it clear which agents have access to what.
+
+#### 6. Hermes Enforcement
+
+HSM writes the allowed capability list to the agent's config. Hermes reads it and enforces:
+- Tool calls checked against the allowed list before execution
+- Admin-only tools check `source.is_admin` before proceeding
+- Unrecognized tools rejected (whitelist, not blacklist)
+
+**Hermes dependency:** Needs a `HERMES_ALLOWED_TOOLS` or `tools.allowed` config that the gateway reads and enforces. Currently Hermes has `enabled_toolsets` but it's coarser-grained than per-tool control.
 
 ---
 
@@ -74,7 +146,8 @@ HSM configures; Hermes enforces. These items need fork/upstream changes before H
 | Admin search hook | Read-path channel scoping in memory tool | Todo |
 | Cross-scope memory | `MEMORY_CROSS_SCOPE_ADMIN` env var | Todo |
 | Session key isolation | Per-user session keys in gateway | Todo |
-| Tool permissions | Hermes respects allowed tool list from config | Todo |
+| Capability gating | Per-tool allow/deny + admin-only enforcement in gateway | Todo |
+| Capability binding | Config format for bound tools/skills/plugins/env keys | Todo |
 
 ---
 
