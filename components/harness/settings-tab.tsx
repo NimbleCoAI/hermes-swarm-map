@@ -18,6 +18,7 @@ type Settings = {
   groupInvitePolicy: 'approved-only' | 'allow-all'
   mentionGating: boolean
   commandApprovalAdminOnly: boolean
+  memoryScope: 'channel' | 'global'
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -68,6 +69,13 @@ function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
   function updateCommandApproval(adminOnly: boolean) {
     if (!settings) return
     setSettings({ ...settings, commandApprovalAdminOnly: adminOnly })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateMemoryScope(scope: 'channel' | 'global') {
+    if (!settings) return
+    setSettings({ ...settings, memoryScope: scope })
     setDirty(true)
     setSaved(false)
   }
@@ -286,6 +294,41 @@ if (loading) {
           {settings.commandApprovalAdminOnly
             ? 'Only admin users can /approve or /deny dangerous commands.'
             : 'Any user can approve or deny commands. Use with caution.'}
+        </p>
+      </div>
+
+      {/* Memory Scope */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Memory Scope (Groups)</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="memoryScope"
+              checked={settings.memoryScope === 'channel'}
+              onChange={() => updateMemoryScope('channel')}
+              className="accent-[var(--accent)]"
+            />
+            Per-channel
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="memoryScope"
+              checked={settings.memoryScope === 'global'}
+              onChange={() => updateMemoryScope('global')}
+              className="accent-[var(--accent)]"
+            />
+            Global
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.memoryScope === 'channel'
+            ? 'Memory writes in groups are scoped to that channel. Users can\'t see memories from other groups. Admins can use scope="global" explicitly.'
+            : 'All memory is shared globally across channels. Any user in any group can read/write the same memory pool.'}
         </p>
       </div>
 
