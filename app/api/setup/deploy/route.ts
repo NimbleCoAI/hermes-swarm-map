@@ -1,12 +1,43 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 import fs from 'fs'
+import { cp } from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import { execSync } from 'child_process'
 
 const BASE_PORT = 8642
 const PORT_STEP = 10
+
+// Template directories for baseline plugins and hooks
+const TEMPLATE_PLUGINS = ['swarm_map_policy']
+const TEMPLATE_HOOKS = ['lifecycle-notify']
+
+/**
+ * Install baseline plugins and hooks from infra/templates/ into an agent's data directory.
+ * Gracefully skips if templates directory doesn't exist (e.g. running from upstream image).
+ */
+async function installBaselineTemplates(agentDataDir: string): Promise<void> {
+  const templatesDir = path.join(process.cwd(), 'infra', 'templates')
+
+  // Install plugins
+  const pluginTemplatesDir = path.join(templatesDir, 'plugins')
+  for (const pluginName of TEMPLATE_PLUGINS) {
+    const srcDir = path.join(pluginTemplatesDir, pluginName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'plugins', pluginName)
+    await cp(srcDir, destDir, { recursive: true })
+  }
+
+  // Install hooks
+  const hookTemplatesDir = path.join(templatesDir, 'hooks')
+  for (const hookName of TEMPLATE_HOOKS) {
+    const srcDir = path.join(hookTemplatesDir, hookName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'hooks', hookName)
+    await cp(srcDir, destDir, { recursive: true })
+  }
+}
 
 function slugify(name: string): string {
   return name
@@ -110,6 +141,13 @@ function generateEnvContent(params: {
   lines.push(`# Swarm Map policy endpoint`)
   lines.push(`SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}`)
 
+  // Baseline agent identity & memory scoping
+  lines.push('')
+  lines.push(`# Agent identity & memory`)
+  lines.push(`HERMES_MEMORY_SCOPE=channel`)
+  lines.push(`HERMES_AGENT_NAME=${name}`)
+  lines.push(`HERMES_HOME_CHANNEL=`)
+
   if (githubToken || braveKey) {
     lines.push('')
     lines.push('# Optional integrations')
@@ -149,6 +187,13 @@ ${sourceBlock}
       - ${path.join(os.homedir(), 'Documents/GitHub/google-mcp')}:/opt/google-mcp:ro
       - ${agentDataDir}/google-tokens:/opt/google/tokens
     command: gateway
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SYS_CHROOT
 
 networks:
   default:
@@ -194,7 +239,7 @@ export async function POST(request: Request) {
       }
     } else {
       // Try pulling from Docker Hub first; if that fails (auth, network), check for local builds
-      let hermesImage = 'nousresearch/hermes-agent:latest'
+      let hermesImage = settings.defaultImage || 'nousresearch/hermes-agent:latest'
       const pullResult = services.docker.pullImage(hermesImage)
       if (!pullResult.ok) {
         // Fallback: look for locally-built hermes images (from hermes-swarm build)
@@ -259,6 +304,9 @@ export async function POST(request: Request) {
 
     // Create memories directory
     fs.mkdirSync(path.join(agentDataDir, 'memories'), { recursive: true })
+
+    // Install baseline plugins and hooks from templates
+    await installBaselineTemplates(agentDataDir)
 
     // Generate standalone compose
     const agentComposeDir = path.join(composeBaseDir, slug)

@@ -64,8 +64,8 @@ function nextAvailablePort(composeBaseDir: string): number {
 }
 
 // Generate a standalone docker-compose.yml for a new agent
-function generateStandaloneCompose(agentName: string, port: number, agentDataDir: string, imageOrBuild?: { image: string } | { build: string }): string {
-  const resolved = imageOrBuild ?? { image: 'nousresearch/hermes-agent:latest' }
+function generateStandaloneCompose(agentName: string, port: number, agentDataDir: string, imageOrBuild?: { image: string } | { build: string }, defaultImage?: string): string {
+  const resolved = imageOrBuild ?? { image: defaultImage || 'nousresearch/hermes-agent:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
@@ -84,11 +84,49 @@ ${sourceBlock}
     volumes:
       - ${agentDataDir}:/opt/data
     command: gateway
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SYS_CHROOT
 
 networks:
   default:
     name: hermes-${agentName}
 `
+}
+
+// Template directories for baseline plugins and hooks installed into every new agent
+const TEMPLATE_PLUGINS = ['swarm_map_policy']
+const TEMPLATE_HOOKS = ['lifecycle-notify']
+
+/**
+ * Install baseline plugins and hooks from infra/templates/ into an agent's data directory.
+ * Uses synchronous fs for compatibility with scaffoldAgentDir.
+ * Gracefully skips if templates directory doesn't exist.
+ */
+function installBaselineTemplates(agentDataDir: string): void {
+  const templatesDir = path.join(process.cwd(), 'infra', 'templates')
+
+  // Install plugins
+  const pluginTemplatesDir = path.join(templatesDir, 'plugins')
+  for (const pluginName of TEMPLATE_PLUGINS) {
+    const srcDir = path.join(pluginTemplatesDir, pluginName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'plugins', pluginName)
+    copyDirRecursive(srcDir, destDir)
+  }
+
+  // Install hooks
+  const hookTemplatesDir = path.join(templatesDir, 'hooks')
+  for (const hookName of TEMPLATE_HOOKS) {
+    const srcDir = path.join(hookTemplatesDir, hookName)
+    if (!fs.existsSync(srcDir)) continue
+    const destDir = path.join(agentDataDir, 'hooks', hookName)
+    copyDirRecursive(srcDir, destDir)
+  }
 }
 
 // Recursively copy a directory
@@ -121,6 +159,11 @@ API_SERVER_PORT=${port}
 # Swarm Map policy endpoint
 SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}
 
+# Agent identity & memory
+HERMES_MEMORY_SCOPE=channel
+HERMES_AGENT_NAME=${name}
+HERMES_HOME_CHANNEL=
+
 # Platform integration (uncomment as needed)
 # MATTERMOST_TOKEN=
 # MATTERMOST_URL=
@@ -149,6 +192,9 @@ SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}
 
   // memories directory
   fs.mkdirSync(path.join(dataDir, 'memories'), { recursive: true })
+
+  // Install baseline plugins and hooks from templates
+  installBaselineTemplates(dataDir)
 }
 
 function expandPath(p: string): string {
@@ -694,7 +740,7 @@ export class HarnessService {
     fs.mkdirSync(agentComposeDir, { recursive: true })
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
-      fs.writeFileSync(composePath, generateStandaloneCompose(newName, port, newDataDir, resolveImageOrBuild(settings)), 'utf-8')
+      fs.writeFileSync(composePath, generateStandaloneCompose(newName, port, newDataDir, resolveImageOrBuild(settings), settings?.defaultImage), 'utf-8')
     }
 
     const duplicate: Partial<Harness> = {
@@ -750,7 +796,7 @@ export class HarnessService {
     fs.mkdirSync(agentComposeDir, { recursive: true })
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
-      fs.writeFileSync(composePath, generateStandaloneCompose(input.name, port, agentDir, resolveImageOrBuild(settings)), 'utf-8')
+      fs.writeFileSync(composePath, generateStandaloneCompose(input.name, port, agentDir, resolveImageOrBuild(settings), settings?.defaultImage), 'utf-8')
     }
 
     const overlay: Partial<Harness> = {
