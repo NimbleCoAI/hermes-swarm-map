@@ -120,6 +120,13 @@ function generateEnvContent(params: {
   } else {
     lines.push(`# MATTERMOST_TOKEN=`)
   }
+  if (mattermostUrl || mattermostToken) {
+    lines.push(`MATTERMOST_ALLOWED_USERS=`)
+    lines.push(`MATTERMOST_ALLOWED_CHANNELS=`)
+  } else {
+    lines.push(`# MATTERMOST_ALLOWED_USERS=`)
+    lines.push(`# MATTERMOST_ALLOWED_CHANNELS=`)
+  }
   if (telegramToken) {
     lines.push(`TELEGRAM_BOT_TOKEN=${telegramToken}`)
   } else {

@@ -167,6 +167,8 @@ HERMES_HOME_CHANNEL=
 # Platform integration (uncomment as needed)
 # MATTERMOST_TOKEN=
 # MATTERMOST_URL=
+# MATTERMOST_ALLOWED_USERS=
+# MATTERMOST_ALLOWED_CHANNELS=
 # TELEGRAM_BOT_TOKEN=
 `
   const envPath = path.join(dataDir, '.env')
