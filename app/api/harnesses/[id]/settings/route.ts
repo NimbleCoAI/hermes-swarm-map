@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
+import { resolveIdentifier } from '@/lib/resolvers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -132,6 +133,26 @@ export async function GET(
   // DM policy — stored as its own env var, not derived from per-platform wildcards
   const dmPolicy: 'approved-only' | 'allow-all' = env[DM_POLICY_VAR] === 'allow-all' ? 'allow-all' : 'approved-only'
 
+  // Enrich with resolved identities
+  const resolvedPath = path.join(dataDir, 'resolved-identities.json')
+  let resolvedIdentities: Record<string, Array<{ display: string; nativeId: string; profileName?: string }>> = {}
+  try {
+    resolvedIdentities = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'))
+  } catch {}
+
+  for (const [platform, surf] of Object.entries(surfaces)) {
+    const resolved = resolvedIdentities[platform]
+    if (resolved?.length) {
+      (surf as any).resolvedUsers = resolved
+      // Merge native IDs into allowedUsers so is_platform_admin matches
+      const nativeIds = resolved.map(r => r.nativeId).filter(Boolean)
+      if (nativeIds.length > 0) {
+        (surf as any).allowedUsers = [...new Set([...(surf as any).allowedUsers, ...nativeIds])]
+        ;(surf as any).adminUsers = (surf as any).allowedUsers
+      }
+    }
+  }
+
   const response: SettingsResponse = {
     dmPolicy,
     groupInvitePolicy,
@@ -236,6 +257,26 @@ export async function PUT(
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  // Resolve identifiers to native IDs (best-effort)
+  const resolvedMap: Record<string, Array<{ display: string; nativeId: string; profileName?: string }>> = {}
+  for (const [platform, settings] of Object.entries(body.surfaces || {})) {
+    if (!settings?.allowedUsers?.length) continue
+    const resolved: Array<{ display: string; nativeId: string; profileName?: string }> = []
+    for (const identifier of settings.allowedUsers) {
+      const result = await resolveIdentifier(id, platform, identifier)
+      if (result) {
+        resolved.push(result)
+      } else {
+        resolved.push({ display: identifier, nativeId: identifier })
+      }
+    }
+    resolvedMap[platform] = resolved
+  }
+  const resolvedPath = path.join(dataDir, 'resolved-identities.json')
+  try {
+    fs.writeFileSync(resolvedPath, JSON.stringify(resolvedMap, null, 2), { mode: 0o600 })
+  } catch {}
 
   return NextResponse.json({ success: true })
 }
