@@ -105,7 +105,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         platform: 'signal',
-        config: { phone, url: 'http://host.docker.internal:8080' },
+        config: { phone, url: 'http://host.docker.internal:8080', profileName: displayName || undefined },
       }),
     })
     const data = await res.json()
@@ -162,6 +162,21 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
                 className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
               />
             </div>
+            {hasExistingNumber && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Bot Display Name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Signal profile name for this bot"
+                  className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Sets the Signal profile name shown to contacts.
+                </p>
+              </div>
+            )}
             {!hasExistingNumber && (
               <p className="text-xs text-muted-foreground">
                 You'll need to receive an SMS to this number for verification.

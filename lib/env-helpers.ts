@@ -14,11 +14,16 @@ export function buildConnectEnvVars(
   config: Record<string, string>
 ): Record<string, string> {
   switch (platform) {
-    case 'signal':
-      return {
+    case 'signal': {
+      const vars: Record<string, string> = {
         SIGNAL_HTTP_URL: config.url || 'http://host.docker.internal:8080',
         SIGNAL_ACCOUNT: config.phone,
       }
+      if (config.profileName) {
+        vars.SIGNAL_PROFILE_NAME = config.profileName
+      }
+      return vars
+    }
     case 'telegram':
       return {
         TELEGRAM_BOT_TOKEN: config.token,
