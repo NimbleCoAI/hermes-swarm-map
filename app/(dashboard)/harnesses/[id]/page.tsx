@@ -659,6 +659,9 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                             {s.config.phone && (
                               <p className="text-xs font-mono text-muted-foreground">{s.config.phone}</p>
                             )}
+                            {s.config.profileName && (
+                              <p className="text-xs text-muted-foreground italic">{s.config.profileName}</p>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -714,6 +717,14 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                               values={surf.allowedUsers}
                               onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
                               placeholder={`Add ${labels.users.toLowerCase()}...`}
+                              renderTag={(value) => {
+                                const resolved = (surf as any).resolvedUsers?.find(
+                                  (r: any) => r.display === value || r.nativeId === value
+                                )
+                                return resolved?.profileName
+                                  ? `${value} (${resolved.profileName})`
+                                  : value
+                              }}
                             />
                             <p className="text-xs text-muted-foreground">
                               Admins can DM, add bot to groups, approve commands, and access global memory.

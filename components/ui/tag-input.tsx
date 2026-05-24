@@ -8,9 +8,10 @@ type Props = {
   onChange: (values: string[]) => void
   placeholder?: string
   validate?: (value: string) => boolean
+  renderTag?: (value: string) => string
 }
 
-export function TagInput({ values, onChange, placeholder = 'Add...', validate }: Props) {
+export function TagInput({ values, onChange, placeholder = 'Add...', validate, renderTag }: Props) {
   const [input, setInput] = useState('')
 
   function addTag() {
@@ -43,7 +44,7 @@ export function TagInput({ values, onChange, placeholder = 'Add...', validate }:
           key={tag}
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs font-mono"
         >
-          {tag}
+          {renderTag ? renderTag(tag) : tag}
           <button
             onClick={() => removeTag(i)}
             className="text-muted-foreground hover:text-foreground"
