@@ -156,7 +156,8 @@ function scaffoldAgentDir(dataDir: string, name: string, port: number): void {
 ANTHROPIC_API_KEY=
 API_SERVER_PORT=${port}
 
-# Swarm Map policy endpoint
+# HSM policy endpoint
+HSM_URL=http://host.docker.internal:${hsmPort}
 SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}
 
 # Agent identity & memory
