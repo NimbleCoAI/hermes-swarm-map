@@ -501,7 +501,7 @@ export class HarnessService {
     }
 
     const settings = this.config?.getSettings()
-    const hermesDir = settings?.hermesDir ?? '~/Documents/GitHub/hermes-swarm'
+    const hermesDir = settings?.hermesDir ?? process.env.HERMES_DIR ?? '~/hermes-swarm'
     const configuredFiles = settings?.composeFiles ?? []
 
     // Determine which compose files to scan
