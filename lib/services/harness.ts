@@ -76,6 +76,8 @@ services:
 ${sourceBlock}
     container_name: hermes-${agentName}
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - ${agentDataDir}/.env
     ports:
