@@ -512,6 +512,13 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       setModelProvider('')
       setModelName('')
       refetchModels()
+      // Auto-restart to pick up model changes
+      await fetch(`/api/harnesses/${id}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'quick' }),
+      })
+      toast.success('Restarting agent to apply model changes...')
     } catch {
       toast.error('Failed to save model config')
     } finally {
@@ -746,6 +753,13 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                 if (!res.ok) { toast.error('Failed to save'); return }
                 toast.success('Model cascade saved')
                 refetchModels()
+                // Auto-restart to pick up cascade changes
+                await fetch(`/api/harnesses/${id}/restart`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ mode: 'quick' }),
+                })
+                toast.success('Restarting agent to apply model changes...')
               } catch { toast.error('Failed to save') }
               finally { setModelSaving(false) }
             }}
