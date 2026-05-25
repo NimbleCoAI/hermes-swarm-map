@@ -611,6 +611,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
             models={modelConfig?.models ?? harness.models ?? []}
             provider={modelConfig?.provider ?? ''}
             fallbackProviders={modelConfig?.fallbackProviders ?? []}
+            harnessId={id}
             onSave={async (entries) => {
               setModelSaving(true)
               try {
@@ -1037,12 +1038,14 @@ function ModelCascadeEditor({
   fallbackProviders: initialFallbackProviders,
   onSave,
   saving,
+  harnessId,
 }: {
   models: string[]
   provider: string
   fallbackProviders: FallbackProviderEntry[]
   onSave: (entries: FallbackProviderEntry[]) => void
   saving: boolean
+  harnessId: string
 }) {
   // Build initial cascade from fallbackProviders if available, else from models
   function buildInitialCascade(): FallbackProviderEntry[] {
@@ -1064,6 +1067,34 @@ function ModelCascadeEditor({
   const [newModel, setNewModel] = useState('')
   const [newProvider, setNewProvider] = useState<string>('anthropic')
   const [newBaseUrl, setNewBaseUrl] = useState('')
+  const [suggesting, setSuggesting] = useState(false)
+
+  async function suggestFromKeys() {
+    setSuggesting(true)
+    try {
+      const res = await fetch(`/api/harnesses/${harnessId}/models/suggest`)
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Failed to load suggestions')
+        return
+      }
+      if (!data.suggested?.length) {
+        toast.info('No API keys detected — add keys to .env first')
+        return
+      }
+      const newEntries: FallbackProviderEntry[] = data.suggested.map((s: { provider: string; model: string; base_url?: string }) => ({
+        provider: s.provider === 'ollama' ? 'ollama' : s.provider,
+        model: s.model,
+        ...(s.base_url ? { base_url: s.base_url } : {}),
+      }))
+      setCascade(newEntries)
+      toast.success(`Suggested ${data.suggested.length} models from ${data.providers.length} provider${data.providers.length === 1 ? '' : 's'}`)
+    } catch {
+      toast.error('Failed to load suggestions')
+    } finally {
+      setSuggesting(false)
+    }
+  }
 
   // Sync when data loads
   useEffect(() => {
@@ -1113,7 +1144,16 @@ function ModelCascadeEditor({
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-medium text-sm">Model Cascade</h3>
-          <span className="text-xs text-muted-foreground">Primary at top, fallbacks below</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={suggestFromKeys}
+              disabled={suggesting}
+              className="text-xs text-[var(--accent)] hover:underline disabled:opacity-50"
+            >
+              {suggesting ? 'Detecting...' : 'Suggest from connected keys'}
+            </button>
+            <span className="text-xs text-muted-foreground">Primary at top, fallbacks below</span>
+          </div>
         </div>
 
         {cascade.length === 0 ? (
