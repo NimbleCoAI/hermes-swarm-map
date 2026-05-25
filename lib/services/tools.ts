@@ -141,7 +141,7 @@ function discoverTools(harnessNames: string[]): Map<string, { tool: Tool; harnes
           source,
           risk: defaultRisk(source),
           allowedTiers: ['individual', 'team', 'org', 'orgpublic', 'public'] as HabitatTier[],
-          reviewed: false,
+          reviewed: true,
           description: `Discovered from agent: ${name}`,
         }
         registry.set(id, { tool, harnesses: [name] })

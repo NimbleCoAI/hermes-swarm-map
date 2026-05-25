@@ -400,7 +400,8 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   if (loading) return <p className="text-muted-foreground">Loading...</p>
   if (!harness) return <p className="text-destructive">Harness not found.</p>
 
-  const harnessTools = tools?.filter((t) => harness.tools.includes(t.id)) ?? []
+  const allToolsEnabled = harness.tools.length === 0
+  const harnessTools = allToolsEnabled ? (tools ?? []) : tools?.filter((t) => harness.tools.includes(t.id)) ?? []
   const allTools = tools ?? []
   const harnessKeys = keys?.filter((k) => k.assignedTo.includes(harness.id)) ?? []
   const harnessMemory = memoryScopes?.filter((m) => m.members.includes(harness.id)) ?? []
@@ -455,7 +456,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="usage">Usage</TabsTrigger>
           <TabsTrigger value="models">Models</TabsTrigger>
-          <TabsTrigger value="tools">Tools ({harnessTools.length}/{allTools.length})</TabsTrigger>
+          <TabsTrigger value="tools">Tools ({allToolsEnabled ? allTools.length : harnessTools.length}/{allTools.length})</TabsTrigger>
           <TabsTrigger value="surfaces">Surfaces ({connectedSurfaces.length})</TabsTrigger>
           <TabsTrigger value="keys">Keys ({harnessKeys.length})</TabsTrigger>
           <TabsTrigger value="memory">Memory ({harnessMemory.length})</TabsTrigger>
@@ -876,12 +877,12 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                   <th className="text-left px-4 py-3">Source</th>
                   <th className="text-left px-4 py-3">Risk</th>
                   <th className="text-left px-4 py-3">Tiers</th>
-                  <th className="text-left px-4 py-3">Reviewed</th>
+                  <th className="text-left px-4 py-3">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {allTools.map((t) => {
-                  const enabled = harness.tools.includes(t.id)
+                  const enabled = allToolsEnabled || harness.tools.includes(t.id)
                   const tierAllowed = t.allowedTiers.includes(harness.tier)
                   return (
                     <tr key={t.id} className={`border-b border-[var(--border)] last:border-0 ${!tierAllowed ? 'opacity-50' : ''}`}>
@@ -908,9 +909,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={t.reviewed ? 'text-[var(--success)]' : 'text-muted-foreground'}>
-                          {t.reviewed ? 'Yes' : 'Pending'}
-                        </span>
+                        <span className="text-[var(--success)]">✓</span>
                       </td>
                     </tr>
                   )
