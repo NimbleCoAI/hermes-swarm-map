@@ -67,6 +67,13 @@ const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
 
 const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'custom', 'gemini', 'nous', 'bedrock'] as const
 
+const KEY_PROVIDERS = [
+  'anthropic', 'openai', 'notion', 'github', 'telegram', 'signal',
+  'mattermost', 'aws', 'aws-bedrock', 'google-cloud', 'brave',
+  'helius', 'coingecko', 'dehashed', 'opencorporates', 'capsolver',
+  'open-measures', 'pexels',
+]
+
 type FallbackProviderEntry = { provider: string; model: string; base_url?: string }
 
 type ModelConfig = { provider: string; primary: string; models: string[]; fallbackProviders?: FallbackProviderEntry[] }
@@ -146,6 +153,14 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   // Tool toggle state
   const [toolsSaving, setToolsSaving] = useState(false)
 
+  // Key management state
+  const [showAddKey, setShowAddKey] = useState(false)
+  const [newKeyProvider, setNewKeyProvider] = useState('')
+  const [newKeyValue, setNewKeyValue] = useState('')
+  const [newKeyBudget, setNewKeyBudget] = useState('')
+  const [keySaving, setKeySaving] = useState(false)
+  const [showAssignKey, setShowAssignKey] = useState(false)
+
   async function toggleTool(toolId: string, enabled: boolean) {
     if (!harness) return
     const current = new Set(harness.tools)
@@ -173,6 +188,113 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       toast.error('Failed to update tools')
     } finally {
       setToolsSaving(false)
+    }
+  }
+
+  async function addKeyToHarness() {
+    if (!harness || !newKeyProvider || !newKeyValue) return
+    setKeySaving(true)
+    try {
+      const res = await fetch('/api/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: newKeyProvider,
+          value: newKeyValue,
+          assignedTo: [harness.id],
+          ...(newKeyBudget ? { budgetUsd: parseFloat(newKeyBudget) } : {}),
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Failed to add key')
+        return
+      }
+      toast.success(`${newKeyProvider} key added`)
+      setShowAddKey(false)
+      setNewKeyProvider('')
+      setNewKeyValue('')
+      setNewKeyBudget('')
+      // Trigger restart for the harness to pick up new env
+      await fetch(`/api/harnesses/${id}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'quick' }),
+      })
+      toast.success('Restarting agent to apply key...')
+      refetch()
+      window.location.reload()
+    } catch {
+      toast.error('Failed to add key')
+    } finally {
+      setKeySaving(false)
+    }
+  }
+
+  async function assignExistingKey(keyId: string) {
+    if (!harness) return
+    const key = keys?.find((k) => k.id === keyId)
+    if (!key) return
+    setKeySaving(true)
+    try {
+      const res = await fetch(`/api/keys/${keyId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignedTo: [...key.assignedTo, harness.id],
+        }),
+      })
+      if (!res.ok) {
+        toast.error('Failed to assign key')
+        return
+      }
+      toast.success(`${key.provider} key assigned`)
+      setShowAssignKey(false)
+      await fetch(`/api/harnesses/${id}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'quick' }),
+      })
+      toast.success('Restarting agent to apply key...')
+      refetch()
+      window.location.reload()
+    } catch {
+      toast.error('Failed to assign key')
+    } finally {
+      setKeySaving(false)
+    }
+  }
+
+  async function unassignKey(keyId: string) {
+    if (!harness) return
+    const key = keys?.find((k) => k.id === keyId)
+    if (!key) return
+    setKeySaving(true)
+    try {
+      const res = await fetch(`/api/keys/${keyId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignedTo: key.assignedTo.filter((h) => h !== harness.id),
+        }),
+      })
+      if (!res.ok) {
+        toast.error('Failed to unassign key')
+        return
+      }
+      toast.success(`${key.provider} key removed`)
+      await fetch(`/api/harnesses/${id}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'quick' }),
+      })
+      toast.success('Restarting agent to apply...')
+      refetch()
+      window.location.reload()
+    } catch {
+      toast.error('Failed to unassign key')
+    } finally {
+      setKeySaving(false)
     }
   }
 
@@ -923,19 +1045,137 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         </TabsContent>
 
         <TabsContent value="keys" className="mt-4">
-          <div className="space-y-2">
+          <div className="space-y-3">
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAddKey(!showAddKey)}
+              >
+                + Add Key
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAssignKey(!showAssignKey)}
+              >
+                Assign Existing
+              </Button>
+            </div>
+
+            {/* Add new key form */}
+            {showAddKey && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+                <h4 className="text-sm font-medium">Add New Key</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Provider</label>
+                    <select
+                      value={newKeyProvider}
+                      onChange={(e) => setNewKeyProvider(e.target.value)}
+                      className="w-full mt-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
+                    >
+                      <option value="">Select provider...</option>
+                      {KEY_PROVIDERS.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">Budget ($/mo)</label>
+                    <input
+                      type="number"
+                      value={newKeyBudget}
+                      onChange={(e) => setNewKeyBudget(e.target.value)}
+                      placeholder="Optional"
+                      className="w-full mt-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">API Key</label>
+                  <input
+                    type="password"
+                    value={newKeyValue}
+                    onChange={(e) => setNewKeyValue(e.target.value)}
+                    placeholder="sk-ant-..., secret_..., etc."
+                    className="w-full mt-1 text-sm font-mono border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={addKeyToHarness}
+                    disabled={!newKeyProvider || !newKeyValue || keySaving}
+                  >
+                    {keySaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                    Add & Restart
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { setShowAddKey(false); setNewKeyProvider(''); setNewKeyValue(''); setNewKeyBudget('') }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Assign existing key dropdown */}
+            {showAssignKey && (
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+                <h4 className="text-sm font-medium">Assign Existing Key</h4>
+                {(() => {
+                  const unassigned = keys?.filter((k) => !k.assignedTo.includes(harness.id)) ?? []
+                  if (unassigned.length === 0) {
+                    return <p className="text-sm text-muted-foreground">No unassigned keys available.</p>
+                  }
+                  return (
+                    <div className="space-y-2">
+                      {unassigned.map((k) => (
+                        <div key={k.id} className="flex items-center justify-between p-2 rounded border border-[var(--border)]">
+                          <div>
+                            <span className="text-sm font-medium">{k.provider}</span>
+                            <span className="text-xs font-mono text-muted-foreground ml-2">{k.maskedValue}</span>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => assignExistingKey(k.id)} disabled={keySaving}>
+                            Assign
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+                <Button variant="ghost" size="sm" onClick={() => setShowAssignKey(false)}>Cancel</Button>
+              </div>
+            )}
+
+            {/* Current keys list */}
             {harnessKeys.map((k) => (
               <div key={k.id} className="flex items-center justify-between p-3 rounded-lg border border-[var(--border)] bg-[var(--surface)]">
                 <div>
                   <p className="font-medium text-sm">{k.provider}</p>
                   <p className="text-xs font-mono text-muted-foreground">{k.maskedValue}</p>
                 </div>
-                {k.budgetUsd && (
-                  <span className="text-xs text-muted-foreground">${k.budgetUsd}/mo</span>
-                )}
+                <div className="flex items-center gap-3">
+                  {k.budgetUsd && (
+                    <span className="text-xs text-muted-foreground">${k.budgetUsd}/mo</span>
+                  )}
+                  <button
+                    onClick={() => unassignKey(k.id)}
+                    className="text-muted-foreground hover:text-[var(--destructive)] transition-colors"
+                    title="Unassign from this harness"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             ))}
-            {harnessKeys.length === 0 && <p className="text-sm text-muted-foreground">No keys assigned.</p>}
+            {harnessKeys.length === 0 && !showAddKey && !showAssignKey && (
+              <p className="text-sm text-muted-foreground">No keys assigned.</p>
+            )}
           </div>
         </TabsContent>
 

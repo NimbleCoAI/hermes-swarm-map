@@ -235,15 +235,37 @@ export class KeysService {
     return result.sort((a, b) => a.provider.localeCompare(b.provider))
   }
 
+  // Map provider to env var name
+  private static PROVIDER_TO_VAR: Record<string, string> = {
+    anthropic: 'ANTHROPIC_API_KEY',
+    openai: 'OPENAI_API_KEY',
+    github: 'GITHUB_TOKEN',
+    mattermost: 'MATTERMOST_TOKEN',
+    telegram: 'TELEGRAM_BOT_TOKEN',
+    signal: 'SIGNAL_ACCOUNT',
+    notion: 'NOTION_API_KEY',
+    aws: 'AWS_ACCESS_KEY_ID',
+    'aws-bedrock': 'AWS_BEARER_TOKEN_BEDROCK',
+    'google-cloud': 'GOOGLE_CLOUD_API_KEY',
+    brave: 'BRAVE_SEARCH_API_KEY',
+    helius: 'HELIUS_API_KEY',
+    coingecko: 'COINGECKO_API_KEY',
+    dehashed: 'DEHASHED_API_KEY',
+    opencorporates: 'OPENCORPORATES_API_KEY',
+    capsolver: 'CAPSOLVER_API_KEY',
+    'open-measures': 'OPEN_MEASURES_API_KEY',
+    pexels: 'PEXELS_API_KEY',
+  }
+
   // Manual add (user-input key not from a .env file)
-  add(input: KeyInput): Key {
+  add(input: KeyInput & { assignedTo?: string[] }): Key {
     const stored = this.storage.read<StoredKey[]>(KEYS_FILE, [])
     const newKey: StoredKey = {
       id: generateId(),
       provider: input.provider,
       maskedValue: maskValue(input.value),
       encryptedValue: this.encryption.encrypt(input.value),
-      assignedTo: [],
+      assignedTo: input.assignedTo ?? [],
       budgetUsd: input.budgetUsd,
       health: 'good',
       manuallyAdded: true,
@@ -253,6 +275,45 @@ export class KeysService {
     this.audit.append({ who: 'admin', what: 'key:add', target: input.provider })
     const { encryptedValue: _, manuallyAdded: __, ...key } = newKey
     return key
+  }
+
+  writeKeyToEnv(harnessName: string, provider: string, value: string): void {
+    const varName = KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
+    const dataDir = agentDataDir(harnessName)
+    const envPath = path.join(dataDir, '.env')
+
+    let content = ''
+    try {
+      content = fs.readFileSync(envPath, 'utf-8')
+    } catch {
+      // .env doesn't exist yet — will create
+    }
+
+    // Check if var already exists — replace it; otherwise append
+    const regex = new RegExp(`^${varName}=.*$`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${value}`)
+    } else {
+      content = content.trimEnd() + `\n${varName}=${value}\n`
+    }
+
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(envPath, content, { mode: 0o600 })
+  }
+
+  removeKeyFromEnv(harnessName: string, provider: string): void {
+    const varName = KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
+    const dataDir = agentDataDir(harnessName)
+    const envPath = path.join(dataDir, '.env')
+
+    try {
+      let content = fs.readFileSync(envPath, 'utf-8')
+      const regex = new RegExp(`^${varName}=.*\n?`, 'm')
+      content = content.replace(regex, '')
+      fs.writeFileSync(envPath, content, { mode: 0o600 })
+    } catch {
+      // .env doesn't exist, nothing to remove
+    }
   }
 
   // Get the decrypted value for a key by id (internal use: restart flows, key injection)
