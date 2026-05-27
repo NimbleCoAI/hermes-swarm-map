@@ -3,6 +3,8 @@ A commons, public goods project of [NimbleCo](https://www.nimbleco.ai/).
 
 **Multiplayer admin and orchestrator platform for Hermes.** Deploy, manage, and monitor multiple [Hermes Agent](https://github.com/NimbleCoAI/hermes-agent) instances from one dashboard — with built-in multi-tenant security, model cascades, and platform connections.
 
+First of its kind, a point and click GUI for not just managing Hermes runtimes, but also who can do what and where. Solves the multi-tenant Hermes problem. View the godhead of complexity without derealizing. Share compute.
+
 <img width="1352" height="763" alt="Screenshot 2026-05-26 at 5 01 19 pm" src="https://github.com/user-attachments/assets/4b94f0d1-d9b8-4a81-8b47-b2dae1940741" />
 *Calm UX showing a variety of config settings for different hermes harness runtimes*
 
