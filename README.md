@@ -4,8 +4,7 @@ A commons, public goods project of [NimbleCo](https://www.nimbleco.ai/).
 **Multiplayer admin and orchestrator platform for Hermes.** Deploy, manage, and monitor multiple [Hermes Agent](https://github.com/NimbleCoAI/hermes-agent) instances from one dashboard — with built-in multi-tenant security, model cascades, and platform connections.
 
 <img width="1352" height="763" alt="Screenshot 2026-05-26 at 5 01 19 pm" src="https://github.com/user-attachments/assets/4b94f0d1-d9b8-4a81-8b47-b2dae1940741" />
-[Calm UX showing a variety of config settings for different hermes harness runtimes]
-
+*Calm UX showing a variety of config settings for different hermes harness runtimes*
 
 ---
 
@@ -94,6 +93,8 @@ Set `ALLOWED_DEV_ORIGINS` in `.env` for dev mode on remote machines (see Configu
 
 ## Architecture
 
+<img width="1023" height="724" alt="Screenshot 2026-05-27 at 2 50 56 pm" src="https://github.com/user-attachments/assets/a2ad3118-81a2-433a-ae02-289546e7e02d" />
+
 - **Next.js 14** (App Router) + **TypeScript**
 - **Tailwind CSS v4** + **shadcn/ui** + **Lucide Icons**
 - **Docker CLI** (via shell) for container management
@@ -102,6 +103,7 @@ Set `ALLOWED_DEV_ORIGINS` in `.env` for dev mode on remote machines (see Configu
 - File-based agent config at `~/.hermes-swarm-map/`
 
 ---
+
 
 ## API Reference
 
