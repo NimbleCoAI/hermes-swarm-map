@@ -58,8 +58,9 @@ function generateEnvContent(params: {
   signalPhone?: string
   githubToken?: string
   braveKey?: string
+  browserEnabled?: boolean
 }): string {
-  const { name, port, provider, llmKey, mattermostUrl, mattermostToken, telegramToken, signalPhone, githubToken, braveKey } = params
+  const { name, port, provider, llmKey, mattermostUrl, mattermostToken, telegramToken, signalPhone, githubToken, braveKey, browserEnabled } = params
 
   const providerKeyMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -140,6 +141,12 @@ function generateEnvContent(params: {
   lines.push(`TELEGRAM_REQUIRE_MENTION=true`)
   lines.push(`MATTERMOST_REQUIRE_MENTION=true`)
   lines.push(`SIGNAL_GROUP_INVITE_POLICY=approved-only`)
+  // Browser tools (Camofox)
+  if (browserEnabled) {
+    lines.push('')
+    lines.push('# Browser tools (Camofox)')
+    lines.push('CAMOFOX_URL=http://host.docker.internal:9377')
+  }
   if (githubToken || braveKey) {
     lines.push('')
     lines.push('# Optional integrations')
@@ -150,8 +157,8 @@ function generateEnvContent(params: {
   return lines.join('\n') + '\n'
 }
 
-function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string): string {
-  return generateDefaultConfig({ provider, primaryModel, fallbackModel })
+function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string, browserEnabled?: boolean): string {
+  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled })
 }
 
 function generateCompose(slug: string, port: number, agentDataDir: string, imageOrBuild: { image: string } | { build: string }, googleMcpDir?: string): string {
@@ -300,11 +307,12 @@ export async function POST(request: Request) {
       signalPhone: signalEnabled ? signalPhone : undefined,
       githubToken,
       braveKey,
+      browserEnabled: body.browserEnabled === true,
     })
     fs.writeFileSync(path.join(agentDataDir, '.env'), envContent, { mode: 0o600 })
 
     // Write config.yaml
-    const configContent = generateConfigYaml(provider, primaryModel, fallbackModel)
+    const configContent = generateConfigYaml(provider, primaryModel, fallbackModel, body.browserEnabled === true)
     fs.writeFileSync(path.join(agentDataDir, 'config.yaml'), configContent, 'utf-8')
 
     // Write SOUL.md

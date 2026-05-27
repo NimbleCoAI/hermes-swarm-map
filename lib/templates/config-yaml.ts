@@ -7,8 +7,9 @@ export function generateDefaultConfig(params: {
   provider: string
   primaryModel: string
   fallbackModel?: string
+  browserEnabled?: boolean
 }): string {
-  const { provider, primaryModel, fallbackModel } = params
+  const { provider, primaryModel, fallbackModel, browserEnabled } = params
 
   const fallbackLine = fallbackModel
     ? `  fallback: ${fallbackModel}`
@@ -71,6 +72,14 @@ terminal:
   backend: "local"
   cwd: "."
   timeout: 180
+${browserEnabled ? `
+# --- Browser ---
+browser:
+  inactivity_timeout: 120
+  command_timeout: 30
+  camofox:
+    managed_persistence: false
+` : ''}
 
 # --- Skills ---
 skills:

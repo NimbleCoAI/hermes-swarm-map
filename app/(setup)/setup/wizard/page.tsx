@@ -27,6 +27,7 @@ type WizardState = {
   signalEnabled: boolean
   signalPhone: string
   googleEnabled: boolean
+  browserEnabled: boolean
   // Step 4
   llmKey: string
   githubToken: string
@@ -48,6 +49,7 @@ const INITIAL_STATE: WizardState = {
   signalEnabled: false,
   signalPhone: '',
   googleEnabled: false,
+  browserEnabled: false,
   llmKey: '',
   githubToken: '',
   braveKey: '',
@@ -467,6 +469,30 @@ export default function WizardPage() {
                     Google Workspace integration uses OAuth for authentication. After deployment,
                     visit the agent&apos;s OAuth callback URL to complete setup.
                     See <a href="https://github.com/NimbleCoAI/google-multiplayer-mcp" target="_blank" rel="noopener" className="underline">NimbleCoAI/google-multiplayer-mcp</a> for setup.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Browser (Camofox) */}
+            <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.browserEnabled}
+                  onChange={(e) => update({ browserEnabled: e.target.checked })}
+                  className="accent-[var(--accent)]"
+                />
+                <div>
+                  <div className="font-medium text-sm">Browser Tools</div>
+                  <div className="text-xs text-muted-foreground">Web browsing via Camofox (requires Camofox container running on host)</div>
+                </div>
+              </label>
+
+              {state.browserEnabled && (
+                <div className="pl-7">
+                  <p className="text-xs text-muted-foreground">
+                    Requires a Camofox browser container on the host. Agent connects via <code className="text-xs">host.docker.internal:9377</code>.
                   </p>
                 </div>
               )}
