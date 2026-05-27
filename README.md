@@ -72,6 +72,8 @@ On first launch, the setup wizard detects your Hermes compose directories automa
 - **API key management** — AES-256-GCM encrypted at rest
 - **Audit log** — track who changed what and when
 
+<img width="911" height="742" alt="Screenshot 2026-05-27 at 3 27 31 pm" src="https://github.com/user-attachments/assets/68a7f594-4e17-419a-8cb6-180b94cac40a" />
+
 <img width="680" height="686" alt="Agent creation wizard" src="https://github.com/user-attachments/assets/62ff24dc-d266-4c18-9542-038ac1b09eaa" />
 
 ---
