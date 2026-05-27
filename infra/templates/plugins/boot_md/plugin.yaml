@@ -1,0 +1,7 @@
+name: boot_md
+description: Execute BOOT.md startup checklist on first session
+version: "1.0.0"
+author: NimbleCoAI
+hooks:
+  - event: on_session_start
+    handler: boot_handler

@@ -1,0 +1,368 @@
+// components/harness/settings-tab.tsx
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Shield, Loader2, Save, RotateCw } from 'lucide-react'
+import { toast } from 'sonner'
+import type { Surface } from '@/lib/types'
+
+type SurfaceSettings = {
+  allowedUsers: string[]
+  allowedGroups: string[]
+  adminUsers: string[]
+  allowAll: boolean
+}
+
+type Settings = {
+  dmPolicy: 'approved-only' | 'allow-all'
+  groupInvitePolicy: 'approved-only' | 'allow-all'
+  mentionGating: boolean
+  commandApprovalAdminOnly: boolean
+  memoryScope: 'channel' | 'global'
+  surfaces: Record<string, SurfaceSettings>
+}
+
+type Props = {
+  harnessId: string
+  connectedSurfaces: Surface[]
+}
+
+export function SettingsTab({ harnessId, connectedSurfaces }: Props) {
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+
+useEffect(() => {
+    fetch(`/api/harnesses/${harnessId}/settings`)
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error) setSettings(data)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [harnessId])
+
+function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
+    if (!settings) return
+    setSettings({ ...settings, dmPolicy: policy })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateGroupInvitePolicy(policy: 'approved-only' | 'allow-all') {
+    if (!settings) return
+    setSettings({ ...settings, groupInvitePolicy: policy })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateMentionGating(enabled: boolean) {
+    if (!settings) return
+    setSettings({ ...settings, mentionGating: enabled })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateCommandApproval(adminOnly: boolean) {
+    if (!settings) return
+    setSettings({ ...settings, commandApprovalAdminOnly: adminOnly })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateMemoryScope(scope: 'channel' | 'global') {
+    if (!settings) return
+    setSettings({ ...settings, memoryScope: scope })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  async function handleSave() {
+    if (!settings) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/harnesses/${harnessId}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      })
+      const data = await res.json()
+      if (data.success) {
+        // Auto-restart with rebuild mode so the container picks up .env changes
+        toast.success('Settings saved. Restarting agent...')
+        setDirty(false)
+        setSaved(false)
+        setRestarting(true)
+        try {
+          const restartRes = await fetch(`/api/harnesses/${harnessId}/restart`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'rebuild' }),
+          })
+          if (restartRes.ok) {
+            toast.success('Agent restarted with new settings')
+          } else {
+            const restartData = await restartRes.json()
+            toast.error(restartData.error || 'Restart failed — restart manually')
+            setSaved(true) // Show manual restart button as fallback
+          }
+        } catch {
+          toast.error('Restart failed — restart manually')
+          setSaved(true)
+        } finally {
+          setRestarting(false)
+        }
+      } else {
+        toast.error(data.error || 'Failed to save')
+      }
+    } catch {
+      toast.error('Network error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRestart() {
+    setRestarting(true)
+    try {
+      const res = await fetch(`/api/harnesses/${harnessId}/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'rebuild' }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Harness restarted')
+        setSaved(false)
+      } else {
+        toast.error(data.error || 'Restart failed')
+      }
+    } catch {
+      toast.error('Restart failed')
+    } finally {
+      setRestarting(false)
+    }
+  }
+
+if (loading) {
+    return <p className="text-sm text-muted-foreground">Loading settings...</p>
+  }
+
+  if (!settings) {
+    return <p className="text-sm text-muted-foreground">No .env found for this harness.</p>
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* DM Policy */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">DM Access Policy</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="dmPolicy"
+              checked={settings.dmPolicy === 'approved-only'}
+              onChange={() => updateDmPolicy('approved-only')}
+              className="accent-[var(--accent)]"
+            />
+            Approved users only
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="dmPolicy"
+              checked={settings.dmPolicy === 'allow-all'}
+              onChange={() => updateDmPolicy('allow-all')}
+              className="accent-[var(--accent)]"
+            />
+            Allow all
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.dmPolicy === 'approved-only'
+            ? 'Only users in the approved list below can DM this agent.'
+            : 'Anyone can DM this agent. Approved users list still controls who can add this agent to groups.'}
+        </p>
+      </div>
+
+      {/* Group Invite Policy */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Group Invite Policy</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="groupInvitePolicy"
+              checked={settings.groupInvitePolicy === 'approved-only'}
+              onChange={() => updateGroupInvitePolicy('approved-only')}
+              className="accent-[var(--accent)]"
+            />
+            Approved users only
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="groupInvitePolicy"
+              checked={settings.groupInvitePolicy === 'allow-all'}
+              onChange={() => updateGroupInvitePolicy('allow-all')}
+              className="accent-[var(--accent)]"
+            />
+            Allow all
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.groupInvitePolicy === 'approved-only'
+            ? 'Only approved users can add this agent to groups.'
+            : 'Anyone can add this agent to groups.'}
+        </p>
+      </div>
+
+      {/* Mention-Gating */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Group Mention-Gating</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="mentionGating"
+              checked={settings.mentionGating === true}
+              onChange={() => updateMentionGating(true)}
+              className="accent-[var(--accent)]"
+            />
+            Require @mention
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="mentionGating"
+              checked={settings.mentionGating === false}
+              onChange={() => updateMentionGating(false)}
+              className="accent-[var(--accent)]"
+            />
+            Respond to all messages
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.mentionGating
+            ? 'Agent only responds when @mentioned, replied to, or a /command is used in groups. Observes other messages silently.'
+            : 'Agent responds to all messages in approved groups.'}
+        </p>
+      </div>
+
+      {/* Command Approval */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Command Approval</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="commandApproval"
+              checked={settings.commandApprovalAdminOnly === true}
+              onChange={() => updateCommandApproval(true)}
+              className="accent-[var(--accent)]"
+            />
+            Admins only
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="commandApproval"
+              checked={settings.commandApprovalAdminOnly === false}
+              onChange={() => updateCommandApproval(false)}
+              className="accent-[var(--accent)]"
+            />
+            Any user
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.commandApprovalAdminOnly
+            ? 'Only admin users can /approve or /deny dangerous commands.'
+            : 'Any user can approve or deny commands. Use with caution.'}
+        </p>
+      </div>
+
+      {/* Memory Scope */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Memory Scope (Groups)</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="memoryScope"
+              checked={settings.memoryScope === 'channel'}
+              onChange={() => updateMemoryScope('channel')}
+              className="accent-[var(--accent)]"
+            />
+            Per-channel
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="memoryScope"
+              checked={settings.memoryScope === 'global'}
+              onChange={() => updateMemoryScope('global')}
+              className="accent-[var(--accent)]"
+            />
+            Global
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.memoryScope === 'channel'
+            ? 'Memory writes in groups are scoped to that channel. Users can\'t see memories from other groups. Admins can use scope="global" explicitly.'
+            : 'All memory is shared globally across channels. Any user in any group can read/write the same memory pool.'}
+        </p>
+      </div>
+
+      {/* Admin note */}
+      <p className="text-xs text-muted-foreground px-1">
+        Admin users are managed per-surface in the Surfaces tab.
+      </p>
+
+
+      {/* Save + Restart buttons */}
+      {(dirty || saved) && (
+        <div className="flex justify-end gap-2">
+          {dirty && (
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Settings
+            </button>
+          )}
+          {saved && !dirty && (
+            <button
+              onClick={handleRestart}
+              disabled={restarting}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--foreground)] hover:bg-[var(--surface)] disabled:opacity-50"
+            >
+              {restarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+              Restart to apply
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,45 @@
+services:
+  signal-cli-daemon:
+    build: .
+    container_name: signal-cli-daemon
+    restart: unless-stopped
+    environment:
+      - MODE=json-rpc
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${HOME}/.hermes-swarm/signal-data:/home/.local/share/signal-cli
+      # Agent data dirs mounted at host paths so signal-cli can read attachments
+      # (agents translate container paths to host paths before sending to signal-cli)
+      - ${HOME}/.hermes:${HOME}/.hermes:ro
+      - ${HOME}/.hermes-cyborg:${HOME}/.hermes-cyborg:ro
+      - ${HOME}/.hermes-osint:${HOME}/.hermes-osint:ro
+      - ${HOME}/.hermes-cryptids:${HOME}/.hermes-cryptids:ro
+      - ${HOME}/.hermes-egregore:${HOME}/.hermes-egregore:ro
+      - ${HOME}/.hermes-evil-duck:${HOME}/.hermes-evil-duck:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf --max-time 3 http://localhost:8080/v1/about | grep -q json-rpc"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 3
+    networks:
+      - hermes-net
+
+  # Auto-restart when signal-cli enters websocket reconnect loop.
+  # The healthcheck detects degraded state via JSON-RPC responsiveness.
+  signal-cli-autoheal:
+    image: willfarrell/autoheal
+    container_name: signal-cli-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: []
+
+networks:
+  hermes-net:
+    external: true
