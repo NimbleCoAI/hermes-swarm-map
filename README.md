@@ -109,6 +109,24 @@ Set `ALLOWED_DEV_ORIGINS` in `.env` for dev mode on remote machines (see Configu
 ---
 
 
+## Security Model
+
+HSM assumes a **reasonably trusted team** — all users with access to the dashboard can manage all agents, keys, and configuration. There is no per-user role separation or access scoping within a deployment.
+
+**What's protected:**
+- API keys are encrypted at rest (AES-256-GCM) with a machine-local key
+- Audit log tracks who changed what
+- Per-agent memory scoping isolates conversation contexts
+- Group approval policies gate which platforms agents can join
+
+**What's not scoped:**
+- Dashboard access is all-or-nothing — anyone who can reach the UI can manage the fleet
+- Skills, tools, and agent configurations are shared across all operators
+- The underlying Hermes agent harnesses remain vulnerable to prompt injection from malicious external content (messages, ingested documents), the same as any LLM-based system
+
+**In practice:** run HSM on a private network or behind authentication (Tailscale, nginx basic auth, etc.) and limit access to people you trust with your API keys and agent configurations.
+---
+
 ## API Reference
 
 Any AI agent (Claude Code, Hermes, etc.) can orchestrate your fleet via the REST API — no GUI needed.
