@@ -128,6 +128,7 @@ function generateEnvContent(params: {
   // Baseline agent identity & memory scoping
   lines.push('')
   lines.push(`# Agent identity & memory`)
+  lines.push(`HOME=/opt/data`)
   lines.push(`HERMES_MEMORY_SCOPE=channel`)
   lines.push(`HERMES_AGENT_NAME=${name}`)
   lines.push(`HERMES_HOME_CHANNEL=`)
@@ -182,7 +183,6 @@ services:
   hermes-${slug}:
 ${sourceBlock}
     container_name: hermes-${slug}
-    user: "10000:10000"
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -197,9 +197,13 @@ ${googleMcpVolumes}    command: gateway
     cap_drop:
       - ALL
     cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - DAC_OVERRIDE
       - NET_BIND_SERVICE
     security_opt:
-      - no-new-privileges
+      - no-new-privileges:false
     read_only: true
     tmpfs:
       - /tmp
