@@ -19,13 +19,19 @@ const audit = new AuditService(storage)
 
 const config = new ConfigService(storage)
 
+const harness = new HarnessService(storage, docker, audit, config)
+const tools = new ToolsService(storage)
+
+// Wire ToolsService into HarnessService for auto-discovery of tools
+harness.setToolsService(tools)
+
 export const services = {
   storage,
   docker,
   audit,
   config,
-  harness: new HarnessService(storage, docker, audit, config),
+  harness,
   keys: new KeysService(storage, audit, DATA_DIR),
-  tools: new ToolsService(storage),
+  tools,
   memory: new MemoryService(storage),
 }

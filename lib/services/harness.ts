@@ -11,6 +11,7 @@ import type { ConfigService } from './config'
 import { getCostToday, getInvocationsToday } from './usage'
 import { markRestarting, isRestarting, clearRestarting } from './restart-tracker'
 import { installBaselineTemplates } from './templates'
+import type { ToolsService } from './tools'
 
 const HARNESSES_FILE = 'harnesses.json'
 
@@ -522,12 +523,41 @@ export function guessDataDir(serviceName: string, containerName: string): string
 }
 
 export class HarnessService {
+  private toolsService?: ToolsService
+
   constructor(
     private storage: Storage,
     private docker: DockerService,
     private audit: AuditService,
     private config?: ConfigService,
   ) {}
+
+  /** Inject ToolsService after construction to break circular init dependency */
+  setToolsService(toolsService: ToolsService): void {
+    this.toolsService = toolsService
+  }
+
+  // Cache for auto-discovered tools per harness name — avoids re-scanning config.yaml on every API call
+  private toolsDiscoveryCache = new Map<string, { tools: string[]; ts: number }>()
+  private static TOOLS_CACHE_TTL_MS = 60_000 // 1 minute
+
+  /**
+   * Auto-discover tools for a harness by scanning its config.yaml and skills dir.
+   * Results are cached for TOOLS_CACHE_TTL_MS to avoid filesystem reads on every request.
+   * Returns undefined if ToolsService is not wired up.
+   */
+  private autoDiscoverTools(harnessName: string): string[] | undefined {
+    if (!this.toolsService) return undefined
+
+    const cached = this.toolsDiscoveryCache.get(harnessName)
+    if (cached && Date.now() - cached.ts < HarnessService.TOOLS_CACHE_TTL_MS) {
+      return cached.tools
+    }
+
+    const tools = this.toolsService.discoverForHarness(harnessName)
+    this.toolsDiscoveryCache.set(harnessName, { tools, ts: Date.now() })
+    return tools
+  }
 
   // Load stored overlays — tier, tools, keys, and other user-configured fields
   private loadOverlays(): Record<string, Partial<Harness>> {
@@ -672,7 +702,7 @@ export class HarnessService {
         models: overlay.models?.length ? overlay.models : readModelConfig(dataDir),
         costToday: getCostToday(id),
         invocations: getInvocationsToday(id),
-        tools: overlay.tools ?? [],
+        tools: overlay.tools ?? this.autoDiscoverTools(name) ?? [],
         ...(overlay.health ? { health: overlay.health } : {}),
         ...(overlay.cacheState ? { cacheState: overlay.cacheState } : {}),
         ...(overlay.cacheAge !== undefined ? { cacheAge: overlay.cacheAge } : {}),
