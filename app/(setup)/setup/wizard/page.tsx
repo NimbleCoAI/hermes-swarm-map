@@ -661,7 +661,7 @@ export default function WizardPage() {
             )}
 
             <p className="text-xs text-muted-foreground">
-              This will pull <span className="font-mono">nousresearch/hermes-agent:latest</span>, scaffold{' '}
+              This will pull <span className="font-mono">ghcr.io/nimblecoai/hermes-agent:latest</span>, scaffold{' '}
               <span className="font-mono">~/.hermes-{slug}/</span>, and start the container.
             </p>
           </Section>

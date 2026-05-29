@@ -45,16 +45,13 @@ HSM is the management plane for multi-tenant Hermes. It configures, deploys, mon
 - [x] **Async restart** — `spawn()` with detached mode + `restart-tracker.ts` (5-min TTL, 409 on concurrent restarts). No spawnSync.
 - [x] **Configurable default image** — defaults to `ghcr.io/nimblecoai/hermes-agent:latest`, configurable via settings.
 
-### Should Ship
+### Shipped to V2
 
-- [ ] **Tier-based defaults** — when tier is `public`/`orgpublic`, default DM policy to allow-all; when `individual`, default to approved-only. Suggested, not enforced.
-- [ ] **Capability gating & binding** — the final settings dimension. See [Capability Gating](#capability-gating) below.
-- [ ] **Per-context people memory** — agent remembers things about each person, scoped to the right context. Includes clear prompting so the agent knows who it's talking to and who's being referenced. Scoping follows channel/global toggle.
-- [ ] **Admin search hook** — memory reads default to channel scope, require explicit `--global` for cross-channel. Backend done (context_id scoping), needs UI toggle + gateway read-path enforcement.
-- [ ] **Cross-scope memory control** — toggle: "Can non-admins query memory from other conversations?" Needs Hermes code changes.
-- [ ] **Audit log for permission changes** — track who changed what, when. HSM already has audit service scaffolding.
-- [ ] **Bulk user management** — import/export admin lists (CSV, JSON).
-- [ ] **Auto-approve on admin invite** — when admin adds bot to group, auto-add to allowed groups. Telegram/Mattermost only (Signal lacks group-join events).
+All "Should Ship" items deferred to V2 (2026-05-28). V1 scope is complete.
+
+- Cross-scope memory control already shipped via Settings UI (per-channel/global toggle, admin `scope="global"`)
+- Admin search hook (read-path enforcement) deferred — single-admin reality means write-side scoping is sufficient
+- Tier-based defaults, capability gating, per-context people memory, audit logs, bulk user management, auto-approve on invite → all tracked in V2 below
 
 ---
 
@@ -133,6 +130,16 @@ HSM writes the allowed capability list to the agent's config. Hermes reads it an
 ## V2: Operational Intelligence
 
 **Ship when:** HSM is not just config management but gives operators insight into what agents are doing, how they're performing, and where they need attention.
+
+### Promoted from V1
+
+- [ ] **Tier-based defaults** — when tier is `public`/`orgpublic`, default DM policy to allow-all; when `individual`, default to approved-only. Suggested, not enforced.
+- [ ] **Capability gating & binding** — per-tool risk classification + admin-only enforcement. See [Capability Gating](#capability-gating) below.
+- [ ] **Per-context people memory** — agent remembers things about each person, scoped to the right context. Includes clear prompting so the agent knows who it's talking to and who's being referenced.
+- [ ] **Admin search hook** — memory reads default to channel scope, require explicit `--global` for cross-channel. Backend done (context_id scoping), needs gateway read-path enforcement.
+- [ ] **Audit log for permission changes** — track who changed what, when. HSM already has audit service scaffolding.
+- [ ] **Bulk user management** — import/export admin lists (CSV, JSON).
+- [ ] **Auto-approve on admin invite** — when admin adds bot to group, auto-add to allowed groups. Telegram/Mattermost only (Signal lacks group-join events).
 
 ### Planned
 
