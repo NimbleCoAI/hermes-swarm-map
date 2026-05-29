@@ -2,8 +2,6 @@
 
 HSM is the management plane for multi-tenant Hermes. It configures, deploys, monitors, and controls agent harnesses. This roadmap works backward from what V1 must ship, then forward to V2.
 
-> **Release plan:** The canonical launch spec lives in the egregore repo at `docs/superpowers/specs/2026-05-26-mt-hermes-release-design.md`. It covers the full MT Hermes release scope: upstream contributions, fork cleanup, HSM, plugins, blog, and social. This roadmap focuses on HSM-specific features.
-
 ---
 
 ## V1: Secure Multi-Tenant Agent Management
@@ -226,7 +224,6 @@ Detailed plans for specific features live in `docs/plans/`:
 | `cost-tracker-litellm.md` | Plan — deferred to v1.1+ | Cost tracking from state.db, per-model breakdown |
 | `home-channel-group-id.md` | Plan — needs hermes-agent-mt work | Signal group display name → group ID resolution |
 
-Execution plans for sessions live in the egregore repo at `docs/superpowers/plans/`.
 
 ---
 
