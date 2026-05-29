@@ -27,6 +27,7 @@ type WizardState = {
   signalEnabled: boolean
   signalPhone: string
   googleEnabled: boolean
+  githubMcpEnabled: boolean
   browserEnabled: boolean
   // Step 4
   llmKey: string
@@ -49,6 +50,7 @@ const INITIAL_STATE: WizardState = {
   signalEnabled: false,
   signalPhone: '',
   googleEnabled: false,
+  githubMcpEnabled: false,
   browserEnabled: false,
   llmKey: '',
   githubToken: '',
@@ -164,6 +166,7 @@ export default function WizardPage() {
           signalEnabled: state.signalEnabled,
           signalPhone: state.signalPhone,
           googleEnabled: state.googleEnabled,
+          githubMcpEnabled: state.githubMcpEnabled,
           llmKey: state.llmKey || undefined,
           githubToken: state.githubToken || undefined,
           braveKey: state.braveKey || undefined,
@@ -474,6 +477,30 @@ export default function WizardPage() {
               )}
             </div>
 
+            {/* GitHub */}
+            <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.githubMcpEnabled}
+                  onChange={(e) => update({ githubMcpEnabled: e.target.checked })}
+                  className="accent-[var(--accent)]"
+                />
+                <div>
+                  <div className="font-medium text-sm">GitHub Tools</div>
+                  <div className="text-xs text-muted-foreground">Repos, issues, PRs via official GitHub MCP server (requires GitHub token in Keys step)</div>
+                </div>
+              </label>
+
+              {state.githubMcpEnabled && !state.githubToken && (
+                <div className="pl-7">
+                  <p className="text-xs text-amber-500">
+                    Add a GitHub token in the Keys step for this to work. Fine-grained PATs are recommended for per-agent scoping.
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Browser (Camofox) */}
             <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
               <label className="flex items-center gap-3 cursor-pointer">
@@ -612,6 +639,12 @@ export default function WizardPage() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Google Workspace</span>
                   <span>enabled (OAuth setup after deploy)</span>
+                </div>
+              )}
+              {state.githubMcpEnabled && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">GitHub Tools</span>
+                  <span>{state.githubToken ? 'enabled' : 'enabled (needs token)'}</span>
                 </div>
               )}
               <div className="flex justify-between">
