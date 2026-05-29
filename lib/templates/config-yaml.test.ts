@@ -116,6 +116,96 @@ describe('generateDefaultConfig', () => {
     expect(result).not.toContain('base_url:')
   })
 
+  // --- MCP Servers ---
+
+  it('generates config without mcp_servers when none provided', () => {
+    const config = generateDefaultConfig(baseParams)
+    expect(config).not.toContain('mcp_servers:')
+  })
+
+  it('generates github mcp_servers section when github is enabled', () => {
+    const config = generateDefaultConfig({
+      ...baseParams,
+      mcpServers: {
+        github: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-github'],
+          env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_PERSONAL_ACCESS_TOKEN}' },
+        },
+      },
+    })
+    expect(config).toContain('mcp_servers:')
+    expect(config).toContain('  github:')
+    expect(config).toContain('    command: npx')
+    expect(config).toContain('      - "-y"')
+    expect(config).toContain('      - "@modelcontextprotocol/server-github"')
+    expect(config).toContain('    env:')
+    expect(config).toContain('      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"')
+  })
+
+  it('generates google mcp_servers section when google is enabled', () => {
+    const config = generateDefaultConfig({
+      ...baseParams,
+      mcpServers: {
+        google: {
+          command: 'node',
+          args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+        },
+      },
+    })
+    expect(config).toContain('mcp_servers:')
+    expect(config).toContain('  google:')
+    expect(config).toContain('    command: node')
+  })
+
+  it('generates both mcp_servers when both enabled', () => {
+    const config = generateDefaultConfig({
+      ...baseParams,
+      mcpServers: {
+        github: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-github'],
+          env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_PERSONAL_ACCESS_TOKEN}' },
+        },
+        google: {
+          command: 'node',
+          args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+        },
+      },
+    })
+    expect(config).toContain('  github:')
+    expect(config).toContain('  google:')
+  })
+
+  it('does not include env key when server has no env vars', () => {
+    const config = generateDefaultConfig({
+      ...baseParams,
+      mcpServers: {
+        google: {
+          command: 'node',
+          args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+        },
+      },
+    })
+    const googleSection = config.split('google:')[1]?.split('\n\n')[0] ?? ''
+    expect(googleSection).not.toContain('env:')
+  })
+
+  it('generates url-based mcp server config', () => {
+    const config = generateDefaultConfig({
+      ...baseParams,
+      mcpServers: {
+        notion: {
+          url: 'https://mcp.notion.com/mcp',
+        },
+      },
+    })
+    expect(config).toContain('mcp_servers:')
+    expect(config).toContain('  notion:')
+    expect(config).toContain('    url: https://mcp.notion.com/mcp')
+    expect(config).not.toContain('    command:')
+  })
+
   it('produces valid YAML structure (no syntax errors)', () => {
     const result = generateDefaultConfig(baseParams)
     // Basic structural checks: no tabs, proper indentation, all colons have values or nested blocks
