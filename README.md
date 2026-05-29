@@ -45,9 +45,9 @@ Hermes Swarm Map is the control plane. One UI to deploy, configure, and manage a
 ```bash
 git clone https://github.com/NimbleCoAI/hermes-swarm-map.git
 cd hermes-swarm-map
-npm install
-npm run seed      # first run: writes settings + tier config
-npm run dev       # http://localhost:3000
+pnpm install
+pnpm seed         # first run: writes settings + tier config
+pnpm dev          # http://localhost:3000
 ```
 
 On first launch, the setup wizard detects your Hermes compose directories automatically. Point it at your agent directory and go.
@@ -85,7 +85,7 @@ On first launch, the setup wizard detects your Hermes compose directories automa
 Build once, run in production mode:
 
 ```bash
-npm run build
+pnpm build
 npx next start --port 3000 --hostname 0.0.0.0
 ```
 
@@ -99,7 +99,7 @@ Set `ALLOWED_DEV_ORIGINS` in `.env` for dev mode on remote machines (see Configu
 
 <img width="1023" height="724" alt="Screenshot 2026-05-27 at 2 50 56 pm" src="https://github.com/user-attachments/assets/a2ad3118-81a2-433a-ae02-289546e7e02d" />
 
-- **Next.js 14** (App Router) + **TypeScript**
+- **Next.js 16** (App Router) + **TypeScript**
 - **Tailwind CSS v4** + **shadcn/ui** + **Lucide Icons**
 - **Docker CLI** (via shell) for container management
 - **Vitest** for testing
@@ -181,6 +181,7 @@ Settings are stored at `~/.hermes-swarm-map/settings.json`. API keys are encrypt
 - [Getting Started](docs/getting-started.md) — deploy your first agent in 5 minutes
 - [Migrating Existing Agents](docs/migrating.md) — upgrade path for existing Hermes users
 - [Platform Setup](docs/platforms.md) — Signal, Telegram, Mattermost, Google Workspace guides
+- [Image vs HSM Boundary](docs/architecture/image-vs-hsm-boundary.md) — what belongs in the Docker image vs HSM scaffolding
 - [Roadmap](docs/ROADMAP.md) — what's shipped and what's next
 - [Contributing](CONTRIBUTING.md) — development setup and PR process
 - [Architecture](AGENTS.md) — service layer, patterns, and agentic development guide

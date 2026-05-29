@@ -12,7 +12,7 @@ See **AGENTS.md** for architecture, patterns, service layer, and what not to do.
    ```bash
    pnpm vitest run
    ```
-   71+ tests must pass. Don't skip or comment out tests.
+   176 tests must pass. Don't skip or comment out tests.
 
 3. **This is NOT an Egregore instance.** No `memory/`, no `/save`, no `/handoff`, no `/wrap`. Standard git workflow.
 
@@ -31,6 +31,7 @@ pnpm seed         # re-seed settings + tier config
 
 ## Key Files
 
+- `docs/architecture/image-vs-hsm-boundary.md` — decision framework: what goes in the Docker image vs HSM
 - `lib/services/harness.ts` — agent discovery, create/import/duplicate, lifecycle
 - `lib/services/docker.ts` — Docker CLI wrapper (stats, restart, pull, health check)
 - `lib/services/keys.ts` — key discovery from .env files + encryption

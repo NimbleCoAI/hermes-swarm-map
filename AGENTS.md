@@ -16,6 +16,8 @@ Hermes Swarm Map is an open-source admin GUI + REST API for orchestrating Hermes
 
 ## Architecture
 
+> **Where does this feature belong — in the Docker image or in HSM?** See [Image vs HSM Boundary](docs/architecture/image-vs-hsm-boundary.md) for the decision framework.
+
 **Next.js fullstack monorepo.** API routes in `app/api/` shell out to Docker via the service layer. No separate backend process — Next.js IS the backend.
 
 **Data at `~/.hermes-swarm-map/`** (configurable via `DATA_DIR`). Holds configs, encryption key, audit logs, and standalone compose files for new agents. Not in the repo.
@@ -181,10 +183,10 @@ Access from any machine on the LAN at `http://<hostname>:3002`.
 ## Testing
 
 ```bash
-pnpm vitest run   # 71 tests across 12 files
+pnpm vitest run   # 176 tests across 21 files
 ```
 
-All tests must pass before committing. Tests mock Docker and filesystem — no real containers needed.
+All 176 tests must pass before committing. Tests mock Docker and filesystem — no real containers needed.
 
 ## What NOT To Do
 
