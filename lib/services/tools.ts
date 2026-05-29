@@ -200,6 +200,15 @@ export class ToolsService {
     return tools.sort((a, b) => a.name.localeCompare(b.name))
   }
 
+  /**
+   * Discover tool IDs for a single harness by scanning its config.yaml and skills dir.
+   * Returns an array of tool IDs (e.g. ['t_abc12345', ...]).
+   */
+  discoverForHarness(harnessName: string): string[] {
+    const registry = discoverTools([harnessName])
+    return Array.from(registry.keys())
+  }
+
   list(harnessNames?: string[]): Tool[] {
     const names = harnessNames ?? this.defaultHarnessNames()
     return this.discover(names)
