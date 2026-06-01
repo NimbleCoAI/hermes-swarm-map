@@ -749,6 +749,34 @@ export class HarnessService {
     if (harnesses.length === 0) {
       return this.storage.read<Harness[]>(HARNESSES_FILE, [])
     }
+
+    // Include overlay-only entries that have no running container (e.g. duplicated but not started)
+    const discoveredIds = new Set(harnesses.map((h) => h.id))
+    const overlays = this.storage.read<Partial<Harness>[]>(HARNESSES_FILE, [])
+    for (const overlay of overlays) {
+      if (!overlay.id || discoveredIds.has(overlay.id)) continue
+      harnesses.push({
+        id: overlay.id,
+        name: overlay.name ?? overlay.id.replace(/^h_/, '').replace(/_/g, '-'),
+        runtime: 'hermes',
+        status: 'stopped',
+        health: { errors: 0 },
+        persona: overlay.persona ?? '',
+        lastSeen: 0,
+        cpu: 0,
+        mem: 0,
+        tier: overlay.tier ?? 'individual',
+        platform: overlay.platform ?? 'hermes',
+        channel: overlay.channel ?? '',
+        models: overlay.models ?? [],
+        tools: overlay.tools ?? [],
+        costToday: 0,
+        invocations: 0,
+        composeFile: overlay.composeFile,
+        serviceName: overlay.serviceName,
+      } as Harness)
+    }
+
     return harnesses
   }
 
