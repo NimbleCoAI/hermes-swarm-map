@@ -292,20 +292,22 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
               </p>
             </div>
             {hasExistingNumber && (
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Bot Display Name</label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Signal profile name for this bot"
-                  className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Sets the Signal profile name shown to contacts.
-                </p>
-              </div>
-              <SignalPinField value={pin} onChange={setPin} disabled={loading} />
+              <>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Bot Display Name</label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Signal profile name for this bot"
+                    className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Sets the Signal profile name shown to contacts.
+                  </p>
+                </div>
+                <SignalPinField value={pin} onChange={setPin} disabled={loading} />
+              </>
             )}
             {!hasExistingNumber && (
               <p className="text-xs text-muted-foreground">
