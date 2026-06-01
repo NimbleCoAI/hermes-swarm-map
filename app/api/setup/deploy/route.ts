@@ -141,6 +141,9 @@ function generateEnvContent(params: {
   lines.push(`SIGNAL_REQUIRE_MENTION=true`)
   lines.push(`TELEGRAM_REQUIRE_MENTION=true`)
   lines.push(`MATTERMOST_REQUIRE_MENTION=true`)
+  lines.push(`SIGNAL_OBSERVE_UNMENTIONED=true`)
+  lines.push(`MATTERMOST_OBSERVE_UNMENTIONED=true`)
+  lines.push(`TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true`)
   lines.push(`SIGNAL_GROUP_INVITE_POLICY=approved-only`)
   // Browser tools (Camofox)
   if (browserEnabled) {
