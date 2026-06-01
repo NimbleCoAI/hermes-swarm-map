@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSignalDaemonUrl } from '@/lib/env-helpers'
+import { services } from '@/lib/services'
 
 const SIGNAL_API = getSignalDaemonUrl()
 
@@ -24,8 +25,29 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ healthy, url: SIGNAL_API, accounts })
+    // Cross-reference PIN status for each known account
+    const pinStatus: Record<string, string> = {}
+    const harnesses = services.harness.list()
+    const harnessAccounts: Array<{ phone: string; harnessId: string }> = []
+
+    for (const h of harnesses) {
+      if (h.platform === 'signal' && h.channel) {
+        harnessAccounts.push({ phone: h.channel, harnessId: h.id })
+      }
+    }
+
+    if (healthy && harnessAccounts.length > 0) {
+      const status = await services.signalPin.checkPinHealth(accounts, harnessAccounts)
+      Object.assign(pinStatus, status)
+    } else {
+      // Daemon not healthy — just report stored status
+      for (const { phone } of harnessAccounts) {
+        pinStatus[phone] = services.signalPin.getPinStatus(phone)
+      }
+    }
+
+    return NextResponse.json({ healthy, url: SIGNAL_API, accounts, pinStatus })
   } catch {
-    return NextResponse.json({ healthy: false, url: SIGNAL_API, accounts: [] })
+    return NextResponse.json({ healthy: false, url: SIGNAL_API, accounts: [], pinStatus: {} })
   }
 }
