@@ -114,17 +114,28 @@ networks:
 `
 }
 
+// Directories to skip when duplicating an agent (caches, build artifacts, ephemeral state)
+const COPY_SKIP_DIRS = new Set(['.cache', 'node_modules', '__pycache__', '.venv'])
+
 // Recursively copy a directory (sync — used by duplicateOverlay for full agent dir copies)
 function copyDirRecursive(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true })
   const entries = fs.readdirSync(src, { withFileTypes: true })
   for (const entry of entries) {
+    if (COPY_SKIP_DIRS.has(entry.name)) continue
     const srcPath = path.join(src, entry.name)
     const destPath = path.join(dest, entry.name)
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath)
-    } else {
-      fs.copyFileSync(srcPath, destPath)
+    try {
+      if (entry.isSymbolicLink()) {
+        const target = fs.readlinkSync(srcPath)
+        fs.symlinkSync(target, destPath)
+      } else if (entry.isDirectory()) {
+        copyDirRecursive(srcPath, destPath)
+      } else {
+        fs.copyFileSync(srcPath, destPath)
+      }
+    } catch {
+      // Skip files that vanish during copy (volatile caches, broken symlinks)
     }
   }
 }
@@ -795,6 +806,11 @@ export class HarnessService {
     if (!source) return undefined
 
     const newId = 'h_' + newName.replace(/-/g, '_').replace(/\s+/g, '_')
+
+    // Reject if name or ID already exists
+    if (overlays.some((h) => h.id === newId || h.name === newName)) {
+      return undefined
+    }
 
     // Determine agent dirs
     const sourceName = source.name ?? sourceId.replace(/^h_/, '').replace(/_/g, '-')

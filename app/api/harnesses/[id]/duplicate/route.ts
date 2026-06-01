@@ -13,7 +13,20 @@ export async function POST(
     return NextResponse.json({ error: 'name is required' }, { status: 400 })
   }
 
-  const result = await services.harness.duplicateOverlay(id, newName.trim())
+  const trimmed = newName.trim()
+
+  // Check if name already exists before attempting duplicate
+  const existing = services.harness.get(
+    'h_' + trimmed.replace(/-/g, '_').replace(/\s+/g, '_')
+  )
+  if (existing) {
+    return NextResponse.json(
+      { error: `Harness "${trimmed}" already exists` },
+      { status: 409 }
+    )
+  }
+
+  const result = await services.harness.duplicateOverlay(id, trimmed)
   if (!result) {
     return NextResponse.json({ error: 'Source harness not found' }, { status: 404 })
   }
