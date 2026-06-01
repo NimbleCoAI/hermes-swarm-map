@@ -117,6 +117,13 @@ networks:
 // Directories to skip when duplicating an agent (caches, build artifacts, ephemeral state)
 const COPY_SKIP_DIRS = new Set(['.cache', 'node_modules', '__pycache__', '.venv'])
 
+// Surface-specific env vars stripped from duplicates to prevent two harnesses sharing one surface
+const SURFACE_ENV_VARS = [
+  'SIGNAL_ACCOUNT', 'SIGNAL_HTTP_URL', 'SIGNAL_ALLOWED_USERS', 'SIGNAL_GROUP_ALLOWED_USERS',
+  'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USERS', 'TELEGRAM_GROUP_ALLOWED_CHATS',
+  'MATTERMOST_URL', 'MATTERMOST_TOKEN', 'MATTERMOST_ALLOWED_CHANNELS', 'MATTERMOST_ALLOWED_USERS',
+]
+
 // Recursively copy a directory (sync — used by duplicateOverlay for full agent dir copies)
 function copyDirRecursive(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true })
@@ -859,7 +866,7 @@ export class HarnessService {
     if (fs.existsSync(sourceDataDir) && !fs.existsSync(newDataDir)) {
       // Deep copy using recursive dir copy
       copyDirRecursive(sourceDataDir, newDataDir)
-      // Update port in the new .env
+      // Update port and strip surface credentials from the new .env
       const newEnvPath = path.join(newDataDir, '.env')
       if (fs.existsSync(newEnvPath)) {
         let envContent = fs.readFileSync(newEnvPath, 'utf-8')
@@ -867,6 +874,11 @@ export class HarnessService {
           /^API_SERVER_PORT=.*/m,
           `API_SERVER_PORT=${port}`
         )
+        // Remove surface-specific vars to avoid two harnesses bound to the same surface
+        envContent = envContent
+          .split('\n')
+          .filter((line) => !SURFACE_ENV_VARS.some((v) => line.startsWith(`${v}=`)))
+          .join('\n')
         fs.writeFileSync(newEnvPath, envContent, { mode: 0o600 })
       }
     } else if (!fs.existsSync(newDataDir)) {
@@ -888,6 +900,8 @@ export class HarnessService {
       channel: `:${port}`,
       composeFile: composePath,
       serviceName: `hermes-${newName}`,
+      parentId: sourceId,
+      platform: undefined, // reset — no surfaces connected yet
     }
 
     overlays.push(duplicate)
