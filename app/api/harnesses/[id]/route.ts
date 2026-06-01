@@ -12,3 +12,19 @@ export async function GET(
   }
   return NextResponse.json(harness)
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const url = new URL(request.url)
+  const deleteFiles = url.searchParams.get('deleteFiles') === 'true'
+
+  const result = services.harness.remove(id, deleteFiles)
+  if (!result.removed) {
+    return NextResponse.json({ error: 'Harness not found' }, { status: 404 })
+  }
+
+  return NextResponse.json(result)
+}

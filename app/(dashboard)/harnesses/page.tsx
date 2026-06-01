@@ -77,6 +77,36 @@ export default function HarnessesPage() {
     }
   }
 
+  async function removeOne(id: string, name: string) {
+    const confirmed = window.confirm(
+      `Remove "${name}" from HSM?\n\nThis will stop the container and unregister it. Data files are kept unless you choose to delete them.`
+    )
+    if (!confirmed) return
+
+    const deleteFiles = window.confirm(
+      `Also delete all data files for "${name}"?\n\n• ~/.hermes-${name}/\n• compose config\n\nClick OK to delete files, or Cancel to keep them.`
+    )
+
+    try {
+      const res = await fetch(`/api/harnesses/${id}?deleteFiles=${deleteFiles}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Remove failed')
+        return
+      }
+      const result = await res.json()
+      const msg = deleteFiles && result.filesDeleted
+        ? `Removed "${name}" and deleted files`
+        : `Removed "${name}" (files kept)`
+      toast.success(msg)
+      refetch()
+    } catch {
+      toast.error('Remove failed')
+    }
+  }
+
   async function duplicateOne(id: string, currentName: string) {
     const newName = window.prompt('Name for the duplicate harness:', `${currentName}-copy`)
     if (!newName?.trim()) return
@@ -162,6 +192,9 @@ export default function HarnessesPage() {
                       </Button>
                       <Button variant="ghost" size="xs" onClick={() => duplicateOne(h.id, h.name)} title="Duplicate">
                         ⧉
+                      </Button>
+                      <Button variant="ghost" size="xs" onClick={() => removeOne(h.id, h.name)} title="Remove" className="text-destructive hover:text-destructive">
+                        ✕
                       </Button>
                     </div>
                   </td>

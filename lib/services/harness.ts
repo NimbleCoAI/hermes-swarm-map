@@ -902,6 +902,56 @@ export class HarnessService {
     return duplicate
   }
 
+  remove(id: string, deleteFiles: boolean): { removed: boolean; stopped: boolean; filesDeleted: boolean } {
+    const overlays = this.storage.read<Partial<Harness>[]>(HARNESSES_FILE, [])
+    const index = overlays.findIndex((h) => h.id === id)
+    if (index === -1) return { removed: false, stopped: false, filesDeleted: false }
+
+    const overlay = overlays[index]
+    const name = overlay.name ?? id.replace(/^h_/, '').replace(/_/g, '-')
+    let stopped = false
+    let filesDeleted = false
+
+    // Stop container if running
+    if (overlay.composeFile && overlay.serviceName) {
+      try {
+        this.docker.stop(overlay.composeFile, overlay.serviceName)
+        stopped = true
+      } catch {
+        // Container may not be running — that's fine
+      }
+    }
+
+    // Remove overlay entry
+    overlays.splice(index, 1)
+    this.storage.write(HARNESSES_FILE, overlays)
+
+    if (deleteFiles) {
+      // Remove data directory
+      const dataDir = path.join(os.homedir(), `.hermes-${name}`)
+      if (fs.existsSync(dataDir)) {
+        fs.rmSync(dataDir, { recursive: true, force: true })
+        filesDeleted = true
+      }
+      // Remove compose directory
+      if (overlay.composeFile) {
+        const composeDir = path.dirname(overlay.composeFile)
+        if (fs.existsSync(composeDir)) {
+          fs.rmSync(composeDir, { recursive: true, force: true })
+          filesDeleted = true
+        }
+      }
+    }
+
+    this.audit.append({
+      who: 'admin',
+      what: deleteFiles ? 'delete' : 'unregister',
+      target: name,
+    })
+
+    return { removed: true, stopped, filesDeleted }
+  }
+
   async createOverlay(input: { name: string; tier?: HabitatTier; platform?: string; channel?: string; models?: string[]; tools?: string[] }): Promise<Partial<Harness>> {
     const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
 

@@ -528,6 +528,33 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
     }
   }
 
+  async function doRemove() {
+    const name = harness?.name ?? id
+    const confirmed = window.confirm(
+      `Remove "${name}" from HSM?\n\nThis will stop the container and unregister it.`
+    )
+    if (!confirmed) return
+
+    const deleteFiles = window.confirm(
+      `Also delete all data files for "${name}"?\n\nClick OK to delete files, or Cancel to keep them.`
+    )
+
+    try {
+      const res = await fetch(`/api/harnesses/${id}?deleteFiles=${deleteFiles}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? 'Remove failed')
+        return
+      }
+      toast.success(`Removed "${name}"`)
+      router.push('/harnesses')
+    } catch {
+      toast.error('Remove failed')
+    }
+  }
+
   async function saveModelConfig() {
     const provider = modelProvider || modelConfig?.provider || ''
     const model = modelName || modelConfig?.primary || ''
@@ -606,6 +633,9 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={doDuplicate}>
             Duplicate
+          </Button>
+          <Button variant="outline" size="sm" onClick={doRemove} className="text-destructive border-destructive/30 hover:bg-destructive/10">
+            Remove
           </Button>
           <SplitButton
             label="Quick Restart"
