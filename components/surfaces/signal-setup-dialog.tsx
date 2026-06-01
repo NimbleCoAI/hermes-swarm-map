@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Phone, ExternalLink, Loader2, CheckCircle2, XCircle, AlertTriangle, RefreshCw, Rocket } from 'lucide-react'
 import { toast } from 'sonner'
+import { SignalPinField, generateClientPin } from './signal-pin-field'
 
 type Step = 'phone' | 'registering' | 'captcha' | 'verify' | 'profile' | 'done' | 'error'
 
@@ -29,6 +30,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
   const [daemonHealthy, setDaemonHealthy] = useState<boolean | null>(null)
   const [healthChecking, setHealthChecking] = useState(false)
   const [deploying, setDeploying] = useState(false)
+  const [pin, setPin] = useState('')
 
   async function checkDaemonHealth() {
     setHealthChecking(true)
@@ -70,6 +72,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
     if (open) {
       dialogRef.current?.showModal()
       checkDaemonHealth()
+      setPin(generateClientPin())
     } else {
       dialogRef.current?.close()
       // Reset state on close
@@ -84,6 +87,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
       setHasExistingNumber(false)
       setDaemonHealthy(null)
       setDeploying(false)
+      setPin('')
     }
   }, [open])
 
@@ -127,7 +131,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
       const res = await fetch('/api/surfaces/signal/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, code: verifyCode, displayName }),
+        body: JSON.stringify({ phone, code: verifyCode, displayName, pin, harnessId }),
       })
       const data = await res.json()
 
@@ -166,6 +170,24 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
   async function handleExistingNumber() {
     setLoading(true)
     setError('')
+
+    // Set PIN on existing account
+    if (pin) {
+      try {
+        const pinRes = await fetch('/api/surfaces/signal/pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone, pin, harnessId }),
+        })
+        const pinData = await pinRes.json()
+        if (!pinData.success) {
+          toast.warning(`Registration lock not set: ${pinData.error}`)
+        }
+      } catch {
+        toast.warning('Could not set registration lock PIN')
+      }
+    }
+
     await connectSurface()
     setLoading(false)
   }
@@ -283,6 +305,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
                   Sets the Signal profile name shown to contacts.
                 </p>
               </div>
+              <SignalPinField value={pin} onChange={setPin} disabled={loading} />
             )}
             {!hasExistingNumber && (
               <p className="text-xs text-muted-foreground">
@@ -387,6 +410,7 @@ export function SignalSetupDialog({ open, onClose, harnessId, harnessName, onCon
                 className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
               />
             </div>
+            <SignalPinField value={pin} onChange={setPin} disabled={loading} />
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             <div className="flex justify-end gap-2">
               <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] hover:bg-muted">
