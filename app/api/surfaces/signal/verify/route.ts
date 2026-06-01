@@ -7,8 +7,8 @@ const CONTAINER = process.env.SIGNAL_CONTAINER || 'signal-cli-daemon'
 const SIGNAL_API = process.env.SIGNAL_API_URL || 'http://localhost:8080'
 
 export async function POST(request: Request) {
-  const { phone, code, displayName } = await request.json() as {
-    phone: string; code: string; displayName?: string
+  const { phone, code, displayName, pin, harnessId } = await request.json() as {
+    phone: string; code: string; displayName?: string; pin?: string; harnessId?: string
   }
 
   if (!phone || !code) {
@@ -62,7 +62,15 @@ export async function POST(request: Request) {
       { timeout: 15000 }
     ).catch(() => {})
 
-    return NextResponse.json({ success: true })
+    // Set registration lock PIN if provided
+    let pinSet = false
+    if (pin && harnessId) {
+      const { services } = await import('@/lib/services')
+      const pinResult = await services.signalPin.setPin(phone, pin, harnessId)
+      pinSet = pinResult.success
+    }
+
+    return NextResponse.json({ success: true, pinSet })
   } catch (error: unknown) {
     const err = error as { stderr?: string; stdout?: string; message?: string }
     const output = (err.stderr || '') + (err.stdout || '') + (err.message || '')
