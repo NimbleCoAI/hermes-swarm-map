@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApi } from '@/lib/hooks/use-api'
 import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
+import { Shield, Loader2 } from 'lucide-react'
 import type { Settings } from '@/lib/types'
 
 export default function SettingsPage() {
@@ -45,6 +46,47 @@ export default function SettingsPage() {
   }
 
   const localApiPort = settings?.localApiPort ?? 8600
+
+  const [bulkLocking, setBulkLocking] = useState(false)
+  const [signalStatus, setSignalStatus] = useState<{
+    accounts: string[]
+    pinStatus: Record<string, string>
+  } | null>(null)
+  const [signalLoading, setSignalLoading] = useState(false)
+
+  async function loadSignalStatus() {
+    setSignalLoading(true)
+    try {
+      const res = await fetch('/api/surfaces/signal')
+      const data = await res.json()
+      if (data.healthy) {
+        setSignalStatus({ accounts: data.accounts || [], pinStatus: data.pinStatus || {} })
+      }
+    } catch {}
+    setSignalLoading(false)
+  }
+
+  async function handleBulkLock() {
+    setBulkLocking(true)
+    try {
+      const res = await fetch('/api/surfaces/signal/pin/bulk-set', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        const count = data.locked?.length || 0
+        const already = data.alreadyLocked?.length || 0
+        const failed = data.failed?.length || 0
+        toast.success(`Locked ${count} accounts (${already} already locked${failed ? `, ${failed} failed` : ''})`)
+        loadSignalStatus()
+      } else {
+        toast.error(data.error || 'Bulk lock failed')
+      }
+    } catch {
+      toast.error('Failed to set registration locks')
+    }
+    setBulkLocking(false)
+  }
+
+  useEffect(() => { loadSignalStatus() }, [])
 
   return (
     <div className="space-y-8">
@@ -88,6 +130,53 @@ export default function SettingsPage() {
           </div>
         </section>
       )}
+
+      {/* Signal Security */}
+      <section>
+        <h3 className="text-base font-medium mb-3 flex items-center gap-2">
+          <Shield className="h-4 w-4" />
+          Signal Security
+        </h3>
+        {signalLoading && <p className="text-muted-foreground text-sm">Loading...</p>}
+        {signalStatus && (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Registered accounts</span>
+              <span>{signalStatus.accounts.length}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Locked (PIN set)</span>
+              <span className="text-[var(--success)]">
+                {Object.values(signalStatus.pinStatus).filter(s => s === 'locked').length}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Unprotected</span>
+              <span className={Object.values(signalStatus.pinStatus).filter(s => s === 'not-set').length > 0 ? 'text-[var(--warning)]' : ''}>
+                {Object.values(signalStatus.pinStatus).filter(s => s === 'not-set').length}
+              </span>
+            </div>
+            {Object.values(signalStatus.pinStatus).filter(s => s === 'expired').length > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Expired</span>
+                <span className="text-[var(--danger)]">
+                  {Object.values(signalStatus.pinStatus).filter(s => s === 'expired').length}
+                </span>
+              </div>
+            )}
+            {Object.values(signalStatus.pinStatus).some(s => s === 'not-set') && (
+              <button
+                onClick={handleBulkLock}
+                disabled={bulkLocking}
+                className="w-full px-3 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              >
+                {bulkLocking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+                Lock all unprotected accounts
+              </button>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Local API */}
       {!sLoading && settings && (
