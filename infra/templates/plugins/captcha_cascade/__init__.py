@@ -48,7 +48,18 @@ def _camofox_url() -> str:
 
 
 def _vnc_url() -> Optional[str]:
-    """Get VNC URL from Camofox /health endpoint."""
+    """Get the externally-reachable VNC URL for human CAPTCHA escalation.
+
+    Prefers VNC_EXTERNAL_URL, which HSM writes when VPN mode is enabled — it
+    encodes the externally-reachable host (the VNC bind host, e.g. a Tailscale
+    address) and the host-published VNC port. The Camofox /health fallback only
+    knows the internal noVNC port and builds the URL from CAMOFOX_URL
+    (host.docker.internal), which a human cannot reach — so it's a last resort.
+    """
+    external = os.environ.get("VNC_EXTERNAL_URL", "").strip().rstrip("/")
+    if external:
+        return external
+
     url = _camofox_url()
     if not url:
         return None

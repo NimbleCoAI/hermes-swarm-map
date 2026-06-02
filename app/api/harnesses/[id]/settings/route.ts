@@ -74,6 +74,7 @@ const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
 const DM_POLICY_VAR = 'HERMES_DM_POLICY'
 const VPN_ENABLED_VAR = 'VPN_ENABLED'
 const CAPSOLVER_KEY_VAR = 'CAPSOLVER_API_KEY'
+const VNC_EXTERNAL_URL_VAR = 'VNC_EXTERNAL_URL'
 
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
@@ -288,14 +289,35 @@ export async function PUT(
     content = content.trimEnd() + `\nHERMES_MEMORY_SCOPE=${memoryScopeValue}\n`
   }
 
-  // VPN toggle
+  // VPN toggle + externally-reachable VNC URL for human CAPTCHA escalation
   if ((body as any).vpnEnabled !== undefined) {
-    const vpnValue = (body as any).vpnEnabled ? 'true' : 'false'
+    const vpnEnabled = !!(body as any).vpnEnabled
+    const vpnValue = vpnEnabled ? 'true' : 'false'
     const vpnRegex = new RegExp(`^${VPN_ENABLED_VAR}=.*$`, 'm')
     if (vpnRegex.test(content)) {
       content = content.replace(vpnRegex, `${VPN_ENABLED_VAR}=${vpnValue}`)
     } else {
       content = content.trimEnd() + `\n${VPN_ENABLED_VAR}=${vpnValue}\n`
+    }
+
+    // The captcha plugin DMs this URL to a human. Port = agent port + 2000
+    // (see harness-compose); host = the configured VNC bind host (loopback by
+    // default — set settings.vncBindHost to a Tailscale address for remote
+    // escalation). Cleared when VPN is disabled.
+    const vncBindHost = services.config.getSettings().vncBindHost || '127.0.0.1'
+    const harness = services.harness.get(id)
+    let vncExternalUrl = ''
+    if (vpnEnabled && harness?.composeFile && fs.existsSync(harness.composeFile)) {
+      const existingCompose = fs.readFileSync(harness.composeFile, 'utf-8')
+      const portMatch = existingCompose.match(/published:\s*(\d+)/)
+      const port = portMatch ? parseInt(portMatch[1], 10) : 8642
+      vncExternalUrl = `http://${vncBindHost}:${port + 2000}`
+    }
+    const vncRegex = new RegExp(`^${VNC_EXTERNAL_URL_VAR}=.*$`, 'm')
+    if (vncRegex.test(content)) {
+      content = content.replace(vncRegex, `${VNC_EXTERNAL_URL_VAR}=${vncExternalUrl}`)
+    } else if (vncExternalUrl) {
+      content = content.trimEnd() + `\n${VNC_EXTERNAL_URL_VAR}=${vncExternalUrl}\n`
     }
   }
 
@@ -327,6 +349,7 @@ export async function PUT(
         vpnEnabled: (body as any).vpnEnabled,
         imageOrBuild,
         defaultImage: settings.defaultImage,
+        vncBindHost: settings.vncBindHost,
       })
       fs.writeFileSync(harness.composeFile, compose, 'utf-8')
     }

@@ -291,6 +291,44 @@ class TestCamofoxUrl:
         assert _camofox_url() == ""
 
 
+class TestVncUrl:
+    """_vnc_url prefers the HSM-provided external URL over Camofox /health.
+
+    HSM knows the externally-reachable VNC address (host bind + published port);
+    the in-container /health only reports the internal noVNC port and the URL is
+    built from CAMOFOX_URL (host.docker.internal), which is unreachable by a human.
+    """
+
+    def test_prefers_vnc_external_url_env(self, monkeypatch):
+        monkeypatch.setenv("VNC_EXTERNAL_URL", "http://100.64.0.5:10642")
+        monkeypatch.setenv("CAMOFOX_URL", "http://host.docker.internal:9377")
+        # Must NOT hit the network when the external URL is provided
+        import __init__ as mod
+        monkeypatch.setattr(
+            mod, "requests",
+            MagicMock(get=MagicMock(side_effect=AssertionError("should not call /health"))),
+        )
+        assert _vnc_url() == "http://100.64.0.5:10642"
+
+    def test_strips_trailing_slash_on_external_url(self, monkeypatch):
+        monkeypatch.setenv("VNC_EXTERNAL_URL", "http://100.64.0.5:10642/")
+        assert _vnc_url() == "http://100.64.0.5:10642"
+
+    def test_falls_back_to_health_when_no_external_url(self, monkeypatch):
+        monkeypatch.delenv("VNC_EXTERNAL_URL", raising=False)
+        monkeypatch.setenv("CAMOFOX_URL", "http://camofox.local:9377")
+        health = MagicMock(status_code=200)
+        health.json.return_value = {"vncPort": 6080}
+        import __init__ as mod
+        monkeypatch.setattr(mod, "requests", MagicMock(get=MagicMock(return_value=health)))
+        assert _vnc_url() == "http://camofox.local:6080"
+
+    def test_returns_none_when_nothing_configured(self, monkeypatch):
+        monkeypatch.delenv("VNC_EXTERNAL_URL", raising=False)
+        monkeypatch.delenv("CAMOFOX_URL", raising=False)
+        assert _vnc_url() is None
+
+
 class TestCamofoxEval:
     def test_successful_eval(self, monkeypatch):
         monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")

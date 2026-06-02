@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: Settings = {
   composeFiles: [],
   defaultImage: 'ghcr.io/nimblecoai/hermes-agent:latest',
   useLocalBuild: true,
+  vncBindHost: '127.0.0.1',
 }
 
 // Agent data directory mapping
