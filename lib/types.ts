@@ -4,7 +4,11 @@ export type HarnessStatus = 'running' | 'idle' | 'stopped' | 'error' | 'restarti
 
 export type CacheState = 'warm' | 'cold' | 'stale'
 
-export type RestartMode = 'quick' | 'rebuild' | 'purge'
+// quick:    docker compose restart — restarts the process, does NOT reload env_file
+// recreate: up -d --force-recreate — recreates the container, reloads env_file (no image build)
+// rebuild:  up -d --build --force-recreate — rebuilds image + recreates
+// purge:    build --no-cache + up -d --force-recreate — full from-scratch rebuild
+export type RestartMode = 'quick' | 'recreate' | 'rebuild' | 'purge'
 
 export type Harness = {
   id: string
