@@ -188,6 +188,27 @@ describe('Harness E2E', () => {
       const result = await service.importFromDir(agentDir, 'imported-agent')
       expect(result.changes.composeGenerated).toBe(true)
     })
+
+    it('defaults mention-gating to require @mention (secure by default)', async () => {
+      storage.write('harnesses.json', [])
+      const result = await service.importFromDir(agentDir, 'imported-agent')
+      expect(result.changes.envVarsAdded).toContain('SIGNAL_REQUIRE_MENTION')
+      const envContent = fs.readFileSync(path.join(result.destDir, '.env'), 'utf-8')
+      expect(envContent).toContain('SIGNAL_REQUIRE_MENTION=true')
+      expect(envContent).toContain('TELEGRAM_REQUIRE_MENTION=true')
+      expect(envContent).toContain('MATTERMOST_REQUIRE_MENTION=true')
+    })
+
+    it('does not override an explicit mention-gating opt-out on import', async () => {
+      // An agent that explicitly disabled the gate stays disabled — the default
+      // only applies when the var is absent.
+      fs.appendFileSync(path.join(agentDir, '.env'), 'SIGNAL_REQUIRE_MENTION=false\n')
+      storage.write('harnesses.json', [])
+      const result = await service.importFromDir(agentDir, 'imported-agent')
+      const envContent = fs.readFileSync(path.join(result.destDir, '.env'), 'utf-8')
+      expect(envContent).toContain('SIGNAL_REQUIRE_MENTION=false')
+      expect(envContent).not.toContain('SIGNAL_REQUIRE_MENTION=true')
+    })
   })
 
   describe('duplicateOverlay', () => {
