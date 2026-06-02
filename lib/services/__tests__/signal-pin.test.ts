@@ -42,7 +42,8 @@ describe('SignalPinService', () => {
       expect(mockFetch).toHaveBeenCalledOnce()
       const body = JSON.parse(mockFetch.mock.calls[0][1].body)
       expect(body.method).toBe('setPin')
-      expect(body.params.registrationLockPin).toBe('12345678')
+      expect(body.params.account).toBe('+15551234567')
+      expect(body.params.pin).toBe('12345678')
 
       // PIN should be stored in key store
       const allKeys = keys.list([])

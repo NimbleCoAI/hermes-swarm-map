@@ -25,14 +25,15 @@ export async function GET() {
       }
     }
 
-    // Cross-reference PIN status for each known account
+    // Cross-reference PIN status using surfaces (Signal is a multi-surface, not h.platform)
     const pinStatus: Record<string, string> = {}
-    const harnesses = services.harness.list()
+    const surfaces = services.config.listSurfaces()
     const harnessAccounts: Array<{ phone: string; harnessId: string }> = []
 
-    for (const h of harnesses) {
-      if (h.platform === 'signal' && h.channel) {
-        harnessAccounts.push({ phone: h.channel, harnessId: h.id })
+    for (const s of surfaces) {
+      if (s.platform === 'signal' && s.status === 'connected' && s.config.phone) {
+        const harnessId = s.harnessIds[0] || 'unknown'
+        harnessAccounts.push({ phone: s.config.phone, harnessId })
       }
     }
 
@@ -40,7 +41,6 @@ export async function GET() {
       const status = await services.signalPin.checkPinHealth(accounts, harnessAccounts)
       Object.assign(pinStatus, status)
     } else {
-      // Daemon not healthy — just report stored status
       for (const { phone } of harnessAccounts) {
         pinStatus[phone] = services.signalPin.getPinStatus(phone)
       }

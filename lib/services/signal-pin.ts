@@ -47,7 +47,7 @@ export class SignalPinService {
 
   async setPin(phone: string, pin: string, harnessId: string): Promise<PinResult> {
     try {
-      await this.rpc('setPin', { registrationLockPin: pin })
+      await this.rpc('setPin', { account: phone, pin })
     } catch (err) {
       return { success: false, error: (err as Error).message }
     }
@@ -68,7 +68,7 @@ export class SignalPinService {
 
   async removePin(phone: string): Promise<PinResult> {
     try {
-      await this.rpc('removePin')
+      await this.rpc('removePin', { account: phone })
     } catch (err) {
       return { success: false, error: (err as Error).message }
     }
