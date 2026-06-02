@@ -10,7 +10,7 @@ import type { AuditService } from './audit'
 import type { ConfigService } from './config'
 import { getCostToday, getInvocationsToday } from './usage'
 import { markRestarting, isRestarting, clearRestarting } from './restart-tracker'
-import { installBaselineTemplates } from './templates'
+import { installBaselineTemplates, TEMPLATE_PLUGINS } from './templates'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose } from './harness-compose'
 
@@ -1069,7 +1069,7 @@ export class HarnessService {
 
     // 5. Install baseline plugins
     await installBaselineTemplates(workDir)
-    const pluginsInstalled = ['swarm_map_policy', 'boot_md']
+    const pluginsInstalled = [...TEMPLATE_PLUGINS]
 
     // 6. Write BOOT.md if not present
     let bootMdCreated = false
