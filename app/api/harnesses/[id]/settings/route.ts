@@ -60,6 +60,13 @@ const MENTION_GATING_VARS: Record<string, string> = {
   mattermost: 'MATTERMOST_REQUIRE_MENTION',
 }
 
+// Env var names for observing unmentioned messages per platform
+const OBSERVE_UNMENTIONED_VARS: Record<string, string> = {
+  signal: 'SIGNAL_OBSERVE_UNMENTIONED',
+  mattermost: 'MATTERMOST_OBSERVE_UNMENTIONED',
+  telegram: 'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES',
+}
+
 // Global env vars for policy settings
 const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
 const DM_POLICY_VAR = 'HERMES_DM_POLICY'
@@ -227,6 +234,18 @@ export async function PUT(
       content = content.replace(regex, `${varName}=${mentionGatingValue}`)
     } else {
       content = content.trimEnd() + `\n${varName}=${mentionGatingValue}\n`
+    }
+  }
+
+  // Observe-unmentioned — when mention-gating is on, silently record unmentioned messages;
+  // when off (responding to everything), observation is not needed
+  const observeValue = body.mentionGating !== false ? 'true' : 'false'
+  for (const [, varName] of Object.entries(OBSERVE_UNMENTIONED_VARS)) {
+    const regex = new RegExp(`^${varName}=.*$`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${observeValue}`)
+    } else {
+      content = content.trimEnd() + `\n${varName}=${observeValue}\n`
     }
   }
 
