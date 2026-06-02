@@ -4,6 +4,8 @@ import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
 import { resolveIdentifier } from '@/lib/resolvers'
+import { services } from '@/lib/services'
+import { generateStandaloneCompose } from '@/lib/services/harness-compose'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -70,6 +72,8 @@ const OBSERVE_UNMENTIONED_VARS: Record<string, string> = {
 // Global env vars for policy settings
 const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
 const DM_POLICY_VAR = 'HERMES_DM_POLICY'
+const VPN_ENABLED_VAR = 'VPN_ENABLED'
+const CAPSOLVER_KEY_VAR = 'CAPSOLVER_API_KEY'
 
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
@@ -77,6 +81,8 @@ type SettingsResponse = {
   mentionGating: boolean
   commandApprovalAdminOnly: boolean
   memoryScope: 'channel' | 'global'
+  vpnEnabled: boolean
+  capsolverConfigured: boolean
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -161,12 +167,18 @@ export async function GET(
     }
   }
 
+  // VPN + CapSolver status
+  const vpnEnabled = env[VPN_ENABLED_VAR] === 'true'
+  const capsolverConfigured = !!env[CAPSOLVER_KEY_VAR]
+
   const response: SettingsResponse = {
     dmPolicy,
     groupInvitePolicy,
     mentionGating,
     commandApprovalAdminOnly,
     memoryScope,
+    vpnEnabled,
+    capsolverConfigured,
     surfaces,
   }
 
@@ -276,7 +288,49 @@ export async function PUT(
     content = content.trimEnd() + `\nHERMES_MEMORY_SCOPE=${memoryScopeValue}\n`
   }
 
+  // VPN toggle
+  if ((body as any).vpnEnabled !== undefined) {
+    const vpnValue = (body as any).vpnEnabled ? 'true' : 'false'
+    const vpnRegex = new RegExp(`^${VPN_ENABLED_VAR}=.*$`, 'm')
+    if (vpnRegex.test(content)) {
+      content = content.replace(vpnRegex, `${VPN_ENABLED_VAR}=${vpnValue}`)
+    } else {
+      content = content.trimEnd() + `\n${VPN_ENABLED_VAR}=${vpnValue}\n`
+    }
+  }
+
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  // Regenerate compose file when VPN toggle changes
+  if ((body as any).vpnEnabled !== undefined) {
+    const harness = services.harness.get(id)
+    if (harness?.composeFile && fs.existsSync(harness.composeFile)) {
+      // Read current port from existing compose file
+      const existingCompose = fs.readFileSync(harness.composeFile, 'utf-8')
+      const portMatch = existingCompose.match(/published:\s*(\d+)/)
+      const port = portMatch ? parseInt(portMatch[1], 10) : 8642
+
+      const settings = services.config.getSettings()
+      const imageOrBuild = settings.useLocalBuild && settings.hermesDir
+        ? (() => {
+            const resolved = settings.hermesDir!.replace(/^~/, os.homedir())
+            try {
+              if (fs.existsSync(path.join(resolved, 'Dockerfile'))) {
+                return { build: resolved }
+              }
+            } catch {}
+            return undefined
+          })()
+        : undefined
+
+      const compose = generateStandaloneCompose(harness.name, port, dataDir, {
+        vpnEnabled: (body as any).vpnEnabled,
+        imageOrBuild,
+        defaultImage: settings.defaultImage,
+      })
+      fs.writeFileSync(harness.composeFile, compose, 'utf-8')
+    }
+  }
 
   // Resolve identifiers to native IDs (best-effort)
   const resolvedMap: Record<string, Array<{ display: string; nativeId: string; profileName?: string }>> = {}

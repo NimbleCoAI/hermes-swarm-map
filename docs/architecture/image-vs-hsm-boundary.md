@@ -153,3 +153,6 @@ NimbleCoAI/hermes-agent is a fork of NousResearch/hermes-agent. Every feature th
 
 **"Agents should default to mention-gating in group chats"**
 → Both. Safe default in adapter code (`true` when env var unset). HSM exposes the toggle in `.env` and the UI.
+
+**"I want agents to auto-solve CAPTCHAs during browser automation"**
+→ HSM. The browser tool already returns `bot_detection_warning` (image). CAPTCHA solving depends on deployment-specific services (Camofox URL, CapSolver API key). Ship as a plugin (`captcha_cascade`) that registers a `captcha_solve` tool. The agent's skill teaches it when to call the tool. No fork changes needed — the image provides the detection, the plugin provides the resolution.

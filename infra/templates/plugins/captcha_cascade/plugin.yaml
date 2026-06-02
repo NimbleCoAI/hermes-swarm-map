@@ -1,0 +1,9 @@
+name: captcha-cascade
+version: 1.0.0
+description: "CapSolver auto-solve + VNC escalation for CAPTCHAs detected during browser automation."
+author: NimbleCo
+requires_env:
+  - name: CAMOFOX_URL
+    description: "URL of the Camofox browser server"
+    prompt: "Camofox URL (e.g., http://localhost:9377)"
+    password: false
