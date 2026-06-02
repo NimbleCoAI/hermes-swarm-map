@@ -52,12 +52,19 @@ next-env.d.ts
 # Claude Code settings (personal, not project)
 .claude/
 
+# Superpowers specs/plans (contain local filesystem paths and PII)
+docs/superpowers/
+
 # Archives
 *.zip
 *.tar.gz
 
 # OS
 Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
 
 # PM2 logs
 /logs/

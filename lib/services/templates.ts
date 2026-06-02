@@ -3,9 +3,9 @@ import { cp } from 'fs/promises'
 import path from 'path'
 
 // Template directories for baseline plugins, hooks, and skills installed into every new agent
-export const TEMPLATE_PLUGINS = ['swarm_map_policy', 'boot_md']
+export const TEMPLATE_PLUGINS = ['swarm_map_policy', 'boot_md', 'captcha_cascade']
 export const TEMPLATE_HOOKS = ['lifecycle-notify']
-export const TEMPLATE_SKILLS = ['ocr-and-documents']
+export const TEMPLATE_SKILLS = ['ocr-and-documents', 'captcha-escalation']
 
 /**
  * Install baseline plugins and hooks from infra/templates/ into an agent's data directory.
