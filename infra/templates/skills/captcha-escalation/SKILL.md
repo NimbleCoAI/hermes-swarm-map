@@ -1,26 +1,26 @@
 # CAPTCHA Escalation
 
-When `browser_navigate` or `browser_click` returns a response containing `captcha_escalation`, a CAPTCHA or bot-detection challenge was detected that couldn't be auto-solved.
+When `browser_navigate` or `browser_click` returns a `bot_detection_warning`, call the `captcha_solve` tool to attempt automated solving.
 
-## What to Do
+## Flow
 
-1. **Send the user a DM** on your primary connected platform (Signal, Telegram, or Mattermost):
+1. **Call `captcha_solve`** — this tries CapSolver auto-solve if configured, or returns VNC escalation info.
+
+2. **If `captcha_solved: true`** in the response — the CAPTCHA was auto-solved. Call `browser_snapshot` to verify the page advanced, then continue your task.
+
+3. **If `captcha_escalation`** in the response — auto-solve failed or isn't available. Send the user a DM on your primary connected platform:
    - Include the VNC link from `captcha_escalation.vnc_url`
    - If a screenshot is available in `captcha_escalation.screenshot`, describe what you see
    - Explain what you were trying to do and what blocked you
    - Example: "I'm trying to buy tickets on Moshtix but hit a CAPTCHA I can't solve. You can take over the browser here: [VNC link]. Let me know when you're done."
 
-2. **Wait for the user** to reply "done", "finished", "ok", or similar confirmation.
+4. **Wait for the user** to reply "done", "finished", "ok", or similar confirmation.
 
-3. **Verify the page advanced** by calling `browser_snapshot` to check if the challenge is gone.
+5. **Verify the page advanced** by calling `browser_snapshot` to check if the challenge is gone.
 
-4. **If still blocked**, tell the user and offer the VNC link again.
+6. **If still blocked**, tell the user and offer the VNC link again.
 
-5. **Once clear**, continue your original task from where you left off.
-
-## When `captcha_solved` Appears Instead
-
-If the response contains `captcha_solved: true`, the CAPTCHA was auto-solved (via CapSolver). No action needed — continue normally.
+7. **Once clear**, continue your original task from where you left off.
 
 ## Tips
 
