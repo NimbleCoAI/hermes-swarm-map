@@ -1040,6 +1040,12 @@ export class HarnessService {
       HERMES_MEMORY_SCOPE: 'channel',
       HERMES_DM_POLICY: 'approved-only',
       HERMES_APPROVAL_ADMIN_ONLY: 'true',
+      // Mention-only is the secure default for groups, matching newly-created
+      // and deployed agents. Only applied when absent, so an imported agent that
+      // explicitly set these stays as configured.
+      SIGNAL_REQUIRE_MENTION: 'true',
+      TELEGRAM_REQUIRE_MENTION: 'true',
+      MATTERMOST_REQUIRE_MENTION: 'true',
     }
 
     const envPath = path.join(workDir, '.env')
