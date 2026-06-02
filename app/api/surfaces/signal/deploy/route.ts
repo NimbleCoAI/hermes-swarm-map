@@ -60,17 +60,19 @@ export async function POST() {
     // Start
     execSync(`docker compose -f "${composePath}" up -d`, { timeout: 60000, cwd: swarmDir })
 
-    // Poll for health (up to 45 seconds)
+    // Poll for health via JSON-RPC (up to 45 seconds)
     const signalUrl = getSignalDaemonUrl()
     for (let i = 0; i < 15; i++) {
       await new Promise(r => setTimeout(r, 3000))
       try {
-        const res = await fetch(`${signalUrl}/v1/about`, { signal: AbortSignal.timeout(3000) })
+        const res = await fetch(`${signalUrl}/api/v1/rpc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'listAccounts', id: 'health' }),
+          signal: AbortSignal.timeout(3000),
+        })
         if (res.ok) {
-          const data = await res.json()
-          if (data.mode === 'json-rpc') {
-            return NextResponse.json({ status: 'started', healthy: true })
-          }
+          return NextResponse.json({ status: 'started', healthy: true })
         }
       } catch { /* not ready yet */ }
     }

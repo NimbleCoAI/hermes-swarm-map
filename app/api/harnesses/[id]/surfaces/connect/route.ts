@@ -22,11 +22,16 @@ export async function POST(
     return NextResponse.json({ error: 'Missing platform or config' }, { status: 400 })
   }
 
-  // Pre-connect health check for Signal
+  // Pre-connect health check for Signal (uses JSON-RPC since daemon runs in native mode)
   if (platform === 'signal') {
     const signalUrl = getSignalDaemonUrl()
     try {
-      const healthRes = await fetch(`${signalUrl}/v1/about`, { signal: AbortSignal.timeout(3000) })
+      const healthRes = await fetch(`${signalUrl}/api/v1/rpc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'listAccounts', id: 'health' }),
+        signal: AbortSignal.timeout(5000),
+      })
       if (!healthRes.ok) {
         return NextResponse.json({ error: 'Signal daemon not reachable. Deploy it first via Settings or run: cd ~/.hermes-swarm && docker compose -f docker-compose.signal.yml up -d' }, { status: 503 })
       }
