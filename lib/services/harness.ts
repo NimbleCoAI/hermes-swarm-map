@@ -655,6 +655,11 @@ export class HarnessService {
     for (const [containerName, live] of Object.entries(liveContainers)) {
       const name = containerNameToHarnessName(containerName)
       const id = 'h_' + name.replace(/-/g, '_')
+
+      // Only include containers that look like hermes agents or have an overlay
+      const isHermes = containerName.startsWith('hermes-') || containerName.startsWith('seraph-')
+      if (!isHermes && !overlays[id]) continue
+
       const dataDir = guessDataDir(live.serviceName, containerName)
       const persona = readSoul(dataDir)
 
