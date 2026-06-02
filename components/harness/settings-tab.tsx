@@ -19,6 +19,8 @@ type Settings = {
   mentionGating: boolean
   commandApprovalAdminOnly: boolean
   memoryScope: 'channel' | 'global'
+  vpnEnabled: boolean
+  capsolverConfigured: boolean
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -76,6 +78,13 @@ function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
   function updateMemoryScope(scope: 'channel' | 'global') {
     if (!settings) return
     setSettings({ ...settings, memoryScope: scope })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateVpnEnabled(enabled: boolean) {
+    if (!settings) return
+    setSettings({ ...settings, vpnEnabled: enabled })
     setDirty(true)
     setSaved(false)
   }
@@ -330,6 +339,44 @@ if (loading) {
             ? 'Memory writes in groups are scoped to that channel. Users can\'t see memories from other groups. Admins can use scope="global" explicitly.'
             : 'All memory is shared globally across channels. Any user in any group can read/write the same memory pool.'}
         </p>
+      </div>
+
+      {/* VPN (WireGuard Sidecar) */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">VPN (WireGuard Sidecar)</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="vpnEnabled"
+              checked={settings.vpnEnabled === true}
+              onChange={() => updateVpnEnabled(true)}
+              className="accent-[var(--accent)]"
+            />
+            Enabled
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="vpnEnabled"
+              checked={settings.vpnEnabled === false}
+              onChange={() => updateVpnEnabled(false)}
+              className="accent-[var(--accent)]"
+            />
+            Disabled
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.vpnEnabled
+            ? 'Browser traffic is routed through a WireGuard VPN sidecar. Requires a WireGuard config in the agent data directory.'
+            : 'Browser traffic uses the host network directly.'}
+        </p>
+        {settings.capsolverConfigured && (
+          <p className="text-xs text-green-500">CapSolver API key configured — automatic CAPTCHA solving enabled.</p>
+        )}
       </div>
 
       {/* Admin note */}
