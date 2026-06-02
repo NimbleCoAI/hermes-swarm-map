@@ -70,6 +70,8 @@ const OBSERVE_UNMENTIONED_VARS: Record<string, string> = {
 // Global env vars for policy settings
 const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
 const DM_POLICY_VAR = 'HERMES_DM_POLICY'
+const VPN_ENABLED_VAR = 'VPN_ENABLED'
+const CAPSOLVER_KEY_VAR = 'CAPSOLVER_API_KEY'
 
 type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
@@ -77,6 +79,8 @@ type SettingsResponse = {
   mentionGating: boolean
   commandApprovalAdminOnly: boolean
   memoryScope: 'channel' | 'global'
+  vpnEnabled: boolean
+  capsolverConfigured: boolean
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -161,12 +165,18 @@ export async function GET(
     }
   }
 
+  // VPN + CapSolver status
+  const vpnEnabled = env[VPN_ENABLED_VAR] === 'true'
+  const capsolverConfigured = !!env[CAPSOLVER_KEY_VAR]
+
   const response: SettingsResponse = {
     dmPolicy,
     groupInvitePolicy,
     mentionGating,
     commandApprovalAdminOnly,
     memoryScope,
+    vpnEnabled,
+    capsolverConfigured,
     surfaces,
   }
 
@@ -274,6 +284,17 @@ export async function PUT(
     content = content.replace(memoryScopeRegex, `HERMES_MEMORY_SCOPE=${memoryScopeValue}`)
   } else {
     content = content.trimEnd() + `\nHERMES_MEMORY_SCOPE=${memoryScopeValue}\n`
+  }
+
+  // VPN toggle
+  if ((body as any).vpnEnabled !== undefined) {
+    const vpnValue = (body as any).vpnEnabled ? 'true' : 'false'
+    const vpnRegex = new RegExp(`^${VPN_ENABLED_VAR}=.*$`, 'm')
+    if (vpnRegex.test(content)) {
+      content = content.replace(vpnRegex, `${VPN_ENABLED_VAR}=${vpnValue}`)
+    } else {
+      content = content.trimEnd() + `\n${VPN_ENABLED_VAR}=${vpnValue}\n`
+    }
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
