@@ -32,12 +32,15 @@ export async function POST() {
     return NextResponse.json({ success: true, locked: [], alreadyLocked: [], failed: [] })
   }
 
-  // Build phone→harnessId mapping from harness list
-  const harnesses = services.harness.list()
+  // Build phone→harnessId mapping from surfaces (Signal is multi-surface, not h.platform)
+  const surfaces = services.config.listSurfaces()
   const phoneToHarness: Record<string, string> = {}
-  for (const h of harnesses) {
-    if (h.platform === 'signal' && h.channel && registeredPhones.includes(h.channel)) {
-      phoneToHarness[h.channel] = h.id
+  for (const s of surfaces) {
+    if (s.platform === 'signal' && s.status === 'connected' && s.config.phone) {
+      const harnessId = s.harnessIds[0] || 'unassigned'
+      if (registeredPhones.includes(s.config.phone)) {
+        phoneToHarness[s.config.phone] = harnessId
+      }
     }
   }
 
