@@ -3,6 +3,8 @@ services:
     build: .
     container_name: signal-cli-daemon
     restart: unless-stopped
+    labels:
+      - "autoheal=true"
     environment:
       - MODE=json-rpc
     ports:
@@ -18,10 +20,14 @@ services:
       - ${HOME}/.hermes-egregore:${HOME}/.hermes-egregore:ro
       - ${HOME}/.hermes-evil-duck:${HOME}/.hermes-evil-duck:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf --max-time 3 http://localhost:8080/v1/about | grep -q json-rpc"]
+      # signal-cli runs in JSON-RPC daemon mode — there is no REST /v1/about
+      # endpoint (it 404s), so probe the JSON-RPC endpoint. This overrides the
+      # image's baked HEALTHCHECK with an explicit, generous start_period so the
+      # autoheal sidecar never fires while the daemon is still booting accounts.
+      test: ["CMD-SHELL", "curl -sf --max-time 3 -X POST http://localhost:8080/api/v1/rpc -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"listAccounts\",\"id\":\"hc\"}' | grep -q result"]
       interval: 30s
       timeout: 10s
-      start_period: 45s
+      start_period: 90s
       retries: 3
     networks:
       - hermes-net
@@ -33,12 +39,15 @@ services:
     container_name: signal-cli-autoheal
     restart: unless-stopped
     environment:
-      - AUTOHEAL_CONTAINER_LABEL=all
+      # Scope to containers labelled autoheal=true (only the daemon) so this
+      # never restarts agent harness containers.
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
       - AUTOHEAL_INTERVAL=30
-      - AUTOHEAL_START_PERIOD=60
+      - AUTOHEAL_START_PERIOD=120
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    networks: []
+    networks:
+      - hermes-net
 
 networks:
   hermes-net:

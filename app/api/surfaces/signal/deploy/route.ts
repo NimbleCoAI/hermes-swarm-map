@@ -5,30 +5,22 @@ import path from 'path'
 import os from 'os'
 import { getSignalDaemonUrl } from '@/lib/env-helpers'
 
-const COMPOSE_CONTENT = `services:
-  signal-cli:
-    image: bbernhard/signal-cli-rest-api:0.199-dev
-    container_name: signal-cli-daemon
-    restart: unless-stopped
-    environment:
-      - MODE=json-rpc
-    ports:
-      - "8080:8080"
-    volumes:
-      - \${HOME}/.hermes-swarm/signal-data:/home/.local/share/signal-cli
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf --max-time 3 http://localhost:8080/v1/about | grep -q json-rpc"]
-      interval: 30s
-      timeout: 10s
-      start_period: 45s
-      retries: 3
-    networks:
-      - hermes-net
-
-networks:
-  hermes-net:
-    external: true
-`
+// The signal-cli daemon is defined ONCE, in infra/signal-cli/docker-compose.yml
+// (build -> native signal-cli daemon image, correct JSON-RPC healthcheck, scoped
+// autoheal sidecar). This route deploys THAT file instead of duplicating a
+// compose string here. A stale duplicate previously drifted to the wrong image
+// (bbernhard/signal-cli-rest-api) with a /v1/about healthcheck that 404s in
+// daemon mode — keeping a single source of truth prevents that class of bug.
+export function renderDeployedCompose(): string {
+  const infraDir = path.join(process.cwd(), 'infra', 'signal-cli')
+  const src = fs.readFileSync(path.join(infraDir, 'docker-compose.yml'), 'utf8')
+  // `build: .` is relative to the infra dir, but the deployed copy lives in
+  // ~/.hermes-swarm, so pin the build context to an absolute path.
+  return src.replace(
+    /^( *)build: \.\s*$/m,
+    `$1build:\n$1  context: ${infraDir}\n$1  dockerfile: Dockerfile`,
+  )
+}
 
 export async function POST() {
   try {
@@ -45,24 +37,24 @@ export async function POST() {
       execSync('docker network create hermes-net 2>/dev/null || true', { timeout: 5000 })
     } catch { /* already exists */ }
 
-    // Write compose file
+    // Write compose file (rendered from the single source of truth in infra/)
     const swarmDir = path.join(os.homedir(), '.hermes-swarm')
     fs.mkdirSync(swarmDir, { recursive: true })
     fs.mkdirSync(path.join(swarmDir, 'signal-data'), { recursive: true })
     const composePath = path.join(swarmDir, 'docker-compose.signal.yml')
-    fs.writeFileSync(composePath, COMPOSE_CONTENT)
+    fs.writeFileSync(composePath, renderDeployedCompose())
 
     // Remove old container if stopped
     try {
       execSync('docker rm signal-cli-daemon 2>/dev/null || true', { timeout: 5000 })
     } catch { /* nothing to remove */ }
 
-    // Start
-    execSync(`docker compose -f "${composePath}" up -d`, { timeout: 60000, cwd: swarmDir })
+    // Start (build the native image on first deploy; cached thereafter)
+    execSync(`docker compose -f "${composePath}" up -d --build`, { timeout: 180000, cwd: swarmDir })
 
-    // Poll for health via JSON-RPC (up to 45 seconds)
+    // Poll for health via JSON-RPC (up to 90 seconds — accounts take time to load)
     const signalUrl = getSignalDaemonUrl()
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 3000))
       try {
         const res = await fetch(`${signalUrl}/api/v1/rpc`, {
