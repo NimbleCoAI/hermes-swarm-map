@@ -161,6 +161,40 @@ describe('generateStandaloneCompose', () => {
     })
   })
 
+  describe('VPN VNC bind security', () => {
+    it('binds the VNC port to loopback (127.0.0.1) by default', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
+      // The human-only VNC port must not be exposed on all interfaces (LAN/tailnet).
+      // Long-form publish with host_ip restricts the host bind.
+      expect(result).toContain('host_ip: 127.0.0.1')
+      // Still mapped to the VNC target/port — just bound to loopback
+      expect(result).toContain(`published: ${port + 2000}`)
+      expect(result).toContain('target: 6080')
+    })
+
+    it('binds the VNC port to a configured vncBindHost (e.g. tailnet IP)', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, {
+        vpnEnabled: true,
+        vncBindHost: '100.64.0.5',
+      })
+      expect(result).toContain('host_ip: 100.64.0.5')
+      expect(result).not.toContain('host_ip: 127.0.0.1')
+    })
+
+    it('only the VNC port is bind-restricted — agent + camofox ports stay reachable', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
+      // Exactly one host_ip restriction (the VNC port). The agent gateway (8642)
+      // and camofox control port (9377) must remain on the default bind.
+      const matches = result.match(/host_ip:/g) || []
+      expect(matches).toHaveLength(1)
+    })
+
+    it('does not introduce host_ip in non-VPN compose', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir)
+      expect(result).not.toContain('host_ip')
+    })
+  })
+
   describe('regression: non-VPN output matches original format', () => {
     it('contains all expected sections in order', () => {
       const result = generateStandaloneCompose('myagent', 8652, '/data/myagent')

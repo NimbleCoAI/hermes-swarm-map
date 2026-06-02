@@ -27,3 +27,11 @@ When `browser_navigate` or `browser_click` returns a `bot_detection_warning`, ca
 - Don't retry the navigation immediately after escalation — the user needs time to solve it
 - If `vnc_url` says "VNC not available", tell the user you can't provide a live browser link and ask them to solve it another way
 - For payment pages (Apple Pay, credit card forms), extract the payment URL if visible and send it to the user instead of the VNC link
+
+## VNC reachability (operator note)
+
+The VNC link gives whoever opens it **full interactive control of the agent's logged-in browser** (cookies, sessions, payment flows). It is therefore **not exposed to the LAN/internet**:
+
+- The VPN-mode compose binds the VNC port to **loopback (`127.0.0.1`) by default** (`harness-compose.ts`, `vncBindHost`). In that state the link only works *from the host machine itself* — a remote human cannot open it.
+- For **remote human escalation**, set `vncBindHost` (HSM settings) to the host's **Tailscale address**, so only tailnet members can reach it. HSM then writes `VNC_EXTERNAL_URL` into the agent's `.env`, and `captcha_solve` returns that reachable URL.
+- **Follow-ups not yet implemented:** there is no VNC password/auth on the noVNC server (access control today is purely the bind host + tailnet), and the Camofox control port (9377) is still host-published. Add a per-agent VNC password and lock down 9377 before exposing this beyond a trusted single-operator tailnet.

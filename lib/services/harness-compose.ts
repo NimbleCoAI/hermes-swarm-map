@@ -12,6 +12,14 @@ export interface ComposeOptions {
   defaultImage?: string
   vpnEnabled?: boolean
   camofoxImage?: string
+  /**
+   * Host interface to bind the human-facing VNC port to. The VNC port (noVNC,
+   * container 6080) is used ONLY by a human during CAPTCHA escalation — the
+   * agent never connects to it — so binding it to loopback by default keeps it
+   * off the LAN/tailnet/internet. Set to a Tailscale IP/hostname to allow remote
+   * human escalation. Defaults to '127.0.0.1'.
+   */
+  vncBindHost?: string
 }
 
 export function generateStandaloneCompose(
@@ -20,14 +28,14 @@ export function generateStandaloneCompose(
   agentDataDir: string,
   options?: ComposeOptions,
 ): string {
-  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage } = options ?? {}
+  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost } = options ?? {}
   const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoai/hermes-agent:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
 
   if (vpnEnabled) {
-    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage)
+    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost)
   }
 
   return generatePlainCompose(agentName, port, agentDataDir, sourceBlock)
@@ -81,6 +89,7 @@ function generateVpnCompose(
   agentDataDir: string,
   sourceBlock: string,
   camofoxImage?: string,
+  vncBindHost: string = '127.0.0.1',
 ): string {
   const camofoxPort = port + 1000
   const vncPort = port + 2000
@@ -103,7 +112,11 @@ services:
         target: 8642
       - published: ${camofoxPort}
         target: 9377
-      - published: ${vncPort}
+      # VNC is human-only (CAPTCHA escalation); bind to loopback by default so it
+      # is not exposed on the LAN/tailnet. Set vncBindHost to a Tailscale address
+      # to allow remote human escalation.
+      - host_ip: ${vncBindHost}
+        published: ${vncPort}
         target: 6080
 
   camofox:
