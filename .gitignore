@@ -59,6 +59,10 @@ next-env.d.ts
 # OS
 Thumbs.db
 
+# Python
+__pycache__/
+*.pyc
+
 # PM2 logs
 /logs/
 
