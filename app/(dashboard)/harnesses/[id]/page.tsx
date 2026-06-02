@@ -17,6 +17,7 @@ import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
 import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
 import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
 import { EditSurfaceDialog } from '@/components/surfaces/edit-surface-dialog'
+import { SignalPinManager } from '@/components/surfaces/signal-pin-manager'
 import { SettingsTab } from '@/components/harness/settings-tab'
 import { toast } from 'sonner'
 import { MessageSquare, Globe, Bot, Hash, Pencil, ChevronDown, ChevronRight, Shield, Loader2, Save, RotateCw, Users, X } from 'lucide-react'
@@ -149,6 +150,14 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const [discoveredGroups, setDiscoveredGroups] = useState<Array<{id: string; name: string}>>([])
   const [pairedUsers, setPairedUsers] = useState<PairingUser[]>([])
   const [expandedSettings, setExpandedSettings] = useState<Record<string, boolean>>({})
+  const [pinStatus, setPinStatus] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    fetch('/api/surfaces/signal')
+      .then(r => r.json())
+      .then(data => { if (data.pinStatus) setPinStatus(data.pinStatus) })
+      .catch(() => {})
+  }, [])
 
   // Tool toggle state
   const [toolsSaving, setToolsSaving] = useState(false)
@@ -1017,6 +1026,23 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                               <p className="text-xs text-muted-foreground">
                                 These users were approved via pairing. Click x to revoke.
                               </p>
+                            </div>
+                          )}
+
+                          {/* Signal Registration Lock */}
+                          {platform === 'signal' && s.config.phone && (
+                            <div className="pt-2 border-t border-[var(--border)]">
+                              <SignalPinManager
+                                phone={s.config.phone}
+                                harnessId={id}
+                                status={(pinStatus[s.config.phone] as 'locked' | 'expired' | 'not-set') || 'not-set'}
+                                onStatusChange={() => {
+                                  fetch('/api/surfaces/signal')
+                                    .then(r => r.json())
+                                    .then(data => { if (data.pinStatus) setPinStatus(data.pinStatus) })
+                                    .catch(() => {})
+                                }}
+                              />
                             </div>
                           )}
                         </div>
