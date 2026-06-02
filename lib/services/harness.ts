@@ -122,6 +122,9 @@ HERMES_MEMORY_SCOPE=channel
 HERMES_AGENT_NAME=${name}
 HERMES_HOME_CHANNEL=
 
+# Web extraction (self-hosted Firecrawl — no API key needed)
+FIRECRAWL_API_URL=http://host.docker.internal:3002
+
 # Platform integration (uncomment as needed)
 # MATTERMOST_TOKEN=
 # MATTERMOST_URL=

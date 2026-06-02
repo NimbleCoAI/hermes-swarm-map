@@ -118,6 +118,11 @@ function generateEnvContent(params: {
     lines.push(`# SIGNAL_ACCOUNT=`)
   }
 
+  // Web extraction (self-hosted Firecrawl — no API key needed)
+  lines.push('')
+  lines.push(`# Web extraction (self-hosted Firecrawl)`)
+  lines.push(`FIRECRAWL_API_URL=http://host.docker.internal:3002`)
+
   // Swarm Map policy URL — allows agents to query their own harness config
   const hsmPort = process.env.PORT || '3002'
   lines.push('')

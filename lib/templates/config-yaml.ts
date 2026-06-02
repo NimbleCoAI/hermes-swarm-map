@@ -97,6 +97,10 @@ tts:
   edge:
     voice: "en-US-AriaNeural"
 
+# --- Web tools (Firecrawl for safe content extraction) ---
+web:
+  extract_backend: firecrawl
+
 # --- Terminal access ---
 terminal:
   backend: "local"
