@@ -4,6 +4,8 @@ import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
 import { resolveIdentifier } from '@/lib/resolvers'
+import { services } from '@/lib/services'
+import { generateStandaloneCompose } from '@/lib/services/harness-compose'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -298,6 +300,37 @@ export async function PUT(
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  // Regenerate compose file when VPN toggle changes
+  if ((body as any).vpnEnabled !== undefined) {
+    const harness = services.harness.get(id)
+    if (harness?.composeFile && fs.existsSync(harness.composeFile)) {
+      // Read current port from existing compose file
+      const existingCompose = fs.readFileSync(harness.composeFile, 'utf-8')
+      const portMatch = existingCompose.match(/published:\s*(\d+)/)
+      const port = portMatch ? parseInt(portMatch[1], 10) : 8642
+
+      const settings = services.config.getSettings()
+      const imageOrBuild = settings.useLocalBuild && settings.hermesDir
+        ? (() => {
+            const resolved = settings.hermesDir!.replace(/^~/, os.homedir())
+            try {
+              if (fs.existsSync(path.join(resolved, 'Dockerfile'))) {
+                return { build: resolved }
+              }
+            } catch {}
+            return undefined
+          })()
+        : undefined
+
+      const compose = generateStandaloneCompose(harness.name, port, dataDir, {
+        vpnEnabled: (body as any).vpnEnabled,
+        imageOrBuild,
+        defaultImage: settings.defaultImage,
+      })
+      fs.writeFileSync(harness.composeFile, compose, 'utf-8')
+    }
+  }
 
   // Resolve identifiers to native IDs (best-effort)
   const resolvedMap: Record<string, Array<{ display: string; nativeId: string; profileName?: string }>> = {}
