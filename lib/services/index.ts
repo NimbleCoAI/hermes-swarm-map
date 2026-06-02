@@ -6,6 +6,7 @@ import { KeysService } from './keys'
 import { ToolsService } from './tools'
 import { MemoryService } from './memory'
 import { ConfigService } from './config'
+import { SignalPinService } from './signal-pin'
 import path from 'path'
 import os from 'os'
 
@@ -22,6 +23,8 @@ const config = new ConfigService(storage)
 const harness = new HarnessService(storage, docker, audit, config)
 const tools = new ToolsService(storage)
 
+const keysService = new KeysService(storage, audit, DATA_DIR)
+
 // Wire ToolsService into HarnessService for auto-discovery of tools
 harness.setToolsService(tools)
 
@@ -31,7 +34,8 @@ export const services = {
   audit,
   config,
   harness,
-  keys: new KeysService(storage, audit, DATA_DIR),
+  keys: keysService,
   tools,
   memory: new MemoryService(storage),
+  signalPin: new SignalPinService(keysService, process.env.SIGNAL_API_URL || 'http://localhost:8080'),
 }
