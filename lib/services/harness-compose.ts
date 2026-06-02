@@ -1,6 +1,10 @@
 /**
  * Standalone Docker Compose generation for Hermes agents.
  * Extracted from harness.ts to support VPN (WireGuard + Camofox) sidecar configuration.
+ *
+ * NOTE: s6-overlay handles privilege dropping internally — never set `user:` in compose.
+ * Required caps: CHOWN, DAC_OVERRIDE, SETGID, SETUID (for s6), NET_BIND_SERVICE (for gateway).
+ * Do NOT set read_only, no-new-privileges, or noexec tmpfs — s6 writes executables to /run.
  */
 
 export interface ComposeOptions {
@@ -40,7 +44,6 @@ services:
   hermes-${agentName}:
 ${sourceBlock}
     container_name: hermes-${agentName}
-    user: "10000:10000"
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -55,14 +58,11 @@ ${sourceBlock}
     cap_drop:
       - ALL
     cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
       - NET_BIND_SERVICE
-    security_opt:
-      - no-new-privileges
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/tmp
-      - /run
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
@@ -124,7 +124,6 @@ services:
   hermes-${agentName}:
 ${sourceBlock}
     container_name: hermes-${agentName}
-    user: "10000:10000"
     restart: unless-stopped
     network_mode: "service:wireguard"
     depends_on:
@@ -139,14 +138,11 @@ ${sourceBlock}
     cap_drop:
       - ALL
     cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
       - NET_BIND_SERVICE
-    security_opt:
-      - no-new-privileges
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/tmp
-      - /run
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:

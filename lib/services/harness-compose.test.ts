@@ -55,9 +55,13 @@ describe('generateStandaloneCompose', () => {
       const result = generateStandaloneCompose(agentName, port, dataDir)
       expect(result).toContain('cap_drop:')
       expect(result).toContain('- ALL')
-      expect(result).toContain('read_only: true')
-      expect(result).toContain('no-new-privileges')
+      expect(result).toContain('- CHOWN')
+      expect(result).toContain('- SETGID')
+      expect(result).toContain('- SETUID')
       expect(result).toContain('memory: 2G')
+      // s6-overlay needs exec perms on /run — no read_only, no-new-privileges, or noexec tmpfs
+      expect(result).not.toContain('read_only')
+      expect(result).not.toContain('no-new-privileges')
     })
 
     it('includes network name', () => {
@@ -142,8 +146,8 @@ describe('generateStandaloneCompose', () => {
       const result = generateStandaloneCompose(agentName, port, dataDir, vpnOpts)
       expect(result).toContain('cap_drop:')
       expect(result).toContain('- ALL')
-      expect(result).toContain('read_only: true')
-      expect(result).toContain('no-new-privileges')
+      expect(result).toContain('- SETGID')
+      expect(result).toContain('- SETUID')
     })
 
     it('mounts wg-config volume on wireguard', () => {
@@ -166,7 +170,8 @@ describe('generateStandaloneCompose', () => {
       // Services section
       expect(result).toContain('services:')
       expect(result).toContain('hermes-myagent:')
-      expect(result).toContain('user: "10000:10000"')
+      // s6-overlay drops privs internally — no user: directive
+      expect(result).not.toContain('user:')
       expect(result).toContain('restart: unless-stopped')
       expect(result).toContain('host.docker.internal:host-gateway')
       expect(result).toContain('/data/myagent/.env')

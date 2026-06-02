@@ -41,9 +41,10 @@ function parseEnvFilePairs(envPath: string): Record<string, string> {
   return result
 }
 
-// Scan existing standalone compose dirs to find next available port
+// Scan compose dirs AND live Docker port bindings to find next available port
 function nextAvailablePort(composeBaseDir: string): number {
   const usedPorts = new Set<number>()
+  // Scan standalone compose files
   try {
     const entries = fs.readdirSync(composeBaseDir, { withFileTypes: true })
     for (const entry of entries) {
@@ -59,6 +60,13 @@ function nextAvailablePort(composeBaseDir: string): number {
           }
         }
       } catch {}
+    }
+  } catch {}
+  // Also scan live Docker containers for published ports (catches monolithic compose)
+  try {
+    const output = execSync('docker ps --format "{{.Ports}}"', { timeout: 5000 }).toString()
+    for (const match of output.matchAll(/0\.0\.0\.0:(\d+)->/g)) {
+      usedPorts.add(parseInt(match[1], 10))
     }
   } catch {}
   let port = BASE_PORT
