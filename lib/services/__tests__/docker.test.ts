@@ -77,6 +77,20 @@ describe('DockerService', () => {
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
+  it('recreates a service in recreate mode (force-recreate, NO rebuild)', () => {
+    docker.restart('/path/compose.yml', 'audrey', 'recreate')
+    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--force-recreate', 'audrey']),
+      expect.objectContaining({ detached: true, stdio: 'ignore' })
+    )
+    // recreate must NOT rebuild the image — it only reloads env_file / config
+    const args = mockSpawn.mock.calls[0][1] as string[]
+    expect(args).not.toContain('--build')
+    expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
+  })
+
   it('restarts a service in purge mode (fire-and-forget via spawn)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'purge')
     expect(mockExecSync).not.toHaveBeenCalled()
@@ -85,19 +99,6 @@ describe('DockerService', () => {
       expect.arrayContaining(['-c', expect.stringContaining('--no-cache audrey')]),
       expect.objectContaining({ detached: true, stdio: 'ignore' })
     )
-    expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
-  })
-
-  it('restarts a service in recreate mode (force-recreate, no image build)', () => {
-    docker.restart('/path/compose.yml', 'audrey', 'recreate')
-    expect(mockExecSync).not.toHaveBeenCalled()
-    expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
-      expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--force-recreate', 'audrey']),
-      expect.objectContaining({ detached: true, stdio: 'ignore' })
-    )
-    // recreate reloads env_file but must NOT rebuild the image (key changes are runtime-only)
-    expect(mockSpawn.mock.calls[0][1]).not.toContain('--build')
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 })

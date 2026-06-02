@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { services } from '@/lib/services'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -62,5 +63,15 @@ export async function POST(
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
 
-  return NextResponse.json({ ok: true })
+  // Recreate so the gateway actually drops the surface. Stripping vars from
+  // .env without recreating leaves the live connection running on stale env.
+  let restarted = false
+  try {
+    services.harness.restart(id, 'recreate')
+    restarted = true
+  } catch {
+    // No compose file — env is stripped; nothing live to recreate.
+  }
+
+  return NextResponse.json({ ok: true, restarted })
 }
