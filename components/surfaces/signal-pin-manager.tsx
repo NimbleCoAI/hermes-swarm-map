@@ -52,9 +52,28 @@ export function SignalPinManager({ phone, harnessId, status, onStatusChange }: P
 
   function handleCopy() {
     if (!revealedPin) return
-    navigator.clipboard.writeText(revealedPin)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      // Fallback for non-HTTPS contexts (e.g. LAN access)
+      const textarea = document.createElement('textarea')
+      textarea.value = revealedPin
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Last resort: select the text so user can Cmd+C
+      const code = document.querySelector('[data-pin-display]')
+      if (code) {
+        const range = document.createRange()
+        range.selectNodeContents(code)
+        window.getSelection()?.removeAllRanges()
+        window.getSelection()?.addRange(range)
+      }
+    }
   }
 
   async function handleSetPin() {
@@ -121,7 +140,7 @@ export function SignalPinManager({ phone, harnessId, status, onStatusChange }: P
         <div className="flex items-center gap-2">
           {revealedPin ? (
             <>
-              <code className="font-mono text-sm bg-muted px-2 py-1 rounded tracking-wider">
+              <code data-pin-display className="font-mono text-sm bg-muted px-2 py-1 rounded tracking-wider">
                 {revealedPin}
               </code>
               <button onClick={handleCopy} className="p-1.5 rounded hover:bg-muted" title="Copy">
