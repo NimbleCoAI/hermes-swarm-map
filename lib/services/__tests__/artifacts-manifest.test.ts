@@ -91,6 +91,18 @@ describe('installArtifacts (local source)', () => {
 
 import { installBaselineTemplates } from '../templates'
 
+describe('pluginsInstalled reflects reality', () => {
+  it('lists only plugin artifacts that were actually installed', async () => {
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-report-'))
+    const results = await installBaselineTemplates(agentDir)
+    const plugins = results.filter(r => r.type === 'plugins' && r.installed).map(r => r.name)
+    expect(plugins).toContain('swarm_map_policy')
+    expect(plugins).toContain('captcha_cascade')
+    expect(plugins).not.toContain('ocr-and-documents')
+    fs.rmSync(agentDir, { recursive: true, force: true })
+  })
+})
+
 describe('installBaselineTemplates (golden output vs infra/templates)', () => {
   it('installs every artifact listed in infra/artifacts.json with identical bytes', async () => {
     const repoRoot = process.cwd()
