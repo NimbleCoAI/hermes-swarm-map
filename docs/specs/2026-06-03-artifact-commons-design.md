@@ -21,7 +21,8 @@ installer of both commons and multiplayer-specific artifacts.**
 refactoring HSM's installer from hardcoded arrays to a manifest-driven loader.
 
 **Explicitly out of scope (separate projects):**
-- The `swarm-map` product rename (separate spec; do not conflate with artifact names).
+- The `swarm-map` product rename — **deferred until OpenClaw support is added**;
+  not happening in this effort (separate spec; do not conflate with artifact names).
 - Actual PyPI/pip publishing (roadmap flag — see Phase 4).
 - Cross-repo dedup of `swarm_map_policy` copies that live in *other* deployment
   repos (`hermes-agent`, `hermes-agent-swarm`, `hermes-swarm`). Per-repo hygiene, later.
@@ -112,6 +113,8 @@ reflect reality. Update behavior-pinning tests.
   code and the new code must be **byte-identical**. If not, the refactor is wrong
   and does not ship.
 - No artifact moves. Nothing is deleted. No runtime behavior changes.
+- **Drive-by fix:** unify the `hsmPort` default — both `deploy/route.ts` and
+  `harness.ts` default to `3000` via one shared helper (see Risk #3).
 
 ### Phase 2 — Extract (HSM-only, one artifact at a time, prove-before-remove)
 - De-scoped to HSM. **One artifact at a time, with real-agent verification between
@@ -147,8 +150,14 @@ cleanliness, timed to the MT launch.
 2. Silent partial-fetch failure booting capability-less agents → loader verifies + reports.
 3. `swarm_map_policy ↔ /api/harnesses/:id/policy` is a runtime contract → keep the
    plugin internal; do not turn it into a cross-repo API boundary.
-   (Note latent bug: `hsmPort` defaults differ — `3002` in `deploy/route.ts:127`
-   vs `3000` in `harness.ts:1035`.)
+   - **Latent bug (Phase 1 drive-by fix):** `hsmPort` is HSM's *own* callback port
+     used to build `HSM_URL`/`SWARM_MAP_POLICY_URL` — distinct from the per-agent
+     `API_SERVER_PORT`, which is correctly dynamic via `nextAvailablePort()`. The
+     two paths disagree on the *default* when `process.env.PORT` is unset:
+     `'3002'` in `deploy/route.ts:127` vs `'3000'` in `harness.ts:1035`. HSM runs on
+     `3000` (`ecosystem.config.js`), so the `3002` default would point agents at a
+     dead callback port. Harmless while `PORT` is set (normal PM2 case), but fix by
+     defaulting both to `3000` via a single shared helper so they can't drift.
 4. MCP is a *different* mechanism (config + mount/npx, not a copy) → manifest models
    it as a reference; `google-multiplayer-mcp` stays multiplayer-specific/private.
 5. No git-fetch/auth exists today → build it carefully with build-time creds.
