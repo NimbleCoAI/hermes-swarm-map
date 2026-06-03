@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 import { installBaselineTemplates } from '@/lib/services/templates'
 import { generateDefaultConfig, type McpServerConfig } from '@/lib/templates/config-yaml'
+import { hsmBaseUrl } from '@/lib/services/hsm-url'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -124,11 +125,11 @@ function generateEnvContent(params: {
   lines.push(`FIRECRAWL_API_URL=http://host.docker.internal:3002`)
 
   // Swarm Map policy URL — allows agents to query their own harness config
-  const hsmPort = process.env.PORT || '3002'
+  const hsmUrl = hsmBaseUrl()
   lines.push('')
   lines.push(`# HSM policy endpoint`)
-  lines.push(`HSM_URL=http://host.docker.internal:${hsmPort}`)
-  lines.push(`SWARM_MAP_POLICY_URL=http://host.docker.internal:${hsmPort}`)
+  lines.push(`HSM_URL=${hsmUrl}`)
+  lines.push(`SWARM_MAP_POLICY_URL=${hsmUrl}`)
 
   // Baseline agent identity & memory scoping
   lines.push('')
