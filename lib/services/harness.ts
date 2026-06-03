@@ -13,6 +13,7 @@ import { markRestarting, isRestarting, clearRestarting } from './restart-tracker
 import { installBaselineTemplates, TEMPLATE_PLUGINS } from './templates'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose } from './harness-compose'
+import { hsmBaseUrl } from './hsm-url'
 
 const HARNESSES_FILE = 'harnesses.json'
 
@@ -1032,10 +1033,10 @@ export class HarnessService {
     const workDir = destDir
 
     // 4. Patch .env — append missing HSM vars
-    const hsmPort = process.env.PORT || '3000'
+    const hsmUrl = hsmBaseUrl()
     const requiredVars: Record<string, string> = {
-      HSM_URL: `http://host.docker.internal:${hsmPort}`,
-      SWARM_MAP_POLICY_URL: `http://host.docker.internal:${hsmPort}`,
+      HSM_URL: hsmUrl,
+      SWARM_MAP_POLICY_URL: hsmUrl,
       HERMES_AGENT_NAME: slug,
       HERMES_MEMORY_SCOPE: 'channel',
       HERMES_DM_POLICY: 'approved-only',
