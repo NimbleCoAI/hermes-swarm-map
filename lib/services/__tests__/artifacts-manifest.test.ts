@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { loadManifest } from '../artifacts-manifest'
+import { loadManifest, installArtifacts } from '../artifacts-manifest'
 
 let tmp: string
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hsm-manifest-')) })
@@ -40,5 +40,51 @@ describe('loadManifest', () => {
     const manifestPath = path.join(tmp, 'artifacts.json')
     fs.writeFileSync(manifestPath, '{ not json')
     expect(() => loadManifest(manifestPath)).toThrow(/invalid artifacts manifest/i)
+  })
+})
+
+describe('installArtifacts (local source)', () => {
+  function seedTemplates(root: string) {
+    for (const [type, name] of [['plugins', 'p1'], ['skills', 's1'], ['hooks', 'h1']]) {
+      const dir = path.join(root, 'infra', 'templates', type, name)
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, 'file.txt'), `${name}-contents`)
+    }
+  }
+
+  it('copies each local artifact into the agent dir and reports installed=true', async () => {
+    const repoRoot = tmp
+    seedTemplates(repoRoot)
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-'))
+    const manifest = {
+      plugins: [{ name: 'p1', source: 'local' }],
+      skills: [{ name: 's1', source: 'local' }],
+      hooks: [{ name: 'h1', source: 'local' }],
+    }
+    const results = await installArtifacts(agentDir, manifest, repoRoot)
+    expect(results).toContainEqual({ type: 'plugins', name: 'p1', installed: true })
+    expect(fs.readFileSync(path.join(agentDir, 'plugins', 'p1', 'file.txt'), 'utf-8')).toBe('p1-contents')
+    expect(fs.readFileSync(path.join(agentDir, 'skills', 's1', 'file.txt'), 'utf-8')).toBe('s1-contents')
+    expect(fs.readFileSync(path.join(agentDir, 'hooks', 'h1', 'file.txt'), 'utf-8')).toBe('h1-contents')
+    fs.rmSync(agentDir, { recursive: true, force: true })
+  })
+
+  it('reports installed=false with an error when a local source dir is missing', async () => {
+    const repoRoot = tmp
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-'))
+    const manifest = { plugins: [{ name: 'ghost', source: 'local' }], skills: [], hooks: [] }
+    const results = await installArtifacts(agentDir, manifest, repoRoot)
+    const r = results.find(x => x.name === 'ghost')!
+    expect(r.installed).toBe(false)
+    expect(r.error).toMatch(/source not found/i)
+    fs.rmSync(agentDir, { recursive: true, force: true })
+  })
+
+  it('throws on an unsupported source scheme (loud failure)', async () => {
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-'))
+    const manifest = { plugins: [{ name: 'x', source: 'git:foo/bar#v1' }], skills: [], hooks: [] }
+    await expect(installArtifacts(agentDir, manifest, tmp))
+      .rejects.toThrow(/unsupported artifact source/i)
+    fs.rmSync(agentDir, { recursive: true, force: true })
   })
 })
