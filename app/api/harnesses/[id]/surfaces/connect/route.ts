@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { buildConnectEnvVars, mergeEnvVars, ensurePolicyDefaults, getSignalDaemonUrl } from '@/lib/env-helpers'
+import { services } from '@/lib/services'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -76,5 +77,18 @@ export async function POST(
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
 
-  return NextResponse.json({ success: true, envVars: Object.keys(envVars) })
+  // Recreate the container so the new env_file actually takes effect. Writing
+  // .env alone leaves the running gateway on the OLD environment (a stale
+  // surface account/token), which silently keeps a broken connection alive.
+  // force-recreate (no rebuild) is the minimal op to reload the env.
+  let restarted = false
+  try {
+    services.harness.restart(id, 'recreate')
+    restarted = true
+  } catch {
+    // Harness may have no compose file (e.g. not yet deployed) — env is still
+    // written, so a later start/restart will pick it up. Don't fail the connect.
+  }
+
+  return NextResponse.json({ success: true, envVars: Object.keys(envVars), restarted })
 }
