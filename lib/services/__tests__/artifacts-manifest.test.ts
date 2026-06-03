@@ -113,7 +113,9 @@ describe('installBaselineTemplates (golden output vs infra/templates)', () => {
     for (const type of ['plugins', 'skills', 'hooks'] as const) {
       for (const entry of manifest[type]) {
         const srcDir = path.join(repoRoot, 'infra', 'templates', type, entry.name)
-        if (!fs.existsSync(srcDir)) continue
+        // Fail loudly if a manifested template went missing from the repo,
+        // rather than silently skipping its byte-identity assertion.
+        expect(fs.existsSync(srcDir), `template ${type}/${entry.name} must exist`).toBe(true)
         const result = results.find(r => r.type === type && r.name === entry.name)
         expect(result?.installed, `${type}/${entry.name} should be installed`).toBe(true)
         const destDir = path.join(agentDir, type, entry.name)
