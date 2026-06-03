@@ -173,8 +173,12 @@ export async function POST(
         content = content.trimEnd() + `\n${groupVar}=${newValue}\n`
       }
       fs.writeFileSync(envPath, content, { mode: 0o600 })
+      // Recreate so the adapter's startup-cached allow-list reloads. Only on an
+      // actual change (never the idempotent already-present path) so a
+      // per-message caller can't trigger a restart loop.
+      try { services.harness.restart(id, 'recreate') } catch {}
     } else {
-      // Already present — write unchanged (idempotent)
+      // Already present — write unchanged (idempotent), no recreate
       fs.writeFileSync(envPath, content, { mode: 0o600 })
     }
     return NextResponse.json({ success: true })
@@ -190,6 +194,10 @@ export async function POST(
     }
     // If var didn't exist, nothing to remove
     fs.writeFileSync(envPath, content, { mode: 0o600 })
+    // Recreate only if a group was actually removed (loop-safe).
+    if (newGroups.length !== currentGroups.length) {
+      try { services.harness.restart(id, 'recreate') } catch {}
+    }
     return NextResponse.json({ success: true })
   }
 
