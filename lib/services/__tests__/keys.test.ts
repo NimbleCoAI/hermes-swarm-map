@@ -152,3 +152,63 @@ describe('anthropic credential env-var routing (writeKeyToEnv/removeKeyFromEnv)'
     expect(read('agentF')).toMatch(/^OPENAI_API_KEY=sk-proj-XYZ$/m)
   })
 })
+
+// A *discovered* key (value lives in an agent .env, surfaced by the registry)
+// used to self-delete when unassigned from its last agent: update() stored an
+// empty-value override, removeKeyFromEnv stripped the .env, and list() — which
+// only emitted manuallyAdded keys — then showed nothing. A key the user is
+// actively managing must survive being unassigned.
+describe('discovered keys persist when unassigned (no self-delete)', () => {
+  let tmpHome: string
+  let tmpStore: string
+  let prevHome: string | undefined
+  let keys: KeysService
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-phome-'))
+    tmpStore = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-pstore-'))
+    prevHome = process.env.HOME
+    process.env.HOME = tmpHome
+    const storage = new Storage(tmpStore)
+    keys = new KeysService(storage, new AuditService(storage))
+  })
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME
+    else process.env.HOME = prevHome
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+    fs.rmSync(tmpStore, { recursive: true, force: true })
+  })
+
+  it('keeps a discovered key (and its value) listed after unassigning its last agent', () => {
+    const dir = path.join(tmpHome, '.hermes-cryptids')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, '.env'), 'ANTHROPIC_API_KEY=sk-ant-api03-DISCOVERED\n')
+
+    const discovered = keys.list().find((k) => k.provider === 'anthropic')
+    expect(discovered).toBeTruthy()
+
+    // Route order: update (unassign) THEN strip from env.
+    keys.update(discovered!.id, { assignedTo: [] })
+    keys.removeKeyFromEnv('cryptids', 'anthropic')
+
+    const after = keys.list().find((k) => k.id === discovered!.id)
+    expect(after).toBeTruthy()              // did NOT self-delete
+    expect(after!.assignedTo).toEqual([])   // shows as unassigned
+    expect(keys.getDecryptedValue(discovered!.id)).toBe('sk-ant-api03-DISCOVERED')
+  })
+
+  it('can re-assign a previously-unassigned discovered key (value still available to write)', () => {
+    const dir = path.join(tmpHome, '.hermes-osint')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, '.env'), 'ANTHROPIC_API_KEY=sk-ant-api03-KEEPME\n')
+    const id = keys.list().find((k) => k.provider === 'anthropic')!.id
+
+    keys.update(id, { assignedTo: [] })
+    keys.removeKeyFromEnv('osint', 'anthropic')
+    // Re-assign: value must still resolve so it can be written back.
+    const val = keys.getDecryptedValue(id)
+    expect(val).toBe('sk-ant-api03-KEEPME')
+    keys.update(id, { assignedTo: ['h_osint'] })
+    expect(keys.list().find((k) => k.id === id)!.assignedTo).toEqual(['h_osint'])
+  })
+})
