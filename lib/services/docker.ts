@@ -189,6 +189,16 @@ export class DockerService {
         child.unref()
         break
       }
+      case 'recreate': {
+        // Recreate the container WITHOUT rebuilding the image — the correct
+        // primitive for env_file changes (e.g. rotated API keys), which a plain
+        // `restart` would not reload. Fast; no image build.
+        const args = ['compose', ...projectFlag.trim().split(' ').filter(Boolean),
+          '-f', composeFile, 'up', '-d', '--force-recreate', service]
+        const child = spawn('docker', args, { stdio: 'ignore', detached: true })
+        child.unref()
+        break
+      }
       case 'rebuild': {
         // Fire-and-forget: Docker builds can exceed any reasonable timeout.
         // The container will come up on its own when the build finishes.

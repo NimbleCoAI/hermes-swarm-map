@@ -16,13 +16,14 @@ export async function PUT(
     const { value, ...metadata } = body
     const rotated = services.keys.rotateValue(id, value, metadata)
     if (!rotated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    // Restart all affected harnesses
+    // Recreate all affected harnesses so the rotated value loads
+    // (env_file is read at container creation, not on a plain restart).
     const allAffected = new Set([
       ...(rotated.assignedTo ?? []),
       ...(currentKey?.assignedTo ?? []),
     ])
     for (const harnessId of allAffected) {
-      try { services.harness.restart(harnessId, 'quick') } catch {}
+      try { services.harness.restart(harnessId, 'recreate') } catch {}
     }
     return NextResponse.json(rotated)
   }
@@ -39,11 +40,11 @@ export async function PUT(
       const removed = currentKey.assignedTo.filter((h: string) => !body.assignedTo.includes(h))
       for (const h of added) {
         services.keys.writeKeyToEnv(h, key.provider, decrypted)
-        try { services.harness.restart(h, 'quick') } catch {}
+        try { services.harness.restart(h, 'recreate') } catch {}
       }
       for (const h of removed) {
         services.keys.removeKeyFromEnv(h, key.provider)
-        try { services.harness.restart(h, 'quick') } catch {}
+        try { services.harness.restart(h, 'recreate') } catch {}
       }
     }
   }
