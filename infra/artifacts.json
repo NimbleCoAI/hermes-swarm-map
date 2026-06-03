@@ -1,0 +1,14 @@
+{
+  "plugins": [
+    { "name": "swarm_map_policy", "source": "local" },
+    { "name": "boot_md", "source": "local" },
+    { "name": "captcha_cascade", "source": "local" }
+  ],
+  "skills": [
+    { "name": "ocr-and-documents", "source": "local" },
+    { "name": "captcha-escalation", "source": "local" }
+  ],
+  "hooks": [
+    { "name": "lifecycle-notify", "source": "local" }
+  ]
+}
