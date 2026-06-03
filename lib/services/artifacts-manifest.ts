@@ -8,6 +8,8 @@ export interface ArtifactEntry {
   name: string
   // Phase 1: only 'local' is supported. Future: 'upstream', 'git:<org>/<repo>#<tag>'.
   source: string
+  // plugins only: write into config.yaml plugins.enabled so the runtime loads this standalone plugin
+  enabled?: boolean
 }
 
 export interface ArtifactsManifest {
@@ -71,4 +73,15 @@ export async function installArtifacts(
     }
   }
   return results
+}
+
+/** Plugin names the manifest marks enabled (written to config.yaml plugins.enabled). */
+export function enabledPluginNames(manifest: ArtifactsManifest): string[] {
+  return manifest.plugins.filter((p) => p.enabled === true).map((p) => p.name)
+}
+
+/** Convenience: enabled plugin names from the repo's infra/artifacts.json. */
+export function defaultEnabledPlugins(repoRoot: string = process.cwd()): string[] {
+  const manifest = loadManifest(path.join(repoRoot, 'infra', 'artifacts.json'))
+  return enabledPluginNames(manifest)
 }
