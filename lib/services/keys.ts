@@ -31,6 +31,37 @@ function fingerprintId(value: string): string {
   return 'k_' + crypto.createHash('sha1').update(fp).digest('hex').slice(0, 8)
 }
 
+// --- Anthropic credential routing -------------------------------------------
+// Anthropic accepts two credential formats that authenticate differently:
+//   * Standard API keys (sk-ant-api*) → x-api-key header, which the SDK reads
+//     from ANTHROPIC_API_KEY.
+//   * Bearer-style tokens (sk-ant-oat* setup tokens, cc-* access tokens, JWT
+//     eyJ*) → Authorization: Bearer, which the SDK reads from ANTHROPIC_TOKEN.
+// The two must never both be set: the SDK auto-attaches x-api-key whenever
+// ANTHROPIC_API_KEY is present — even alongside a Bearer token — producing a
+// conflicting dual-header request the API rejects (HTTP 401). So a credential
+// is written to exactly one of these vars and the other is cleared.
+export const ANTHROPIC_ENV_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_TOKEN'] as const
+
+export function anthropicEnvVarForValue(value: string): 'ANTHROPIC_API_KEY' | 'ANTHROPIC_TOKEN' {
+  const v = (value ?? '').trim()
+  if (v.startsWith('sk-ant-api')) return 'ANTHROPIC_API_KEY'
+  if (v.startsWith('sk-ant-') || v.startsWith('cc-') || v.startsWith('eyJ')) return 'ANTHROPIC_TOKEN'
+  return 'ANTHROPIC_API_KEY'
+}
+
+// Set VAR=value in a .env body — replacing an existing line or appending one.
+function upsertEnvVar(content: string, varName: string, value: string): string {
+  const regex = new RegExp(`^${varName}=.*$`, 'm')
+  if (regex.test(content)) return content.replace(regex, `${varName}=${value}`)
+  return content.trimEnd() + `\n${varName}=${value}\n`
+}
+
+// Remove a VAR= line (if present) from a .env body.
+function removeEnvVar(content: string, varName: string): string {
+  return content.replace(new RegExp(`^${varName}=.*\\n?`, 'm'), '')
+}
+
 type ProviderPattern = {
   varPattern: RegExp
   provider: string
@@ -39,6 +70,7 @@ type ProviderPattern = {
 
 const PROVIDER_PATTERNS: ProviderPattern[] = [
   { varPattern: /^ANTHROPIC_API_KEY$/i, provider: 'anthropic', valuePattern: /^sk-ant-/ },
+  { varPattern: /^ANTHROPIC_TOKEN$/i, provider: 'anthropic', valuePattern: /^(sk-ant-oat|cc-|eyJ)/ },
   { varPattern: /^OPENAI_API_KEY$/i, provider: 'openai', valuePattern: /^sk-/ },
   { varPattern: /^GITHUB_TOKEN$|^GITHUB_PAT$/i, provider: 'github', valuePattern: /^gh[pso]_/ },
   { varPattern: /^MATTERMOST_TOKEN$/i, provider: 'mattermost' },
@@ -201,26 +233,36 @@ export class KeysService {
     const registry = discoverKeys(names, this.encryption)
     const storedAll = this.storage.read<StoredKey[]>(KEYS_FILE, [])
 
-    // Build override map for discovered keys
+    // A stored key is "persistent" if it carries its own value: manual adds,
+    // rotated keys, or discovered keys materialized on first edit/assign. These
+    // list regardless of whether the value still lives in any .env — so
+    // unassigning a key never makes it disappear. Stored keys WITHOUT a value
+    // are metadata-only overrides that decorate a still-discovered key.
+    const hasValue = (s: StoredKey) => typeof s.encryptedValue === 'string' && s.encryptedValue.length > 0
+    const isPersistent = (s: StoredKey) => s.manuallyAdded === true || hasValue(s)
+
+    // Build override map for (non-persistent) discovered keys
     const overrides = new Map<string, KeyOverride>()
     for (const s of storedAll) {
-      if (!s.manuallyAdded) {
+      if (!isPersistent(s)) {
         const { encryptedValue: _, manuallyAdded: __, ...k } = s
         overrides.set(k.id, k)
       }
     }
 
-    // Collect manually-added keys
-    const manualKeys: Key[] = storedAll
-      .filter((s) => s.manuallyAdded)
+    // Collect persistent keys (value-bearing stored keys)
+    const persistentKeys: Key[] = storedAll
+      .filter(isPersistent)
       .map((s) => {
         const { encryptedValue: _, manuallyAdded: __, ...k } = s
         return k
       })
+    const persistentIds = new Set(persistentKeys.map((k) => k.id))
 
-    // Build discovered key list
+    // Build discovered key list (skip ids already covered by a persistent entry)
     const discoveredKeys: Key[] = []
     for (const [id, { key, harnesses }] of registry) {
+      if (persistentIds.has(id)) continue
       const override = overrides.get(id)
       const { encryptedValue: _, ...baseKey } = key
       const merged: Key = {
@@ -233,10 +275,10 @@ export class KeysService {
       discoveredKeys.push(merged)
     }
 
-    // Merge: discovered + manual, deduplicated by id
+    // Merge: persistent (authoritative) + discovered, deduplicated by id
     const seen = new Set<string>()
     const result: Key[] = []
-    for (const k of [...discoveredKeys, ...manualKeys]) {
+    for (const k of [...persistentKeys, ...discoveredKeys]) {
       if (!seen.has(k.id)) {
         seen.add(k.id)
         result.push(k)
@@ -289,8 +331,14 @@ export class KeysService {
     return key
   }
 
+  // Resolve the env var a provider's credential is written to. Anthropic is
+  // value-dependent (see anthropicEnvVarForValue); everything else is fixed.
+  private resolveEnvVar(provider: string, value: string): string {
+    if (provider === 'anthropic') return anthropicEnvVarForValue(value)
+    return KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
+  }
+
   writeKeyToEnv(harnessIdOrName: string, provider: string, value: string): void {
-    const varName = KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
     const name = harnessIdOrName.startsWith('h_') ? idToName(harnessIdOrName) : harnessIdOrName
     const dataDir = agentDataDir(name)
     const envPath = path.join(dataDir, '.env')
@@ -302,12 +350,15 @@ export class KeysService {
       // .env doesn't exist yet — will create
     }
 
-    // Check if var already exists — replace it; otherwise append
-    const regex = new RegExp(`^${varName}=.*$`, 'm')
-    if (regex.test(content)) {
-      content = content.replace(regex, `${varName}=${value}`)
-    } else {
-      content = content.trimEnd() + `\n${varName}=${value}\n`
+    const varName = this.resolveEnvVar(provider, value)
+    content = upsertEnvVar(content, varName, value)
+
+    // Anthropic's credential belongs in exactly one var depending on its format;
+    // clear the other so a stale value can't add a conflicting auth header.
+    if (provider === 'anthropic') {
+      for (const other of ANTHROPIC_ENV_VARS) {
+        if (other !== varName) content = removeEnvVar(content, other)
+      }
     }
 
     fs.mkdirSync(dataDir, { recursive: true })
@@ -315,15 +366,17 @@ export class KeysService {
   }
 
   removeKeyFromEnv(harnessIdOrName: string, provider: string): void {
-    const varName = KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
     const name = harnessIdOrName.startsWith('h_') ? idToName(harnessIdOrName) : harnessIdOrName
     const dataDir = agentDataDir(name)
     const envPath = path.join(dataDir, '.env')
 
     try {
       let content = fs.readFileSync(envPath, 'utf-8')
-      const regex = new RegExp(`^${varName}=.*\n?`, 'm')
-      content = content.replace(regex, '')
+      // Anthropic may have been written to either var; clear both.
+      const vars = provider === 'anthropic'
+        ? [...ANTHROPIC_ENV_VARS]
+        : [KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`]
+      for (const v of vars) content = removeEnvVar(content, v)
       fs.writeFileSync(envPath, content, { mode: 0o600 })
     } catch {
       // .env doesn't exist, nothing to remove
@@ -365,16 +418,27 @@ export class KeysService {
     if (index !== -1) {
       stored[index] = { ...stored[index], ...partial }
     } else {
-      // Create an override entry for a discovered key
+      // First time a discovered key is modified: materialize it as a persistent
+      // stored key, capturing its current value. The value is still in the .env
+      // at this point (the route strips it only afterwards), so getDecryptedValue
+      // can resolve it. Previously this stored an empty-value override, so once
+      // the value left the last .env the key vanished from list() entirely and
+      // could not be re-assigned.
+      const discovered = this.list().find((k) => k.id === id)
+      const decrypted = this.getDecryptedValue(id)
       stored.push({
         id,
-        provider: partial.provider ?? 'unknown',
-        maskedValue: partial.maskedValue ?? '••••',
-        encryptedValue: '',
-        assignedTo: partial.assignedTo ?? [],
-        ...(partial.budgetUsd !== undefined ? { budgetUsd: partial.budgetUsd } : {}),
-        ...(partial.name ? { name: partial.name } : {}),
-        health: partial.health ?? 'good',
+        provider: partial.provider ?? discovered?.provider ?? 'unknown',
+        maskedValue: partial.maskedValue ?? discovered?.maskedValue ?? '••••',
+        encryptedValue: decrypted ? this.encryption.encrypt(decrypted) : '',
+        assignedTo: partial.assignedTo ?? discovered?.assignedTo ?? [],
+        ...(partial.budgetUsd !== undefined
+          ? { budgetUsd: partial.budgetUsd }
+          : discovered?.budgetUsd !== undefined
+            ? { budgetUsd: discovered.budgetUsd }
+            : {}),
+        ...(partial.name ? { name: partial.name } : discovered?.name ? { name: discovered.name } : {}),
+        health: partial.health ?? discovered?.health ?? 'good',
       })
     }
     this.storage.write(KEYS_FILE, stored)
