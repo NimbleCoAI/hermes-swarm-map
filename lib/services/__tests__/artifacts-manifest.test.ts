@@ -88,3 +88,31 @@ describe('installArtifacts (local source)', () => {
     fs.rmSync(agentDir, { recursive: true, force: true })
   })
 })
+
+import { installBaselineTemplates } from '../templates'
+
+describe('installBaselineTemplates (golden output vs infra/templates)', () => {
+  it('installs every artifact listed in infra/artifacts.json with identical bytes', async () => {
+    const repoRoot = process.cwd()
+    const manifest = loadManifest(path.join(repoRoot, 'infra', 'artifacts.json'))
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-golden-'))
+    const results = await installBaselineTemplates(agentDir)
+
+    for (const type of ['plugins', 'skills', 'hooks'] as const) {
+      for (const entry of manifest[type]) {
+        const srcDir = path.join(repoRoot, 'infra', 'templates', type, entry.name)
+        if (!fs.existsSync(srcDir)) continue
+        const result = results.find(r => r.type === type && r.name === entry.name)
+        expect(result?.installed, `${type}/${entry.name} should be installed`).toBe(true)
+        const destDir = path.join(agentDir, type, entry.name)
+        for (const f of fs.readdirSync(srcDir)) {
+          const s = path.join(srcDir, f), d = path.join(destDir, f)
+          if (fs.statSync(s).isFile()) {
+            expect(fs.readFileSync(d)).toEqual(fs.readFileSync(s))
+          }
+        }
+      }
+    }
+    fs.rmSync(agentDir, { recursive: true, force: true })
+  })
+})
