@@ -165,6 +165,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   // Key management state
   const [showAddKey, setShowAddKey] = useState(false)
   const [newKeyProvider, setNewKeyProvider] = useState('')
+  const [newKeyName, setNewKeyName] = useState('')
   const [newKeyValue, setNewKeyValue] = useState('')
   const [newKeyBudget, setNewKeyBudget] = useState('')
   const [keySaving, setKeySaving] = useState(false)
@@ -211,6 +212,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           provider: newKeyProvider,
           value: newKeyValue,
           assignedTo: [harness.id],
+          ...(newKeyName ? { name: newKeyName } : {}),
           ...(newKeyBudget ? { budgetUsd: parseFloat(newKeyBudget) } : {}),
         }),
       })
@@ -222,13 +224,16 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       toast.success(`${newKeyProvider} key added`)
       setShowAddKey(false)
       setNewKeyProvider('')
+      setNewKeyName('')
       setNewKeyValue('')
       setNewKeyBudget('')
-      // Trigger restart for the harness to pick up new env
+      // Recreate (not 'quick') so the new env_file value actually loads — a plain
+      // restart keeps the old creation-time env. (POST /api/keys also recreates
+      // server-side; this is the belt-and-suspenders client trigger.)
       await fetch(`/api/harnesses/${id}/restart`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'quick' }),
+        body: JSON.stringify({ mode: 'recreate' }),
       })
       toast.success('Restarting agent to apply key...')
       refetch()
@@ -1216,6 +1221,16 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 </div>
                 <div>
+                  <label className="text-xs text-muted-foreground">Name (optional)</label>
+                  <input
+                    type="text"
+                    value={newKeyName}
+                    onChange={(e) => setNewKeyName(e.target.value)}
+                    placeholder="e.g. hermes-cryptids"
+                    className="w-full mt-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
+                  />
+                </div>
+                <div>
                   <label className="text-xs text-muted-foreground">API Key</label>
                   <input
                     type="password" autoComplete="off"
@@ -1237,7 +1252,7 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { setShowAddKey(false); setNewKeyProvider(''); setNewKeyValue(''); setNewKeyBudget('') }}
+                    onClick={() => { setShowAddKey(false); setNewKeyProvider(''); setNewKeyName(''); setNewKeyValue(''); setNewKeyBudget('') }}
                   >
                     Cancel
                   </Button>
