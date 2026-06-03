@@ -375,5 +375,11 @@ export async function PUT(
     fs.writeFileSync(resolvedPath, JSON.stringify(resolvedMap, null, 2), { mode: 0o600 })
   } catch {}
 
+  // Recreate the container so the updated .env (and, for VPN changes, the
+  // regenerated compose) actually loads. env_file is read at container creation,
+  // not on a plain restart — without this, settings changes silently no-op until
+  // the next manual rebuild.
+  try { services.harness.restart(id, 'recreate') } catch {}
+
   return NextResponse.json({ success: true })
 }
