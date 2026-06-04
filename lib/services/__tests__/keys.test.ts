@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { KeysService, anthropicEnvVarForValue } from '../keys'
 import { Storage } from '../storage'
 import { AuditService } from '../audit'
@@ -18,7 +18,32 @@ describe('KeysService', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  // An added+assigned key is written to the harness .env, so discovery finds it
+  // too. The stored entry and the discovered entry must collapse to ONE row.
+  it('does not duplicate a key that was added and assigned to a harness', () => {
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
+    const value = 'github_pat_11ABCDEFG0aBcDeFgHiJkLmnwvYN'
+    keys.add({ provider: 'github', value, assignedTo: ['h_cryptids'] })
+    keys.writeKeyToEnv('h_cryptids', 'github', value)
+
+    const github = keys.list(['cryptids']).filter((k) => k.provider === 'github')
+    expect(github).toHaveLength(1)
+  })
+
+  it('keeps the optional name on an added+assigned key (no dup, name preserved)', () => {
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
+    const value = 'github_pat_11ABCDEFG0aBcDeFgHiJkLmnwvYN'
+    keys.add({ provider: 'github', value, name: 'hermes-cryptids', assignedTo: ['h_cryptids'] })
+    keys.writeKeyToEnv('h_cryptids', 'github', value)
+
+    const github = keys.list(['cryptids']).filter((k) => k.provider === 'github')
+    expect(github).toHaveLength(1)
+    expect(github[0].name).toBe('hermes-cryptids')
+    expect(github[0].assignedTo).toContain('h_cryptids')
   })
 
   // Pass [] as harnessNames so discovery is skipped (no real agent dirs in test env)

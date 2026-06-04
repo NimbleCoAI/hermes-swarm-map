@@ -21,10 +21,6 @@ function maskValue(value: string): string {
   return `${prefix}…${suffix}`
 }
 
-function generateId(): string {
-  return `k_${crypto.randomBytes(6).toString('hex')}`
-}
-
 // Derive a stable ID from the masked key fingerprint (first 8 + last 8 chars of value)
 function fingerprintId(value: string): string {
   const fp = value.slice(0, 8) + value.slice(-8)
@@ -314,7 +310,10 @@ export class KeysService {
   add(input: KeyInput & { assignedTo?: string[] }): Key {
     const stored = this.storage.read<StoredKey[]>(KEYS_FILE, [])
     const newKey: StoredKey = {
-      id: generateId(),
+      // Fingerprint id (== the id discovery assigns) so an added+assigned key
+      // collapses with its discovered twin in list() instead of duplicating.
+      // (Random ids made the same token appear twice: once stored, once discovered.)
+      id: fingerprintId(input.value),
       provider: input.provider,
       ...(input.name ? { name: input.name } : {}),
       maskedValue: maskValue(input.value),
@@ -324,7 +323,10 @@ export class KeysService {
       health: 'good',
       manuallyAdded: true,
     }
-    stored.push(newKey)
+    // Upsert: re-adding the same value updates the entry rather than duplicating.
+    const existingIdx = stored.findIndex((k) => k.id === newKey.id)
+    if (existingIdx >= 0) stored[existingIdx] = newKey
+    else stored.push(newKey)
     this.storage.write(KEYS_FILE, stored)
     this.audit.append({ who: 'admin', what: 'key:add', target: input.provider })
     const { encryptedValue: _, manuallyAdded: __, ...key } = newKey
