@@ -14,7 +14,6 @@ import { installBaselineTemplates } from './templates'
 import { defaultEnabledPlugins } from './artifacts-manifest'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose } from './harness-compose'
-import { provisionGitCredentials } from './git-credentials'
 import { hsmBaseUrl } from './hsm-url'
 
 const HARNESSES_FILE = 'harnesses.json'
@@ -791,6 +790,33 @@ export class HarnessService {
     this.audit.append({ who: 'admin', what: `restart:${mode}`, target: harness.name })
   }
 
+  /**
+   * Force the agent runtime to re-provision its git credentials.
+   *
+   * The runtime writes ~/.git-credentials + ~/.gitconfig at container boot
+   * (a cont-init hook) but is apply-if-absent, so it won't overwrite stale
+   * files (e.g. after a token rotation). We delete the cred files and recreate
+   * the container so the boot hook regenerates them from the agent's current
+   * .env token — keeping the runtime as the single source of truth instead of
+   * re-introducing a host-side writer.
+   */
+  refreshGitCredentials(id: string): { ok: boolean; serviceName: string } {
+    const harness = this.get(id)
+    if (!harness?.serviceName) {
+      throw new Error(`Harness ${id} not found`)
+    }
+    const dataDir = guessDataDir(harness.serviceName, harness.serviceName)
+    for (const f of ['.git-credentials', '.gitconfig']) {
+      try {
+        fs.rmSync(path.join(dataDir, 'home', f), { force: true })
+      } catch {
+        // Best-effort: a missing file is fine — recreate re-provisions anyway.
+      }
+    }
+    this.restart(id, 'recreate')
+    return { ok: true, serviceName: harness.serviceName }
+  }
+
   start(id: string): void {
     const harness = this.get(id)
     if (!harness?.composeFile || !harness.serviceName) {
@@ -967,14 +993,9 @@ export class HarnessService {
       await scaffoldAgentDir(agentDir, input.name, port)
     }
 
-    // Provision git auth from the agent's own PAT if one is already configured.
-    // No-op for a fresh scaffold (placeholder env, no token); re-run via the
-    // API or once a token is set. See provisionGitCredentials.
-    try {
-      provisionGitCredentials(id, { dataDir: agentDir, name: input.name })
-    } catch {
-      // Non-fatal: agent still creates; git auth can be (re)run later.
-    }
+    // Git auth is provisioned by the agent runtime at container boot (a
+    // cont-init hook reads the agent's own .env). HSM no longer writes the
+    // credential files — single source of truth, and nothing to clobber.
 
     // Generate standalone compose file
     const agentComposeDir = path.join(composeBaseDir, input.name)
@@ -1191,13 +1212,10 @@ If this is your very first startup ever, introduce yourself briefly in your home
       }
     }
 
-    // Wire git auth from the imported agent's OWN PAT (if its .env carries one)
-    // so git/gh work in the agent's tool environment immediately after import.
-    try {
-      provisionGitCredentials(overlay.id ?? `h_${slug.replace(/-/g, '_')}`, { dataDir: destDir, name: slug })
-    } catch {
-      // Non-fatal: import still succeeds; git auth can be (re)run via the API.
-    }
+    // Git auth is provisioned by the agent runtime at container boot (a
+    // cont-init hook reads the imported agent's own .env). HSM deliberately
+    // doesn't write these files here — doing so is exactly what would clobber
+    // an imported user's existing git setup.
 
     return {
       id: overlay.id,
