@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 import { installBaselineTemplates } from '@/lib/services/templates'
+import { defaultEnabledPlugins } from '@/lib/services/artifacts-manifest'
 import { generateDefaultConfig, type McpServerConfig } from '@/lib/templates/config-yaml'
 import { hsmBaseUrl } from '@/lib/services/hsm-url'
 import fs from 'fs'
@@ -168,7 +169,7 @@ function generateEnvContent(params: {
 }
 
 function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string, browserEnabled?: boolean, mcpServers?: Record<string, McpServerConfig>): string {
-  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled, mcpServers })
+  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins: defaultEnabledPlugins() })
 }
 
 function generateCompose(slug: string, port: number, agentDataDir: string, imageOrBuild: { image: string } | { build: string }, googleMcpDir?: string, githubMcpEnabled?: boolean): string {

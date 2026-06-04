@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { loadManifest, installArtifacts } from '../artifacts-manifest'
+import { loadManifest, installArtifacts, enabledPluginNames } from '../artifacts-manifest'
 
 let tmp: string
 beforeEach(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hsm-manifest-')) })
@@ -86,6 +86,23 @@ describe('installArtifacts (local source)', () => {
     await expect(installArtifacts(agentDir, manifest, tmp))
       .rejects.toThrow(/unsupported artifact source/i)
     fs.rmSync(agentDir, { recursive: true, force: true })
+  })
+})
+
+describe('enabledPluginNames', () => {
+  it('returns only plugins explicitly marked enabled: true', () => {
+    const m = {
+      plugins: [
+        { name: 'a', source: 'local', enabled: true },
+        { name: 'b', source: 'local', enabled: false },
+        { name: 'c', source: 'local' },
+      ],
+      skills: [], hooks: [],
+    }
+    expect(enabledPluginNames(m)).toEqual(['a'])
+  })
+  it('returns empty when none enabled', () => {
+    expect(enabledPluginNames({ plugins: [{ name: 'x', source: 'local' }], skills: [], hooks: [] })).toEqual([])
   })
 })
 

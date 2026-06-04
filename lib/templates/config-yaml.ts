@@ -16,8 +16,9 @@ export function generateDefaultConfig(params: {
   fallbackModel?: string
   browserEnabled?: boolean
   mcpServers?: Record<string, McpServerConfig>
+  enabledPlugins?: string[]
 }): string {
-  const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers } = params
+  const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins } = params
 
   const fallbackLine = fallbackModel
     ? `  fallback: ${fallbackModel}`
@@ -42,6 +43,14 @@ export function generateDefaultConfig(params: {
           mcpBlock += `      ${key}: "${value}"\n`
         }
       }
+    }
+  }
+
+  let pluginsBlock = ''
+  if (enabledPlugins && enabledPlugins.length > 0) {
+    pluginsBlock = '\n# --- Plugins (standalone plugins enabled by Swarm Map) ---\nplugins:\n  enabled:\n'
+    for (const name of enabledPlugins) {
+      pluginsBlock += `    - ${name}\n`
     }
   }
 
@@ -134,5 +143,5 @@ platform_toolsets:
   signal: [hermes-signal]
   slack: [hermes-slack]
   mattermost: [hermes-mattermost]
-${mcpBlock}`
+${pluginsBlock}${mcpBlock}`
 }

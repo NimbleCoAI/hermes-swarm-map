@@ -218,3 +218,17 @@ describe('generateDefaultConfig', () => {
     }
   })
 })
+
+describe('generateDefaultConfig plugins.enabled', () => {
+  it('emits a plugins.enabled block listing enabled plugins', () => {
+    const out = generateDefaultConfig({ provider: 'anthropic', primaryModel: 'claude-sonnet-4-5', enabledPlugins: ['swarm_map_policy', 'captcha_cascade'] })
+    expect(out).toContain('plugins:')
+    expect(out).toContain('enabled:')
+    expect(out).toMatch(/-\s+swarm_map_policy/)
+    expect(out).toMatch(/-\s+captcha_cascade/)
+  })
+  it('omits the plugins block when no plugins are enabled', () => {
+    const out = generateDefaultConfig({ provider: 'anthropic', primaryModel: 'claude-sonnet-4-5' })
+    expect(out).not.toMatch(/^plugins:/m)
+  })
+})

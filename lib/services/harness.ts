@@ -11,6 +11,7 @@ import type { ConfigService } from './config'
 import { getCostToday, getInvocationsToday } from './usage'
 import { markRestarting, isRestarting, clearRestarting } from './restart-tracker'
 import { installBaselineTemplates } from './templates'
+import { defaultEnabledPlugins } from './artifacts-manifest'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose } from './harness-compose'
 import { hsmBaseUrl } from './hsm-url'
@@ -158,6 +159,7 @@ SIGNAL_GROUP_INVITE_POLICY=approved-only
   const configContent = generateDefaultConfig({
     provider: 'anthropic',
     primaryModel: 'claude-sonnet-4-5',
+    enabledPlugins: defaultEnabledPlugins(),
   })
   const configPath = path.join(dataDir, 'config.yaml')
   if (!fs.existsSync(configPath)) {
