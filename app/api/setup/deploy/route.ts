@@ -8,6 +8,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { execSync } from 'child_process'
+import { provisionGitCredentials } from '@/lib/services/git-credentials'
 
 const BASE_PORT = 8642
 const PORT_STEP = 10
@@ -328,6 +329,14 @@ export async function POST(request: Request) {
       browserEnabled: body.browserEnabled === true,
     })
     fs.writeFileSync(path.join(agentDataDir, '.env'), envContent, { mode: 0o600 })
+
+    // Provision per-agent git auth from the agent's own PAT so `git` works over
+    // HTTPS (the image ships no gh CLI / SSH key). No-op when no token is set.
+    try {
+      provisionGitCredentials(slug, { dataDir: agentDataDir, name: slug })
+    } catch {
+      // Non-fatal: the agent still deploys; git auth can be (re)run via the API.
+    }
 
     // Resolve Google MCP dir early (needed for both config.yaml and compose)
     const googleEnabled = body.googleEnabled === true
