@@ -2,7 +2,11 @@ module.exports = {
   apps: [
     {
       name: 'hermes-swarm-map',
-      script: 'node_modules/.bin/next',
+      // Point at Next's real JS entry, not node_modules/.bin/next: under pnpm
+      // the .bin entry is a /bin/sh shim, which crashes when pm2 runs it through
+      // the node interpreter ("SyntaxError: missing ) after argument list").
+      // dist/bin/next has a `#!/usr/bin/env node` shebang and is layout-agnostic.
+      script: 'node_modules/next/dist/bin/next',
       args: 'start',
       env: {
         NODE_ENV: 'production',
