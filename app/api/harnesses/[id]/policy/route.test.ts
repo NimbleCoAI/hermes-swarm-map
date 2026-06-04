@@ -16,11 +16,14 @@ vi.mock('@/lib/services/usage', () => ({
   getCostMonth: vi.fn(() => 0),
 }))
 
-// Mock the services module (keys.list)
+// Mock the services module (keys.list + harness.restart)
 vi.mock('@/lib/services', () => ({
   services: {
     keys: {
       list: vi.fn(() => []),
+    },
+    harness: {
+      restart: vi.fn(),
     },
   },
 }))
@@ -303,6 +306,45 @@ describe('Policy API — group-deregister (POST)', () => {
     const res = await POST(req, makeParams('h_seraph'))
 
     expect(res.status).toBe(200)
+  })
+
+  it('recreates the harness when a new group is registered (cached allow-list reloads)', async () => {
+    vi.mocked(services.harness.restart).mockClear()
+    readSpy.mockReturnValue('SIGNAL_GROUP_ALLOWED_USERS=group1\n')
+    const req = new Request('http://localhost/api/harnesses/h_seraph/policy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'group-register', platform: 'signal', chatId: 'group2' }),
+    })
+    const res = await POST(req, makeParams('h_seraph'))
+    expect(res.status).toBe(200)
+    expect(services.harness.restart).toHaveBeenCalledWith('h_seraph', 'recreate')
+  })
+
+  it('does NOT recreate when registering an already-present group (loop-safe)', async () => {
+    vi.mocked(services.harness.restart).mockClear()
+    readSpy.mockReturnValue('SIGNAL_GROUP_ALLOWED_USERS=group1\n')
+    const req = new Request('http://localhost/api/harnesses/h_seraph/policy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'group-register', platform: 'signal', chatId: 'group1' }),
+    })
+    const res = await POST(req, makeParams('h_seraph'))
+    expect(res.status).toBe(200)
+    expect(services.harness.restart).not.toHaveBeenCalled()
+  })
+
+  it('recreates on deregister only when a group was actually removed', async () => {
+    vi.mocked(services.harness.restart).mockClear()
+    readSpy.mockReturnValue('SIGNAL_GROUP_ALLOWED_USERS=group1,group2\n')
+    const req = new Request('http://localhost/api/harnesses/h_seraph/policy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'group-deregister', platform: 'signal', chatId: 'group2' }),
+    })
+    const res = await POST(req, makeParams('h_seraph'))
+    expect(res.status).toBe(200)
+    expect(services.harness.restart).toHaveBeenCalledWith('h_seraph', 'recreate')
   })
 
   it('returns 404 when agent .env not found', async () => {
