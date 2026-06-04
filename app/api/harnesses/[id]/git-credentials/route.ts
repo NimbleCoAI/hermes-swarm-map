@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server'
-import { provisionGitCredentials } from '@/lib/services/git-credentials'
+import { services } from '@/lib/services'
 
 /**
- * Provision (or refresh) per-agent git credentials from the agent's own
- * configured GitHub PAT. Writes ~/.git-credentials + ~/.gitconfig into the
- * agent's data dir so `git` works over HTTPS without `gh` or SSH keys.
+ * Refresh an agent's git credentials.
  *
- * No container restart needed — git reads these files live from the mounted
- * data dir. Returns provisioned:false (200) when the agent has no token.
+ * Provisioning now lives in the agent runtime: a cont-init boot hook reads the
+ * agent's own .env token and writes ~/.git-credentials + ~/.gitconfig into its
+ * tool HOME. That hook is apply-if-absent, so after a token rotation the stale
+ * files would survive. This endpoint forces a refresh by deleting those files
+ * and recreating the container, so the boot hook regenerates them from the
+ * current token — keeping the runtime as the single source of truth (HSM no
+ * longer writes credential files itself).
  */
 export async function POST(
   _request: Request,
@@ -15,13 +18,11 @@ export async function POST(
 ) {
   const { id } = await params
   try {
-    // Explicit user action → force a refresh (the auto-hooks on create/import
-    // stay apply-if-absent so they never clobber an existing setup).
-    const result = provisionGitCredentials(id, { force: true })
+    const result = services.harness.refreshGitCredentials(id)
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'git credential provisioning failed' },
+      { error: err instanceof Error ? err.message : 'git credential refresh failed' },
       { status: 500 },
     )
   }

@@ -101,16 +101,18 @@ describe('HarnessService.importFromDir', () => {
     expect(overlay.persona).toContain('test agent')
   })
 
-  it('provisions git credentials from an imported GITHUB_TOKEN (tool-HOME)', async () => {
+  it('does NOT write git credentials on import — the runtime provisions them at boot', async () => {
     storage.write('harnesses.json', [])
     fs.writeFileSync(
       path.join(hermesDir, '.env'),
       'ANTHROPIC_API_KEY=sk-ant-test123\nGITHUB_TOKEN=github_pat_IMPORTED\n',
     )
     const result = await service.importFromDir(hermesDir, 'gitcred-test')
+    // Git credential provisioning moved into the agent runtime (a cont-init boot
+    // hook reads the agent's own .env). HSM no longer writes these files, so it
+    // can't clobber a user's git setup and there's no second source of truth.
     const credPath = path.join(result.destDir, 'home', '.git-credentials')
-    expect(fs.existsSync(credPath)).toBe(true)
-    expect(fs.readFileSync(credPath, 'utf-8')).toContain('github_pat_IMPORTED')
+    expect(fs.existsSync(credPath)).toBe(false)
   })
 
   it('detects persona from SOUL.md', async () => {
