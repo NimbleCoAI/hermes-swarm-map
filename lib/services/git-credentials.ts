@@ -86,8 +86,16 @@ export function provisionGitCredentials(
   const name = opts?.name ?? harnessId.replace(/^h_/, '').replace(/_/g, '-')
   const email = opts?.email ?? `${name}@users.noreply.github.com`
 
-  fs.writeFileSync(path.join(dataDir, '.git-credentials'), buildGitCredentialsContent(found.token), { mode: 0o600 })
-  fs.writeFileSync(path.join(dataDir, '.gitconfig'), buildGitConfigContent({ name, email }), { mode: 0o644 })
+  // The agent's terminal/code-exec tool runs subprocesses with HOME set to
+  // {HERMES_HOME}/home (hermes-agent tools/environments/local.py — "redirect
+  // system tool configs git/ssh/gh/npm into {HERMES_HOME}/home/"). HERMES_HOME
+  // is the mounted data dir, so git reads creds from {dataDir}/home — NOT the
+  // data-dir root (that's the gateway's HOME, which never runs git). Creating
+  // the dir also makes the tool's HOME override kick in.
+  const homeDir = path.join(dataDir, 'home')
+  fs.mkdirSync(homeDir, { recursive: true })
+  fs.writeFileSync(path.join(homeDir, '.git-credentials'), buildGitCredentialsContent(found.token), { mode: 0o600 })
+  fs.writeFileSync(path.join(homeDir, '.gitconfig'), buildGitConfigContent({ name, email }), { mode: 0o644 })
 
   return { provisioned: true, source: found.source }
 }
