@@ -77,11 +77,21 @@ export interface ProvisionResult {
  */
 export function provisionGitCredentials(
   harnessId: string,
-  opts?: { name?: string; email?: string; dataDir?: string },
+  opts?: { name?: string; email?: string; dataDir?: string; force?: boolean },
 ): ProvisionResult {
   const dataDir = opts?.dataDir ?? agentDataDir(harnessId)
   const found = readEnvToken(path.join(dataDir, '.env'))
   if (!found) return { provisioned: false, reason: 'no GitHub token configured' }
+
+  // Apply-if-absent: never clobber an existing git setup (e.g. an imported
+  // agent that already has its own .gitconfig/.git-credentials). Only the
+  // explicit on-demand route forces a refresh. Without this, auto-provisioning
+  // on import would silently overwrite a user's configuration.
+  const credPath = path.join(dataDir, 'home', '.git-credentials')
+  const cfgPath = path.join(dataDir, 'home', '.gitconfig')
+  if (!opts?.force && (fs.existsSync(credPath) || fs.existsSync(cfgPath))) {
+    return { provisioned: false, reason: 'git config already present (pass force to overwrite)' }
+  }
 
   const name = opts?.name ?? harnessId.replace(/^h_/, '').replace(/_/g, '-')
   const email = opts?.email ?? `${name}@users.noreply.github.com`
