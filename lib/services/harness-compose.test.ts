@@ -195,6 +195,26 @@ describe('generateStandaloneCompose', () => {
     })
   })
 
+  describe('agent HOME (credential/state probes must hit the mounted data dir, not /root)', () => {
+    // The gateway runs as a non-root `hermes` user. If HOME is unset it falls
+    // back to /root (mode 700, root-owned), so home-relative credential probes
+    // (~/.claude/.credentials.json, ~/.local/state/hermes/…) raise EACCES and
+    // surface as "Provider authentication failed". Pinning HOME to the mounted,
+    // accessible data dir keeps every agent — built or imported — working
+    // regardless of whether the image happens to define ENV HOME.
+    it('sets HOME and HERMES_HOME to /opt/data in non-VPN compose', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir)
+      expect(result).toContain('HOME=/opt/data')
+      expect(result).toContain('HERMES_HOME=/opt/data')
+    })
+
+    it('sets HOME and HERMES_HOME to /opt/data in VPN compose', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
+      expect(result).toContain('HOME=/opt/data')
+      expect(result).toContain('HERMES_HOME=/opt/data')
+    })
+  })
+
   describe('regression: non-VPN output matches original format', () => {
     it('contains all expected sections in order', () => {
       const result = generateStandaloneCompose('myagent', 8652, '/data/myagent')
