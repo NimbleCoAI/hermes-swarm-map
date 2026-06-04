@@ -57,6 +57,13 @@ ${sourceBlock}
       - "host.docker.internal:host-gateway"
     env_file:
       - ${agentDataDir}/.env
+    environment:
+      # The gateway runs as a non-root user; without HOME it falls back to /root
+      # (mode 700) and home-relative credential probes (~/.claude/.credentials.json)
+      # raise EACCES → "Provider authentication failed". Pin HOME to the mounted
+      # data dir so every agent works regardless of image-level ENV.
+      - HOME=/opt/data
+      - HERMES_HOME=/opt/data
     ports:
       - published: ${port}
         target: 8642
@@ -145,6 +152,11 @@ ${sourceBlock}
       - "host.docker.internal:host-gateway"
     env_file:
       - ${agentDataDir}/.env
+    environment:
+      # See generatePlainCompose: pin HOME so non-root credential probes don't
+      # hit /root and fail with EACCES ("Provider authentication failed").
+      - HOME=/opt/data
+      - HERMES_HOME=/opt/data
     volumes:
       - ${agentDataDir}:/opt/data
     command: gateway
