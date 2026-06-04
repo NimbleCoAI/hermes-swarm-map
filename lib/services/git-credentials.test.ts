@@ -26,11 +26,11 @@ describe('buildGitCredentialsContent', () => {
 })
 
 describe('buildGitConfigContent', () => {
-  const cfg = buildGitConfigContent({ name: 'nimbleco', email: 'n@users.noreply.github.com' })
+  const cfg = buildGitConfigContent({ name: 'testagent', email: 'n@users.noreply.github.com' })
 
   it('uses the store credential helper and identity', () => {
     expect(cfg).toContain('helper = store')
-    expect(cfg).toContain('name = nimbleco')
+    expect(cfg).toContain('name = testagent')
     expect(cfg).toContain('email = n@users.noreply.github.com')
   })
 
@@ -46,6 +46,7 @@ describe('provisionGitCredentials', () => {
 
   beforeEach(() => {
     writes = []
+    vi.spyOn(fs, 'mkdirSync').mockImplementation(() => undefined as never)
     vi.spyOn(fs, 'writeFileSync').mockImplementation((p, data, opts) => {
       writes.push({ path: String(p), data: String(data), mode: (opts as any)?.mode })
     })
@@ -55,19 +56,23 @@ describe('provisionGitCredentials', () => {
   it('writes .git-credentials (0600) and .gitconfig from the agent .env token', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=github_pat_XYZ\n' as never)
 
-    const result = provisionGitCredentials('h_nimbleco', { dataDir: '/data/nimbleco' })
+    const result = provisionGitCredentials('h_testagent', { dataDir: '/data/testagent' })
 
     expect(result.provisioned).toBe(true)
-    const creds = writes.find(w => w.path === '/data/nimbleco/.git-credentials')!
+    // Must land in the tool subprocess HOME ({dataDir}/home), where the agent's
+    // terminal/code-exec tool reads git/ssh/gh config — NOT the data-dir root
+    // (that's the gateway's HOME, which never runs git).
+    expect(fs.mkdirSync).toHaveBeenCalledWith('/data/testagent/home', { recursive: true })
+    const creds = writes.find(w => w.path === '/data/testagent/home/.git-credentials')!
     expect(creds.data).toContain('x-access-token:github_pat_XYZ@github.com')
     expect(creds.mode).toBe(0o600)
-    expect(writes.some(w => w.path === '/data/nimbleco/.gitconfig')).toBe(true)
+    expect(writes.some(w => w.path === '/data/testagent/home/.gitconfig')).toBe(true)
   })
 
   it('is a no-op when no GitHub token is configured', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue('OTHER=1\n' as never)
 
-    const result = provisionGitCredentials('h_nimbleco', { dataDir: '/data/nimbleco' })
+    const result = provisionGitCredentials('h_testagent', { dataDir: '/data/testagent' })
 
     expect(result.provisioned).toBe(false)
     expect(writes).toHaveLength(0)
@@ -78,10 +83,10 @@ describe('provisionGitCredentials', () => {
       'GITHUB_TOKEN=copilot_tok\nGITHUB_PAT=github_pat_DEDICATED\n' as never
     )
 
-    const result = provisionGitCredentials('h_nimbleco', { dataDir: '/data/nimbleco' })
+    const result = provisionGitCredentials('h_testagent', { dataDir: '/data/testagent' })
 
     expect(result.source).toBe('GITHUB_PAT')
-    const creds = writes.find(w => w.path === '/data/nimbleco/.git-credentials')!
+    const creds = writes.find(w => w.path === '/data/testagent/home/.git-credentials')!
     expect(creds.data).toContain('github_pat_DEDICATED')
   })
 })
