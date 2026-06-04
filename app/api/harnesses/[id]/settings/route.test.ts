@@ -16,12 +16,16 @@ vi.mock('@/lib/services', () => ({
     config: { getSettings: vi.fn(() => ({})) },
   },
 }))
-vi.mock('@/lib/resolvers', () => ({ resolveIdentifier: vi.fn(async () => null) }))
+vi.mock('@/lib/resolvers', () => ({
+  resolveIdentifier: vi.fn(async () => null),
+  expandSignalAllowlist: vi.fn(async (_id: string, users: string[]) => users),
+}))
 vi.mock('@/lib/services/harness-compose', () => ({ generateStandaloneCompose: vi.fn(() => '') }))
 vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
 
 import { PUT } from './route'
 import { services } from '@/lib/services'
+import { expandSignalAllowlist } from '@/lib/resolvers'
 
 function makeParams(id: string) {
   return { params: Promise.resolve({ id }) }
@@ -58,5 +62,27 @@ describe('Settings API — PUT', () => {
     expect(res.status).toBe(200)
     expect(fs.writeFileSync).toHaveBeenCalled()
     expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
+  })
+
+  it('expands Signal allowed users to include resolved UUIDs before writing', async () => {
+    const body = {
+      dmPolicy: 'approved-only',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {
+        signal: {
+          allowedUsers: ['+15550001234'],
+          adminUsers: ['+15550001234'],
+          allowedGroups: [],
+          allowAll: false,
+          allowAllGroups: false,
+        },
+      },
+    }
+    await PUT(makeRequest(body), makeParams('h_test'))
+
+    expect(expandSignalAllowlist).toHaveBeenCalledWith('h_test', ['+15550001234'])
   })
 })

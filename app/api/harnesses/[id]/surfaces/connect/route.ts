@@ -4,6 +4,7 @@ import path from 'path'
 import os from 'os'
 import { buildConnectEnvVars, mergeEnvVars, ensurePolicyDefaults, getSignalDaemonUrl } from '@/lib/env-helpers'
 import { services } from '@/lib/services'
+import { expandSignalAllowlist } from '@/lib/resolvers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -55,7 +56,14 @@ export async function POST(
     }
     const key = allowedUsersKey[platform]
     if (key) {
-      envVars[key] = config.adminUser
+      if (platform === 'signal') {
+        // Store both the phone and its resolved UUID — sealed-sender DMs carry
+        // only the UUID, so a phone-only allowlist silently rejects the admin.
+        const expanded = await expandSignalAllowlist(id, config.adminUser.split(','))
+        envVars[key] = expanded.join(',')
+      } else {
+        envVars[key] = config.adminUser
+      }
     }
   }
 
