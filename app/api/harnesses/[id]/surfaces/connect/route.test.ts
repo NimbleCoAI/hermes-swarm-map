@@ -17,6 +17,12 @@ vi.mock('@/lib/services', () => ({
     harness: { restart: restartMock },
   },
 }))
+vi.mock('@/lib/resolvers', () => ({
+  expandSignalAllowlist: vi.fn(async () => [
+    '+15550001234',
+    'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  ]),
+}))
 
 import { POST } from './route'
 
@@ -55,6 +61,29 @@ describe('surface connect — applies env by recreating the container', () => {
     expect(writeSpy).toHaveBeenCalled()
     // ...and the container recreated so the env takes effect (no rebuild needed).
     expect(restartMock).toHaveBeenCalledWith('h_seraph', 'recreate')
+  })
+
+  it('writes both the phone and its resolved UUID into SIGNAL_ALLOWED_USERS', async () => {
+    readSpy.mockReturnValue('SIGNAL_ACCOUNT=+16189263363\n')
+    // Signal connect runs a pre-flight daemon health check via fetch.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ result: [] }) })))
+
+    const req = new Request('http://localhost/api/harnesses/h_nimbleco/surfaces/connect', {
+      method: 'POST',
+      body: JSON.stringify({
+        platform: 'signal',
+        config: { phone: '+16189263363', adminUser: '+15550001234' },
+      }),
+    })
+
+    const res = await POST(req, makeParams('h_nimbleco'))
+    expect(res.status).toBe(200)
+
+    const written = writeSpy.mock.calls.at(-1)?.[1] as string
+    expect(written).toContain(
+      'SIGNAL_ALLOWED_USERS=+15550001234,aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    )
+    vi.unstubAllGlobals()
   })
 
   it('still succeeds (does not 500) when recreate fails', async () => {

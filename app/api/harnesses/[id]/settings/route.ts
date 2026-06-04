@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
-import { resolveIdentifier } from '@/lib/resolvers'
+import { resolveIdentifier, expandSignalAllowlist } from '@/lib/resolvers'
 import { services } from '@/lib/services'
 import { generateStandaloneCompose } from '@/lib/services/harness-compose'
 
@@ -206,8 +206,15 @@ export async function PUT(
     const settings = body.surfaces[platform]
     if (!settings) continue
 
-    // Users — empty string = no one allowed (secure default), * = allow all
-    const usersValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, settings.allowedUsers)
+    // Users — empty string = no one allowed (secure default), * = allow all.
+    // For Signal, expand phone numbers to also include their resolved UUID:
+    // sealed-sender DMs identify the sender only by UUID, so a phone-only
+    // allowlist silently rejects them (see expandSignalAllowlist).
+    let allowedUsers = settings.allowedUsers
+    if (platform === 'signal' && allowedUsers.length > 0) {
+      allowedUsers = await expandSignalAllowlist(id, allowedUsers)
+    }
+    const usersValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, allowedUsers)
     const usersRegex = new RegExp(`^${vars.users}=.*$`, 'm')
     if (usersRegex.test(content)) {
       content = content.replace(usersRegex, `${vars.users}=${usersValue}`)
