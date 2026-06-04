@@ -1,0 +1,10 @@
+name: human_escalation
+version: 1.0.0
+description: "Human-in-the-loop escalation bus over chat -- relay codes, confirm charges, hand off links. Used by the checkout skill."
+author: NimbleCo
+kind: standalone
+provides_tools:
+  - escalate_to_human
+  - check_pending_escalation
+provides_hooks:
+  - pre_gateway_dispatch
