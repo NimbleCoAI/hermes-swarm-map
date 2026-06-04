@@ -31,12 +31,14 @@ storage.write('harnesses.json', [
   { id: 'h_generalist', tier: 'org', platform: 'hermes', channel: ':8712' },
 ])
 
-// Models — static config (not discovered)
+// Models — static config (not discovered).
+// Native Anthropic + local Ollama only. The Bedrock (LiteLLM :4100) and
+// Gemini (vertex-proxy :4200) backends were retired 2026-06-04 — both were
+// down/auth-failing and removed from all agent cascades.
 storage.write('models.json', [
-  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', vendor: 'anthropic', accessTier: 'admin', costClass: 'high', notes: 'Primary model via LiteLLM proxy.' },
-  { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', vendor: 'anthropic', accessTier: 'admin', costClass: 'high', notes: 'Fallback direct anthropic.' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', vendor: 'google', accessTier: 'admin', costClass: 'medium', notes: 'Via vertex-proxy.' },
-  { id: 'qwen3.5-9b', name: 'Qwen 3.5 9B', vendor: 'ollama', accessTier: 'open', costClass: 'local', notes: 'Local. Lightweight.' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', vendor: 'anthropic', accessTier: 'admin', costClass: 'high', notes: 'Primary — direct Anthropic API.' },
+  { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5', vendor: 'anthropic', accessTier: 'admin', costClass: 'high', notes: 'Direct Anthropic API.' },
+  { id: 'qwen3.5-9b', name: 'Qwen 3.5 9B', vendor: 'ollama', accessTier: 'open', costClass: 'local', notes: 'Local fallback (Ollama).' },
 ])
 
 // People — static admin config
