@@ -15,7 +15,9 @@ export async function POST(
 ) {
   const { id } = await params
   try {
-    const result = provisionGitCredentials(id)
+    // Explicit user action → force a refresh (the auto-hooks on create/import
+    // stay apply-if-absent so they never clobber an existing setup).
+    const result = provisionGitCredentials(id, { force: true })
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json(

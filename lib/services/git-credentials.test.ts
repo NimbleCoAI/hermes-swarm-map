@@ -69,6 +69,19 @@ describe('provisionGitCredentials', () => {
     expect(writes.some(w => w.path === '/data/testagent/home/.gitconfig')).toBe(true)
   })
 
+  it('does NOT clobber existing git config (apply-if-absent), but force overwrites', () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=github_pat_XYZ\n' as never)
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true) // creds already present (e.g. an imported agent)
+
+    const noForce = provisionGitCredentials('h_testagent', { dataDir: '/data/testagent' })
+    expect(noForce.provisioned).toBe(false)
+    expect(writes).toHaveLength(0) // imported user's setup left untouched
+
+    const forced = provisionGitCredentials('h_testagent', { dataDir: '/data/testagent', force: true })
+    expect(forced.provisioned).toBe(true)
+    expect(writes.some(w => w.path === '/data/testagent/home/.git-credentials')).toBe(true)
+  })
+
   it('is a no-op when no GitHub token is configured', () => {
     vi.spyOn(fs, 'readFileSync').mockReturnValue('OTHER=1\n' as never)
 
