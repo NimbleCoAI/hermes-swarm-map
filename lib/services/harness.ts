@@ -14,6 +14,7 @@ import { installBaselineTemplates } from './templates'
 import { defaultEnabledPlugins } from './artifacts-manifest'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose } from './harness-compose'
+import { provisionGitCredentials } from './git-credentials'
 import { hsmBaseUrl } from './hsm-url'
 
 const HARNESSES_FILE = 'harnesses.json'
@@ -966,6 +967,15 @@ export class HarnessService {
       await scaffoldAgentDir(agentDir, input.name, port)
     }
 
+    // Provision git auth from the agent's own PAT if one is already configured.
+    // No-op for a fresh scaffold (placeholder env, no token); re-run via the
+    // API or once a token is set. See provisionGitCredentials.
+    try {
+      provisionGitCredentials(id, { dataDir: agentDir, name: input.name })
+    } catch {
+      // Non-fatal: agent still creates; git auth can be (re)run later.
+    }
+
     // Generate standalone compose file
     const agentComposeDir = path.join(composeBaseDir, input.name)
     fs.mkdirSync(agentComposeDir, { recursive: true })
@@ -1179,6 +1189,14 @@ If this is your very first startup ever, introduce yourself briefly in your home
         overlays[idx] = { ...overlays[idx], ...patches }
         this.storage.write('harnesses.json', overlays)
       }
+    }
+
+    // Wire git auth from the imported agent's OWN PAT (if its .env carries one)
+    // so git/gh work in the agent's tool environment immediately after import.
+    try {
+      provisionGitCredentials(overlay.id ?? `h_${slug.replace(/-/g, '_')}`, { dataDir: destDir, name: slug })
+    } catch {
+      // Non-fatal: import still succeeds; git auth can be (re)run via the API.
     }
 
     return {
