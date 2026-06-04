@@ -80,7 +80,7 @@ describe('HarnessService.importFromDir', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
     fs.rmSync(hermesDir, { recursive: true, force: true })
     // Clean up copied agent dirs
-    for (const name of ['imported-agent', 'soul-test']) {
+    for (const name of ['imported-agent', 'soul-test', 'gitcred-test']) {
       const dir = path.join(os.homedir(), `.hermes-${name}`)
       if (fs.existsSync(dir)) {
         fs.rmSync(dir, { recursive: true, force: true })
@@ -99,6 +99,18 @@ describe('HarnessService.importFromDir', () => {
     const overlay = overlays.find((h: any) => h.name === 'imported-agent')
     expect(overlay).toBeDefined()
     expect(overlay.persona).toContain('test agent')
+  })
+
+  it('provisions git credentials from an imported GITHUB_TOKEN (tool-HOME)', async () => {
+    storage.write('harnesses.json', [])
+    fs.writeFileSync(
+      path.join(hermesDir, '.env'),
+      'ANTHROPIC_API_KEY=sk-ant-test123\nGITHUB_TOKEN=github_pat_IMPORTED\n',
+    )
+    const result = await service.importFromDir(hermesDir, 'gitcred-test')
+    const credPath = path.join(result.destDir, 'home', '.git-credentials')
+    expect(fs.existsSync(credPath)).toBe(true)
+    expect(fs.readFileSync(credPath, 'utf-8')).toContain('github_pat_IMPORTED')
   })
 
   it('detects persona from SOUL.md', async () => {
