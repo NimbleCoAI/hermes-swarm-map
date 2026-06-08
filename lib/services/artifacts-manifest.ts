@@ -18,6 +18,74 @@ export interface ArtifactsManifest {
   hooks: ArtifactEntry[]
 }
 
+export interface GitSource {
+  org: string
+  repo: string
+  ref: string
+  subdir?: string
+}
+
+// org / repo names and refs are charset-validated because the parsed values
+// later feed a git command — a stray shell metacharacter or path traversal
+// must be rejected loudly, never silently passed through.
+const GIT_NAME_RE = /^[A-Za-z0-9._-]+$/ // <org> and <repo>
+const GIT_REF_RE = /^[A-Za-z0-9._/-]+$/ // <tag> (tags may contain '/')
+const GIT_SUBDIR_RE = /^[A-Za-z0-9._/-]+$/
+
+/**
+ * Parse a `git:<org>/<repo>#<tag>[:<subdir>]` artifact source.
+ *
+ * Security front door for git-sourced (third-party / cross-trust-boundary)
+ * artifacts:
+ * - returns `null` for non-git sources (`local`, `upstream`, …) so the caller
+ *   routes them through the existing local path;
+ * - throws (loud failure) on any `git:`-prefixed source that is **unpinned**
+ *   (pinning to a tag is mandatory — an unpinned ref can silently drift to
+ *   malicious code), malformed, or contains unsafe characters / path traversal.
+ */
+export function parseGitSource(source: string): GitSource | null {
+  if (!source.startsWith('git:')) return null
+  const rest = source.slice('git:'.length)
+
+  const hashIdx = rest.indexOf('#')
+  if (hashIdx === -1) {
+    throw new Error(`git source must be pinned: "${source}" is missing "#<tag>"`)
+  }
+  const repoPart = rest.slice(0, hashIdx) // <org>/<repo>
+  let refPart = rest.slice(hashIdx + 1) // <tag>[:<subdir>]
+
+  let subdir: string | undefined
+  const colonIdx = refPart.indexOf(':')
+  if (colonIdx !== -1) {
+    subdir = refPart.slice(colonIdx + 1)
+    refPart = refPart.slice(0, colonIdx)
+  }
+
+  const segs = repoPart.split('/')
+  if (segs.length !== 2 || !segs[0] || !segs[1]) {
+    throw new Error(`malformed git source "${source}": expected git:<org>/<repo>#<tag>`)
+  }
+  const [org, repo] = segs
+  if (!GIT_NAME_RE.test(org) || !GIT_NAME_RE.test(repo)) {
+    throw new Error(`invalid org/repo in git source "${source}" (unsafe characters)`)
+  }
+  if (!refPart) {
+    throw new Error(`git source must be pinned: "${source}" has an empty ref`)
+  }
+  if (!GIT_REF_RE.test(refPart)) {
+    throw new Error(`invalid ref in git source "${source}" (unsafe characters)`)
+  }
+  if (subdir !== undefined) {
+    if (!subdir || !GIT_SUBDIR_RE.test(subdir) || subdir.split('/').includes('..')) {
+      throw new Error(`invalid subdir in git source "${source}" (traversal or unsafe characters)`)
+    }
+  }
+
+  const parsed: GitSource = { org, repo, ref: refPart }
+  if (subdir !== undefined) parsed.subdir = subdir
+  return parsed
+}
+
 export function loadManifest(manifestPath: string): ArtifactsManifest {
   let raw: string
   try {
