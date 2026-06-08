@@ -72,7 +72,7 @@ Optional: Add GitHub token (for code tools) or Brave Search key (for web search)
 <!-- screenshot: wizard-step-5-deploy -->
 
 Review your settings and hit Deploy. HSM will:
-1. Pull the `ghcr.io/nimblecoai/hermes-agent:latest` Docker image
+1. Pull the `ghcr.io/nimblecoai/hermes-agent-mt:latest` Docker image
 2. Scaffold `~/.hermes-{name}/` with config, persona, and plugins
 3. Generate a hardened `docker-compose.yml`
 4. Start the container
