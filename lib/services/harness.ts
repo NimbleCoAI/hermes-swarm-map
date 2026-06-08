@@ -479,18 +479,6 @@ function getComposeFilesForDir(hermesDir: string): string[] {
   }
 }
 
-function getServicesFromComposeFile(composeFile: string): string[] {
-  try {
-    const output = execSync(
-      `docker compose -f ${composeFile} config --services`,
-      { stdio: 'pipe', timeout: 10000 }
-    ).toString()
-    return output.trim().split('\n').filter((s) => s.trim())
-  } catch {
-    return []
-  }
-}
-
 // Map service name to the data directory where its SOUL.md lives
 export function guessDataDir(serviceName: string, containerName: string): string {
   // hermes-personal → ~/.hermes (the default/personal instance)

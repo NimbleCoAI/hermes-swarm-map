@@ -1001,8 +1001,8 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                               onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
                               placeholder={`Add ${labels.users.toLowerCase()}...`}
                               renderTag={(value) => {
-                                const resolved = (surf as any).resolvedUsers?.find(
-                                  (r: any) => r.display === value || r.nativeId === value
+                                const resolved = (surf as { resolvedUsers?: Array<{ display: string; nativeId: string; profileName?: string }> }).resolvedUsers?.find(
+                                  (r) => r.display === value || r.nativeId === value
                                 )
                                 return resolved?.profileName
                                   ? `${value} (${resolved.profileName})`
