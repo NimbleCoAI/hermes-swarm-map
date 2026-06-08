@@ -151,6 +151,8 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
   const [pairedUsers, setPairedUsers] = useState<PairingUser[]>([])
   const [expandedSettings, setExpandedSettings] = useState<Record<string, boolean>>({})
   const [pinStatus, setPinStatus] = useState<Record<string, string>>({})
+  const [profileNameDraft, setProfileNameDraft] = useState<Record<string, string>>({})
+  const [profileNameSaving, setProfileNameSaving] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     fetch('/api/surfaces/signal')
@@ -945,6 +947,53 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
                       {/* Expandable settings section */}
                       {isExpanded && surf && (
                         <div className="border-t border-[var(--border)] p-4 space-y-4 bg-[var(--bg)]/50">
+                          {platform === 'signal' && s.config.phone && (
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-muted-foreground">Signal profile name</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={profileNameDraft[s.id] ?? s.config.profileName ?? ''}
+                                  onChange={(e) => setProfileNameDraft(prev => ({ ...prev, [s.id]: e.target.value }))}
+                                  placeholder="Display name shown to Signal contacts"
+                                  className="flex-1 px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
+                                />
+                                <button
+                                  disabled={profileNameSaving[s.id] || !(profileNameDraft[s.id] ?? s.config.profileName ?? '').trim()}
+                                  onClick={async () => {
+                                    setProfileNameSaving(prev => ({ ...prev, [s.id]: true }))
+                                    try {
+                                      const res = await fetch('/api/surfaces/signal/profile', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          phone: s.config.phone,
+                                          displayName: (profileNameDraft[s.id] ?? s.config.profileName ?? '').trim(),
+                                        }),
+                                      })
+                                      const data = await res.json()
+                                      if (data.success) {
+                                        toast.success('Signal profile name updated')
+                                        refetchSurfaces()
+                                      } else {
+                                        toast.error(data.error || 'Failed to update profile name')
+                                      }
+                                    } catch {
+                                      toast.error('Failed to update profile name')
+                                    } finally {
+                                      setProfileNameSaving(prev => ({ ...prev, [s.id]: false }))
+                                    }
+                                  }}
+                                  className="text-xs px-3 py-2 rounded-md border border-[var(--border)] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                                >
+                                  {profileNameSaving[s.id] ? 'Saving…' : 'Update'}
+                                </button>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                The name contacts see when they DM this number. Written to the Signal daemon.
+                              </p>
+                            </div>
+                          )}
                           <div className="space-y-1">
                             <label className="text-xs font-medium text-muted-foreground">Admins ({labels.users})</label>
                             <TagInput
