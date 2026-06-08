@@ -51,6 +51,8 @@ SIGNAL_ACCOUNT=+15551234567
 
 **Voice memos:** Agents can transcribe incoming voice messages via local Whisper when available.
 
+**Profile (display) name:** The name contacts see when they DM the agent's number lives in the signal-cli daemon, not in HSM/`.env`. Set it from the harness **Surfaces → Signal** settings ("Signal profile name" field) — HSM writes it via the daemon's `updateProfile` RPC. (The daemon has no read-back, so the field reflects HSM's last-saved value.)
+
 ---
 
 ## Mattermost
@@ -100,3 +102,4 @@ All platforms share these conventions:
 - **`REQUIRE_MENTION` defaults to `true`** on every platform — agents stay quiet in groups unless addressed.
 - **Approval via HSM UI:** The **Surfaces** tab lets you manage approved users and groups without editing `.env` files.
 - **Approval via `.env`:** Power users can edit allowlists directly and restart the agent.
+- **Duplicating an agent gives it a fresh identity.** Duplicate copies the source's config/tools but resets `HERMES_AGENT_NAME` (the agent's HSM-policy identity) and `SOUL.md` to the new name, and strips surface credentials — so a duplicate never inherits the source's policy/persona or shares its surfaces. Customize the new SOUL.md and connect surfaces afterward.

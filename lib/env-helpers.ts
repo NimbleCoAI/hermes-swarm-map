@@ -101,6 +101,26 @@ export function getSignalDaemonUrl(): string {
 }
 
 /**
+ * Call the signal-cli JSON-RPC daemon (POST {daemon}/api/v1/rpc).
+ *
+ * The daemon is signal-cli's JSON-RPC daemon — it 404s on the REST `/v1/...`
+ * paths; everything goes through this single RPC endpoint. Returns the parsed
+ * `{result}` / `{error}` envelope.
+ */
+export async function callSignalRpc(
+  method: string,
+  params?: Record<string, unknown>,
+): Promise<{ result?: unknown; error?: { code: number; message: string } }> {
+  const res = await fetch(`${getSignalDaemonUrl()}/api/v1/rpc`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', method, id: '1', params }),
+    signal: AbortSignal.timeout(15000),
+  })
+  return res.json()
+}
+
+/**
  * Build the value for a settings env var (ALLOWED_USERS etc.)
  *
  * Rules:

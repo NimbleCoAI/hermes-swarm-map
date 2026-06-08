@@ -76,7 +76,9 @@ describe('SignalPinService', () => {
 
       const result = await pinService.setPin('+15551234567', '12345678', 'h_personal')
       expect(result.success).toBe(false)
-      expect(result.error).toBeDefined()
+      if (!result.success) {
+        expect(result.error).toBeDefined()
+      }
     })
   })
 

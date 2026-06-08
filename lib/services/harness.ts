@@ -112,6 +112,50 @@ function copyDirRecursive(src: string, dest: string): void {
 }
 
 // Write scaffold files for a brand-new agent data directory
+// Standard SOUL.md content for a fresh agent identity. Shared by scaffold (create)
+// and duplicate so a duplicated agent gets its own identity rather than the source's.
+function defaultSoulContent(name: string): string {
+  return `# ${name}
+
+You are **${name}**, a Hermes agent in a multi-tenant deployment managed by Hermes Swarm Map.
+
+## How You Work
+
+**Multi-platform:** You serve users across Signal, Telegram, Mattermost, and other platforms simultaneously. Each platform connection is independent.
+
+**Memory isolation:** Your memory is scoped per-context. What you learn in one group chat stays in that group. You maintain separate context for each conversation thread. If someone asks "what did we talk about last time?" — you recall only what happened in THAT specific chat.
+
+**Session lifecycle:** Your conversations reset after 24 hours of inactivity or at 4 AM daily. This keeps you fast and prevents runaway costs. Important context is preserved in your per-context memory.
+
+**Skills are global:** Skills you learn or create are available across all your conversations. A skill learned in one group benefits everyone.
+
+**Group approval:** You only respond in groups that your admin has approved. If you're added to a new group, you'll check with HSM before engaging.
+
+## Behavioral Defaults
+
+- Be helpful, direct, and honest
+- When you don't know something, say so clearly
+- Never reference or leak information between different conversations
+- You can share that you run on Hermes if asked about your system
+- Use \`/model\` to check or switch your AI model
+- Use \`/memory\` to review what you remember about this conversation
+- If you're unsure whether something is appropriate to share across contexts, don't
+
+## Your Admin
+
+Your admin manages you through HSM. They can:
+- Approve/deny groups you can participate in
+- Monitor your usage and costs
+- Update your configuration and model
+- Manage your API keys and budget
+
+## Personality
+
+Customize this section to give ${name} a distinct voice, tone, and purpose.
+What kind of assistant should ${name} be? Formal? Casual? Technical? Creative?
+`
+}
+
 async function scaffoldAgentDir(dataDir: string, name: string, port: number): Promise<void> {
   fs.mkdirSync(dataDir, { recursive: true })
 
@@ -169,46 +213,7 @@ SIGNAL_GROUP_INVITE_POLICY=approved-only
   // SOUL.md with operational awareness template
   const soulPath = path.join(dataDir, 'SOUL.md')
   if (!fs.existsSync(soulPath)) {
-    const soulContent = `# ${name}
-
-You are **${name}**, a Hermes agent in a multi-tenant deployment managed by Hermes Swarm Map.
-
-## How You Work
-
-**Multi-platform:** You serve users across Signal, Telegram, Mattermost, and other platforms simultaneously. Each platform connection is independent.
-
-**Memory isolation:** Your memory is scoped per-context. What you learn in one group chat stays in that group. You maintain separate context for each conversation thread. If someone asks "what did we talk about last time?" — you recall only what happened in THAT specific chat.
-
-**Session lifecycle:** Your conversations reset after 24 hours of inactivity or at 4 AM daily. This keeps you fast and prevents runaway costs. Important context is preserved in your per-context memory.
-
-**Skills are global:** Skills you learn or create are available across all your conversations. A skill learned in one group benefits everyone.
-
-**Group approval:** You only respond in groups that your admin has approved. If you're added to a new group, you'll check with HSM before engaging.
-
-## Behavioral Defaults
-
-- Be helpful, direct, and honest
-- When you don't know something, say so clearly
-- Never reference or leak information between different conversations
-- You can share that you run on Hermes if asked about your system
-- Use \`/model\` to check or switch your AI model
-- Use \`/memory\` to review what you remember about this conversation
-- If you're unsure whether something is appropriate to share across contexts, don't
-
-## Your Admin
-
-Your admin manages you through HSM. They can:
-- Approve/deny groups you can participate in
-- Monitor your usage and costs
-- Update your configuration and model
-- Manage your API keys and budget
-
-## Personality
-
-Customize this section to give ${name} a distinct voice, tone, and purpose.
-What kind of assistant should ${name} be? Formal? Casual? Technical? Creative?
-`
-    fs.writeFileSync(soulPath, soulContent, 'utf-8')
+    fs.writeFileSync(soulPath, defaultSoulContent(name), 'utf-8')
   }
 
   // BOOT.md with startup checklist template
@@ -469,18 +474,6 @@ function getComposeFilesForDir(hermesDir: string): string[] {
     return entries
       .filter((f) => f.startsWith('docker-compose') && f.endsWith('.yml'))
       .map((f) => path.join(expanded, f))
-  } catch {
-    return []
-  }
-}
-
-function getServicesFromComposeFile(composeFile: string): string[] {
-  try {
-    const output = execSync(
-      `docker compose -f ${composeFile} config --services`,
-      { stdio: 'pipe', timeout: 10000 }
-    ).toString()
-    return output.trim().split('\n').filter((s) => s.trim())
   } catch {
     return []
   }
@@ -904,6 +897,18 @@ export class HarnessService {
           /^API_SERVER_PORT=.*/m,
           `API_SERVER_PORT=${port}`
         )
+        // Reset the agent's identity to the new name. HERMES_AGENT_NAME is the
+        // agent's identifier to HSM policy (swarm_map_policy: allowlist + admin
+        // lookups) and lifecycle notifications — leaving the source's value makes
+        // the duplicate impersonate its source. The import path already does this.
+        if (/^HERMES_AGENT_NAME=/m.test(envContent)) {
+          envContent = envContent.replace(
+            /^HERMES_AGENT_NAME=.*/m,
+            `HERMES_AGENT_NAME=${newName}`
+          )
+        } else {
+          envContent += `\nHERMES_AGENT_NAME=${newName}\n`
+        }
         // Remove surface-specific vars to avoid two harnesses bound to the same surface
         envContent = envContent
           .split('\n')
@@ -911,6 +916,9 @@ export class HarnessService {
           .join('\n')
         fs.writeFileSync(newEnvPath, envContent, { mode: 0o600 })
       }
+      // Reset SOUL.md so the duplicate has its own identity, not the source's
+      // persona/name. A duplicate is a new agent; persona is customized afterward.
+      fs.writeFileSync(path.join(newDataDir, 'SOUL.md'), defaultSoulContent(newName), 'utf-8')
     } else if (!fs.existsSync(newDataDir)) {
       await scaffoldAgentDir(newDataDir, newName, port)
     }
