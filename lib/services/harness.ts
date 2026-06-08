@@ -780,14 +780,42 @@ export class HarnessService {
     return this.get(id)
   }
 
+  // Resolve the compose file + service name for lifecycle ops (restart/start/stop).
+  //
+  // composeFile/serviceName are LIVE Docker state (not persisted in the overlay),
+  // so a harness whose container is briefly undiscoverable (mid-recreate, port
+  // bind failure, daemon hiccup) would otherwise have no composeFile and every
+  // restart/start/stop would throw "no compose file configured" — leaving the
+  // agent unmanageable through Swarm Map. Fall back to the conventional
+  // standalone layout (~/.hermes-swarm-map/compose/<name>/docker-compose.yml,
+  // service hermes-<name>) so a known agent stays recoverable.
+  private resolveComposeTarget(
+    harness: Harness
+  ): { composeFile: string; serviceName: string } | undefined {
+    let composeFile = harness.composeFile
+    if (!composeFile && harness.name) {
+      const settings = this.config?.getSettings()
+      const swarmMapDataDir = settings?.dataDir
+        ? expandPath(settings.dataDir)
+        : path.join(os.homedir(), '.hermes-swarm-map')
+      const candidate = path.join(swarmMapDataDir, 'compose', harness.name, 'docker-compose.yml')
+      if (fs.existsSync(candidate)) composeFile = candidate
+    }
+    const serviceName =
+      harness.serviceName || (composeFile && harness.name ? `hermes-${harness.name}` : undefined)
+    if (!composeFile || !serviceName) return undefined
+    return { composeFile, serviceName }
+  }
+
   restart(id: string, mode: RestartMode): void {
     const harness = this.get(id)
-    if (!harness?.composeFile || !harness.serviceName) {
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!target) {
       throw new Error(`Harness ${id} has no compose file configured`)
     }
     markRestarting(id, mode)
-    this.docker.restart(harness.composeFile, harness.serviceName, mode)
-    this.audit.append({ who: 'admin', what: `restart:${mode}`, target: harness.name })
+    this.docker.restart(target.composeFile, target.serviceName, mode)
+    this.audit.append({ who: 'admin', what: `restart:${mode}`, target: harness!.name })
   }
 
   /**
@@ -819,20 +847,22 @@ export class HarnessService {
 
   start(id: string): void {
     const harness = this.get(id)
-    if (!harness?.composeFile || !harness.serviceName) {
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!target) {
       throw new Error(`Harness ${id} has no compose file configured`)
     }
-    this.docker.start(harness.composeFile, harness.serviceName)
-    this.audit.append({ who: 'admin', what: 'start', target: harness.name })
+    this.docker.start(target.composeFile, target.serviceName)
+    this.audit.append({ who: 'admin', what: 'start', target: harness!.name })
   }
 
   stop(id: string): void {
     const harness = this.get(id)
-    if (!harness?.composeFile || !harness.serviceName) {
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!target) {
       throw new Error(`Harness ${id} has no compose file configured`)
     }
-    this.docker.stop(harness.composeFile, harness.serviceName)
-    this.audit.append({ who: 'admin', what: 'stop', target: harness.name })
+    this.docker.stop(target.composeFile, target.serviceName)
+    this.audit.append({ who: 'admin', what: 'stop', target: harness!.name })
   }
 
   async duplicateOverlay(sourceId: string, newName: string): Promise<Partial<Harness> | undefined> {
