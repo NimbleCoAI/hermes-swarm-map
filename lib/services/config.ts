@@ -13,7 +13,7 @@ const DEFAULT_SETTINGS: Settings = {
   dataDir: '~/.hermes-swarm-map',
   theme: 'light',
   composeFiles: [],
-  defaultImage: 'ghcr.io/nimblecoai/hermes-agent:latest',
+  defaultImage: 'ghcr.io/nimblecoai/hermes-agent-mt:latest',
   useLocalBuild: true,
   vncBindHost: '127.0.0.1',
 }
