@@ -1,6 +1,9 @@
 import fs from 'fs'
 import { cp } from 'fs/promises'
+import os from 'os'
 import path from 'path'
+import { gateArtifactDir } from './artifact-gate'
+import { fetchGitArtifact } from './git-fetch'
 
 export type ArtifactType = 'plugins' | 'skills' | 'hooks'
 
@@ -115,32 +118,80 @@ export interface InstallResult {
   error?: string
 }
 
-// Phase 1 supports only the 'local' source: copy infra/templates/<type>/<name>
-// into <agentDataDir>/<type>/<name>. Unsupported source schemes throw (loud
-// failure) rather than silently producing a capability-less agent.
+export interface InstallOpts {
+  // Inject a fetcher (tests / custom transports). Defaults to fetchGitArtifact.
+  gitFetch?: (src: GitSource) => string
+  // Passed through to the default fetcher.
+  gitBaseUrl?: string
+  gitToken?: string
+  cacheRoot?: string
+}
+
+// Sources supported:
+//   'local'                      copy infra/templates/<type>/<name>
+//   'git:<org>/<repo>#<tag>[:..]' fetch at the pinned tag, run the trust gate,
+//                                 then install — or REFUSE (throw) if the gate
+//                                 finds prompt-injection / promptware.
+// Any other scheme throws (loud failure) rather than silently producing a
+// capability-less agent.
 export async function installArtifacts(
   agentDataDir: string,
   manifest: ArtifactsManifest,
   repoRoot: string,
+  opts: InstallOpts = {},
 ): Promise<InstallResult[]> {
   const results: InstallResult[] = []
   const types: ArtifactType[] = ['plugins', 'skills', 'hooks']
+
+  const gitFetch =
+    opts.gitFetch ??
+    ((src: GitSource): string =>
+      fetchGitArtifact(src, {
+        baseUrl: opts.gitBaseUrl,
+        token: opts.gitToken,
+        cacheRoot: opts.cacheRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), 'hsm-artifact-cache-')),
+      }))
+
   for (const type of types) {
     for (const entry of manifest[type]) {
-      if (entry.source !== 'local') {
-        throw new Error(
-          `Unsupported artifact source "${entry.source}" for ${type}/${entry.name} (Phase 1 supports 'local' only)`,
-        )
-      }
-      const srcDir = path.join(repoRoot, 'infra', 'templates', type, entry.name)
       const destDir = path.join(agentDataDir, type, entry.name)
+
       // Never clobber an agent's existing (possibly customized) artifact — e.g.
       // when importing an already-provisioned agent. Seed baseline only when the
-      // artifact is absent; the agent owns its own copy thereafter.
+      // artifact is absent; the agent owns its own copy thereafter. Applied
+      // before fetching so an already-present git-sourced artifact isn't re-cloned.
       if (fs.existsSync(destDir)) {
         results.push({ type, name: entry.name, installed: true, skipped: true })
         continue
       }
+
+      // Throws loudly on a malformed / unpinned git source; null for non-git.
+      const git = parseGitSource(entry.source)
+      if (git) {
+        const fetchedDir = gitFetch(git)
+        const gate = gateArtifactDir(fetchedDir)
+        if (!gate.ok) {
+          const summary = gate.findings.map((f) => `${f.file} [${f.ids.join(',')}]`).join('; ')
+          throw new Error(
+            `Refused git-sourced ${type}/${entry.name} (${entry.source}): content failed the injection scan (${summary}). Not installed.`,
+          )
+        }
+        try {
+          await cp(fetchedDir, destDir, {
+            recursive: true,
+            filter: (s) => !s.split(path.sep).includes('.git'),
+          })
+          results.push({ type, name: entry.name, installed: true })
+        } catch (e) {
+          results.push({ type, name: entry.name, installed: false, error: `copy failed: ${(e as Error).message}` })
+        }
+        continue
+      }
+
+      if (entry.source !== 'local') {
+        throw new Error(`Unsupported artifact source "${entry.source}" for ${type}/${entry.name}`)
+      }
+      const srcDir = path.join(repoRoot, 'infra', 'templates', type, entry.name)
       try {
         await cp(srcDir, destDir, { recursive: true })
         results.push({ type, name: entry.name, installed: true })
