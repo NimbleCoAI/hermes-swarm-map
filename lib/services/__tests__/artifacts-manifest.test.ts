@@ -69,6 +69,26 @@ describe('installArtifacts (local source)', () => {
     fs.rmSync(agentDir, { recursive: true, force: true })
   })
 
+  it('does not clobber an agent\'s existing (customized) artifact — import-safe', async () => {
+    const repoRoot = tmp
+    seedTemplates(repoRoot)
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-'))
+    // The agent already has a customized skills/s1 (e.g. an imported agent).
+    const existing = path.join(agentDir, 'skills', 's1')
+    fs.mkdirSync(existing, { recursive: true })
+    fs.writeFileSync(path.join(existing, 'file.txt'), 'CUSTOMIZED-by-operator')
+
+    const manifest = { plugins: [], skills: [{ name: 's1', source: 'local' }], hooks: [] }
+    const results = await installArtifacts(agentDir, manifest, repoRoot)
+
+    // The operator's content must be preserved, not overwritten with the baseline.
+    expect(fs.readFileSync(path.join(existing, 'file.txt'), 'utf-8')).toBe('CUSTOMIZED-by-operator')
+    const r = results.find((x) => x.name === 's1')!
+    expect(r.installed).toBe(true)
+    expect(r.skipped).toBe(true)
+    fs.rmSync(agentDir, { recursive: true, force: true })
+  })
+
   it('reports installed=false with an error when a local source dir is missing', async () => {
     const repoRoot = tmp
     const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-'))

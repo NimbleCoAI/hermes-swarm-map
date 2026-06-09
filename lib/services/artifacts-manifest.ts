@@ -42,6 +42,8 @@ export interface InstallResult {
   type: ArtifactType
   name: string
   installed: boolean
+  // true when the artifact was already present and left untouched (import-safe).
+  skipped?: boolean
   error?: string
 }
 
@@ -64,6 +66,13 @@ export async function installArtifacts(
       }
       const srcDir = path.join(repoRoot, 'infra', 'templates', type, entry.name)
       const destDir = path.join(agentDataDir, type, entry.name)
+      // Never clobber an agent's existing (possibly customized) artifact — e.g.
+      // when importing an already-provisioned agent. Seed baseline only when the
+      // artifact is absent; the agent owns its own copy thereafter.
+      if (fs.existsSync(destDir)) {
+        results.push({ type, name: entry.name, installed: true, skipped: true })
+        continue
+      }
       try {
         await cp(srcDir, destDir, { recursive: true })
         results.push({ type, name: entry.name, installed: true })
