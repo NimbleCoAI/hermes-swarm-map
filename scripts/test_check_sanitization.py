@@ -238,3 +238,35 @@ class TestMainFailClosed:
         c = TestLLMLayer._FakeClient('{"flagged": true, "reasons": ["case detail"]}')
         rc = cs.main([rel], root=str(tmp_path), client_factory=lambda: c, require_llm=True)
         assert rc == 1
+
+
+class TestCLIDeterministicOnly:
+    """The --deterministic-only CLI mode used as an always-on CI gate (no key)."""
+
+    SCRIPT = str(pathlib.Path(__file__).resolve().parent / "check_sanitization.py")
+
+    def _run(self, tmp_path):
+        import os
+        import subprocess
+        env = dict(os.environ)
+        env.pop("ANTHROPIC_API_KEY", None)  # prove it needs no key
+        env["SANITIZE_ROOT"] = str(tmp_path)
+        return subprocess.run(
+            [sys.executable, self.SCRIPT, "--all", "--deterministic-only"],
+            env=env, capture_output=True, text=True,
+        )
+
+    def test_blocks_secret_without_key(self, tmp_path):
+        d = tmp_path / "infra" / "templates" / "skills" / "x"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"key: {GH_PAT_P}")
+        r = self._run(tmp_path)
+        assert r.returncode == 1
+        assert "BLOCKED" in r.stdout
+
+    def test_passes_clean_without_key(self, tmp_path):
+        d = tmp_path / "infra" / "templates" / "skills" / "x"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("Generic methodology for structuring a handoff.")
+        r = self._run(tmp_path)
+        assert r.returncode == 0, r.stdout
