@@ -19,10 +19,22 @@ The manifest references a **tag**, never a branch. `parseGitSource` rejects an
 unpinned source loudly (an unpinned ref can silently drift to malicious code).
 
 ## 3. Reference it in the manifest
-`infra/artifacts.json`:
+`infra/artifacts.json`. **Point the source at the artifact *subdir* inside the
+repo** (`#<tag>:<subdir>`), not the repo root — a single repo typically holds a
+co-located plugin **and** skill (the osint-engine layout), each referenced by its
+own subdir and installed to its own agent dir (`plugins/<name>/`, `skills/<name>/`):
 ```json
-{ "name": "captcha_solver", "source": "git:<org>/<repo>#v0.1.0", "enabled": true }
+{
+  "plugins": [
+    { "name": "captcha_solver",  "source": "git:<org>/<repo>#v0.1.0:hermes-plugin", "enabled": true }
+  ],
+  "skills": [
+    { "name": "captcha-solving", "source": "git:<org>/<repo>#v0.1.0:hermes-skill" }
+  ]
+}
 ```
+Without a subdir the whole repo root (README, `tests/`, both `hermes-*` dirs) is
+copied into `plugins/<name>/` and the runtime won't find `plugin.yaml`.
 
 ## 4. Provision the build-time token (HSM server env)
 - `ARTIFACT_GIT_TOKEN` (falls back to `GITHUB_TOKEN`) on the **HSM server** —
