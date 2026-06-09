@@ -3,15 +3,23 @@ import { loadManifest, installArtifacts, type InstallResult } from './artifacts-
 
 /**
  * Install baseline plugins, skills, and hooks into an agent's data directory,
- * driven by infra/artifacts.json. Phase 1: all entries are 'local' (copied from
- * infra/templates), so output is identical to the previous hardcoded-array copy.
- * Returns what was actually installed (replaces the old void return + the
- * pluginsInstalled = [...TEMPLATE_PLUGINS] lie). Throws on unsupported sources.
+ * driven by infra/artifacts.json. `local` entries are copied from
+ * infra/templates; `git:<org>/<repo>#<tag>` entries are fetched at the pinned
+ * tag and screened by the install-time trust gate (see installArtifacts).
+ * Returns what was actually installed. Throws on unsupported sources or when the
+ * trust gate refuses a fetched artifact.
+ *
+ * The git build-time token is read from the HSM *server* env
+ * (`ARTIFACT_GIT_TOKEN`, falling back to `GITHUB_TOKEN`). This is deliberately
+ * distinct from the per-agent runtime `GITHUB_TOKEN` written into an agent's
+ * `.env`: the server fetches+screens artifacts at create time; the agent never
+ * sees this credential.
  */
 export async function installBaselineTemplates(agentDataDir: string): Promise<InstallResult[]> {
   const repoRoot = process.cwd()
   const manifest = loadManifest(path.join(repoRoot, 'infra', 'artifacts.json'))
-  return installArtifacts(agentDataDir, manifest, repoRoot)
+  const gitToken = process.env.ARTIFACT_GIT_TOKEN || process.env.GITHUB_TOKEN || undefined
+  return installArtifacts(agentDataDir, manifest, repoRoot, { gitToken })
 }
 
 /**
