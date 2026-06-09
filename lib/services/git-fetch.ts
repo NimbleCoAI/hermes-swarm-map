@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process'
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import type { GitSource } from './artifacts-manifest'
 
@@ -8,8 +9,10 @@ export interface FetchOpts {
   // `${baseUrl}/${org}/${repo}.git`. Defaults to GitHub HTTPS. A local path is
   // accepted (used by tests + self-hosted mirrors).
   baseUrl?: string
-  // Build-time token injected into the HTTPS URL (HSM server env, distinct from
-  // the agent's runtime GITHUB_TOKEN). Ignored when baseUrl is set.
+  // Build-time token (HSM server env, distinct from the agent's runtime token).
+  // Supplied to git OUT OF BAND via GIT_ASKPASS — never placed in the URL or
+  // argv, so it can't leak through `ps` or a clone error message. Ignored when
+  // baseUrl is set.
   token?: string
   // Where clones are placed; a unique subdir is created per fetch.
   cacheRoot: string
@@ -19,8 +22,26 @@ function buildUrl(src: GitSource, opts: FetchOpts): string {
   if (opts.baseUrl) {
     return `${opts.baseUrl.replace(/\/+$/, '')}/${src.org}/${src.repo}.git`
   }
-  const auth = opts.token ? `${opts.token}@` : ''
-  return `https://${auth}github.com/${src.org}/${src.repo}.git`
+  // Username only (no secret). The password (token) is delivered via GIT_ASKPASS.
+  // x-access-token is the correct username for GitHub token auth (works for ghp_,
+  // ghu_, gho_, github_pat_ alike, unlike token-as-username).
+  const userPrefix = opts.token ? 'x-access-token@' : ''
+  return `https://${userPrefix}github.com/${src.org}/${src.repo}.git`
+}
+
+/**
+ * Remove anything secret-shaped from a string before it is surfaced in an error.
+ * Defense in depth: with GIT_ASKPASS the token should never reach here, but we
+ * scrub the known token value + GitHub token shapes + any `user:secret@` URLs
+ * regardless.
+ */
+export function redactSecrets(text: string, token?: string): string {
+  let out = text
+  if (token) out = out.split(token).join('***')
+  return out
+    .replace(/gh[posru]_[A-Za-z0-9]{16,}/g, '***')
+    .replace(/github_pat_[A-Za-z0-9_]{16,}/g, '***')
+    .replace(/(https?:\/\/[^/\s:@]+:)[^@\s]+@/g, '$1***@')
 }
 
 /**
@@ -29,7 +50,8 @@ function buildUrl(src: GitSource, opts: FetchOpts): string {
  *
  * Pinning + charset safety are enforced upstream by parseGitSource; here we
  * clone exactly that ref with --depth 1 and `--` so the ref/url can never be
- * read as a git option. A subdir is resolved and verified to stay inside the
+ * read as a git option. The token is passed via GIT_ASKPASS (kept out of argv,
+ * the URL, and any error). A subdir is resolved and verified to stay inside the
  * clone (defense against an escaping/`..` subdir that slipped through).
  */
 export function fetchGitArtifact(src: GitSource, opts: FetchOpts): string {
@@ -37,9 +59,38 @@ export function fetchGitArtifact(src: GitSource, opts: FetchOpts): string {
   const dest = fs.mkdtempSync(path.join(opts.cacheRoot, `${src.repo}-`))
   const url = buildUrl(src, opts)
 
-  execFileSync('git', ['clone', '-q', '--depth', '1', '--branch', src.ref, '--', url, dest], {
-    stdio: 'ignore',
-  })
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  let askpass: string | undefined
+  if (opts.token && !opts.baseUrl) {
+    // A generic helper that echoes the token from the env — the SCRIPT holds no
+    // secret; the token lives only in this child process's env, never on disk
+    // in plaintext beyond the (env-reading) helper and never in argv.
+    askpass = path.join(dest, '..', `.askpass-${path.basename(dest)}.sh`)
+    fs.writeFileSync(askpass, '#!/bin/sh\nprintf %s "$GIT_ARTIFACT_TOKEN"\n', { mode: 0o700 })
+    env.GIT_ASKPASS = askpass
+    env.GIT_ARTIFACT_TOKEN = opts.token
+  }
+
+  try {
+    execFileSync('git', ['clone', '-q', '--depth', '1', '--branch', src.ref, '--', url, dest], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env,
+    })
+  } catch (e) {
+    const err = e as { stderr?: Buffer; message?: string }
+    const raw = (err.stderr?.toString() || err.message || 'clone failed').trim()
+    throw new Error(
+      `git clone failed for ${src.org}/${src.repo}#${src.ref}: ${redactSecrets(raw, opts.token)}`,
+    )
+  } finally {
+    if (askpass) {
+      try {
+        fs.rmSync(askpass, { force: true })
+      } catch {
+        /* best effort */
+      }
+    }
+  }
 
   if (!src.subdir) return dest
 
