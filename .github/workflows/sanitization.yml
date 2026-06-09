@@ -10,6 +10,8 @@ on:
       - 'infra/templates/**'
       - 'docs/**'
       - '**/*.md'
+      - 'SOUL*'
+      - '**/SOUL*'
       - 'scripts/check_sanitization.py'
       - 'scripts/test_check_sanitization.py'
       - '.github/workflows/sanitization.yml'
