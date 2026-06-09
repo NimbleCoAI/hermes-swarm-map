@@ -250,16 +250,32 @@ Respond with ONLY a JSON object: {"flagged": <bool>, "reasons": [<short strings>
 
 
 def _extract_json(text):
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1 or end < start:
+    """Extract the first complete JSON object from a model reply, tolerating
+    leading/trailing prose (the model sometimes adds a note despite the
+    JSON-only instruction). Brace-counts while skipping string contents so a
+    ``}`` inside a reason string doesn't end the object early."""
+    start = text.find("{")
+    if start == -1:
         raise ValueError(f"no JSON object in model reply: {text!r}")
-    try:
-        return json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        start2 = text.rfind("{")
-        if start2 != -1 and start2 < end:
-            return json.loads(text[start2:end + 1])
-        raise
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start:i + 1])
+    raise ValueError(f"no balanced JSON object in model reply: {text!r}")
 
 
 def assess(content, client, filename):

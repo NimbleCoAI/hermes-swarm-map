@@ -270,3 +270,35 @@ class TestCLIDeterministicOnly:
         (d / "SKILL.md").write_text("Generic methodology for structuring a handoff.")
         r = self._run(tmp_path)
         assert r.returncode == 0, r.stdout
+
+
+class TestExtractJson:
+    """Robust extraction of the verdict object from real model replies."""
+
+    def test_trailing_prose(self):
+        # The exact CI failure: valid JSON followed by a note.
+        assert cs._extract_json('{"flagged": false, "reasons": []}\n\nNote: looks clean.') == {
+            "flagged": False, "reasons": [],
+        }
+
+    def test_leading_prose(self):
+        assert cs._extract_json('Here is my verdict:\n{"flagged": true, "reasons": ["x"]}') == {
+            "flagged": True, "reasons": ["x"],
+        }
+
+    def test_brace_inside_a_reason_string(self):
+        assert cs._extract_json('{"flagged": true, "reasons": ["has a } in it"]}') == {
+            "flagged": True, "reasons": ["has a } in it"],
+        }
+
+    def test_first_object_wins(self):
+        assert cs._extract_json('{"flagged": false, "reasons": []}\n{"flagged": true}') == {
+            "flagged": False, "reasons": [],
+        }
+
+    def test_no_json_raises(self):
+        try:
+            cs._extract_json("no json here at all")
+            assert False, "expected ValueError"
+        except ValueError:
+            pass
