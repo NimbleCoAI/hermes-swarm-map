@@ -134,7 +134,7 @@ describe('pluginsInstalled reflects reality', () => {
     const results = await installBaselineTemplates(agentDir)
     const plugins = results.filter(r => r.type === 'plugins' && r.installed).map(r => r.name)
     expect(plugins).toContain('swarm_map_policy')
-    expect(plugins).toContain('captcha_cascade')
+    expect(plugins).toContain('boot_md')
     expect(plugins).not.toContain('ocr-and-documents')
     fs.rmSync(agentDir, { recursive: true, force: true })
   })
