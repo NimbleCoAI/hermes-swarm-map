@@ -149,13 +149,15 @@ describe('generateDefaultConfig', () => {
       mcpServers: {
         google: {
           command: 'node',
-          args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+          args: ['/opt/google-multiplayer-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
         },
       },
     })
     expect(config).toContain('mcp_servers:')
     expect(config).toContain('  google:')
     expect(config).toContain('    command: node')
+    expect(config).toContain('      - "/opt/google-multiplayer-mcp/dist/index.js"')
+    expect(config).not.toContain('/opt/google-mcp/')
   })
 
   it('generates both mcp_servers when both enabled', () => {
@@ -169,12 +171,14 @@ describe('generateDefaultConfig', () => {
         },
         google: {
           command: 'node',
-          args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+          args: ['/opt/google-multiplayer-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
         },
       },
     })
     expect(config).toContain('  github:')
     expect(config).toContain('  google:')
+    expect(config).toContain('      - "/opt/google-multiplayer-mcp/dist/index.js"')
+    expect(config).not.toContain('/opt/google-mcp/')
   })
 
   it('does not include env key when server has no env vars', () => {
@@ -183,12 +187,13 @@ describe('generateDefaultConfig', () => {
       mcpServers: {
         google: {
           command: 'node',
-          args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+          args: ['/opt/google-multiplayer-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
         },
       },
     })
     const googleSection = config.split('google:')[1]?.split('\n\n')[0] ?? ''
     expect(googleSection).not.toContain('env:')
+    expect(config).not.toContain('/opt/google-mcp/')
   })
 
   it('generates url-based mcp server config', () => {

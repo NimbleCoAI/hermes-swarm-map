@@ -181,11 +181,11 @@ function generateCompose(slug: string, port: number, agentDataDir: string, image
   // e.g. agent on 8642 → OAuth on 9095, agent on 8652 → OAuth on 9105
   const oauthPort = port + 453  // 8642 + 453 = 9095 (avoids collisions with agent port range)
   const googleMcpPorts = googleMcpDir
-    ? `      - published: ${oauthPort}\n        target: 8095   # Google OAuth callback (google-mcp auth flow)\n`
+    ? `      - published: ${oauthPort}\n        target: 8095   # Google OAuth callback (google-multiplayer-mcp auth flow)\n`
     : ``
 
   const googleMcpVolumes = googleMcpDir
-    ? `      - ${googleMcpDir}:/opt/google-mcp:ro\n      - ${agentDataDir}/google-tokens:/opt/google/tokens\n`
+    ? `      - ${googleMcpDir}:/opt/google-multiplayer-mcp:ro\n      - ${agentDataDir}/google-tokens:/opt/google/tokens\n`
     : ``
 
   const githubEnv = githubMcpEnabled
@@ -349,7 +349,7 @@ export async function POST(request: Request) {
 
     // Resolve Google MCP dir early (needed for both config.yaml and compose)
     const googleEnabled = body.googleEnabled === true
-    const googleMcpCandidateDir = expandPath(process.env.GOOGLE_MCP_DIR || '~/Documents/GitHub/google-mcp')
+    const googleMcpCandidateDir = expandPath(process.env.GOOGLE_MCP_DIR || '~/Documents/GitHub/google-multiplayer-mcp')
     const googleMcpDir = googleEnabled && fs.existsSync(googleMcpCandidateDir) ? googleMcpCandidateDir : undefined
 
     // Build MCP servers config based on enabled integrations
@@ -367,7 +367,7 @@ export async function POST(request: Request) {
     if (googleMcpDir) {
       mcpServers.google = {
         command: 'node',
-        args: ['/opt/google-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
+        args: ['/opt/google-multiplayer-mcp/dist/index.js', '--config', '/opt/google/config.yaml'],
       }
     }
 
