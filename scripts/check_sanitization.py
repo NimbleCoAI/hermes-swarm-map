@@ -288,7 +288,12 @@ def assess(content, client, filename):
 
 def _make_client():  # pragma: no cover - thin wrapper, injected in tests
     import anthropic
-    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        # Empty/absent secret → raise so main() fails closed with a clear message
+        # rather than letting the SDK emit an opaque auth traceback.
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+    return anthropic.Anthropic(api_key=key)
 
 
 def _read(path):
