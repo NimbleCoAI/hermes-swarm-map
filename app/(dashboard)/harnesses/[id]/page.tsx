@@ -477,7 +477,15 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
+  const ACTION_LABELS: Record<string, { loading: string; success: string }> = {
+    quick: { loading: 'Restarting…', success: 'Harness restarted' },
+    rebuild: { loading: 'Rebuilding…', success: 'Harness rebuilt and restarted' },
+    purge: { loading: 'Purging…', success: 'Cache purged and harness restarted' },
+  }
+
   async function doRestart(mode: string) {
+    const labels = ACTION_LABELS[mode] ?? { loading: 'Restarting…', success: `Harness restarted (${mode})` }
+    const toastId = toast.loading(labels.loading)
     setActionLoading(mode)
     try {
       const res = await fetch(`/api/harnesses/${id}/restart`, {
@@ -486,10 +494,10 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         body: JSON.stringify({ mode }),
       })
       if (!res.ok) throw new Error('Failed')
-      toast.success(`Harness restarted (${mode})`)
+      toast.success(labels.success, { id: toastId })
       refetch()
     } catch {
-      toast.error('Restart failed')
+      toast.error('Restart failed', { id: toastId })
     } finally {
       setActionLoading(null)
     }
@@ -655,7 +663,11 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
           </Button>
           <SplitButton
             label="Quick Restart"
-            loadingLabel="Restarting…"
+            loadingLabel={
+              actionLoading === 'rebuild' ? 'Rebuilding…' :
+              actionLoading === 'purge' ? 'Purging…' :
+              'Restarting…'
+            }
             onClick={() => doRestart('quick')}
             disabled={harness.status === 'stopped'}
             loading={!!actionLoading && actionLoading !== 'stop' && actionLoading !== 'start'}
