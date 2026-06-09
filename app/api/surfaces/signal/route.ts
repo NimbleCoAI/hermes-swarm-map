@@ -26,8 +26,14 @@ export async function GET() {
     }
 
     // Cross-reference PIN status using surfaces (Signal is a multi-surface, not h.platform)
+    // Pass the live harness names so every existing harness is considered. Without
+    // this, listSurfaces() falls back to a hardcoded DEFAULT_HARNESS_NAMES list and
+    // harnesses outside it (e.g. nimbleco) never produce a Signal surface — so their
+    // saved PIN status is never looked up and the UI shows "Registration Lock: not
+    // set" (issue #57). Mirrors GET /api/surfaces.
     const pinStatus: Record<string, string> = {}
-    const surfaces = services.config.listSurfaces()
+    const harnessNames = services.harness.list().map((h) => h.name)
+    const surfaces = services.config.listSurfaces(harnessNames)
     const harnessAccounts: Array<{ phone: string; harnessId: string }> = []
 
     for (const s of surfaces) {
