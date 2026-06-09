@@ -308,6 +308,20 @@ export async function POST(request: Request) {
 
     const agentDataDir = path.join(os.homedir(), `.hermes-${slug}`)
 
+    // Guard against clobbering an existing agent. Deploy is a CREATE-new flow and
+    // every write below (.env with API keys, config.yaml, SOUL.md, BOOT.md) is
+    // unconditional — re-deploying onto an existing slug would destroy its identity,
+    // credentials, and config. Refuse instead (mirrors importFromDir). Manage an
+    // existing agent from the dashboard.
+    if (fs.existsSync(agentDataDir)) {
+      return NextResponse.json(
+        {
+          error: `Agent "${slug}" already exists (${agentDataDir}). Pick a different name, or manage the existing agent from the dashboard.`,
+        },
+        { status: 409 },
+      )
+    }
+
     // Scaffold agent directory
     fs.mkdirSync(agentDataDir, { recursive: true })
 
