@@ -141,7 +141,8 @@ class TestPII:
         assert cs.scan_secrets("internal 192.168.14.22") == []            # RFC1918 private (example)
         assert cs.scan_secrets("cgnat 100.64.0.5:10642") == []            # RFC6598 fixture
         assert cs.scan_secrets("bind 127.0.0.1 only") == []               # loopback
-        assert cs.scan_secrets("example 203.0.113.5") == []               # RFC5737 doc range
+        assert cs.scan_secrets("example 203.0.113.5") == []               # RFC5737 doc /24
+        assert cs.scan_secrets("server 192.0.100.1") != []                # public — NOT the 192.0.2/24 doc range
 
 
 class TestLLMLayer:

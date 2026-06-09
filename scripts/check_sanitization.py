@@ -129,7 +129,7 @@ def _is_public_ipv4(o):
         return False
     if a == 169 and b == 254:                 # link-local
         return False
-    if (a, b) in ((192, 0), (198, 51), (203, 0)):  # RFC5737 doc ranges (loose)
+    if (o[0], o[1], o[2]) in ((192, 0, 2), (198, 51, 100), (203, 0, 113)):  # RFC5737 doc /24s
         return False
     return True
 
@@ -151,6 +151,11 @@ def _is_placeholder(body: str) -> bool:
 
 
 def _has_entropy(s: str) -> bool:
+    # Known acceptable gap: a purely all-letter (no-digit) UNQUOTED value reads as
+    # an identifier and is not flagged here — real secrets carry a known prefix
+    # (caught above) or contain digits, and the quoted form + the LLM layer are
+    # the backstops. Tightening this further would false-positive on code
+    # identifiers / camelCase, which is worse for an automated gate.
     return bool(re.search(r"\d", s)) and bool(re.search(r"[A-Za-z]", s))
 
 
