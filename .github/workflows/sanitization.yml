@@ -1,0 +1,38 @@
+name: sanitization
+
+# Gate the base package (infra/templates/**, docs, base skills/soul) so it never
+# ships secrets, PII, or use-case-specific particulars to every agent — even from
+# an automated contribution. Runs a deterministic secret/PII layer (no key needed)
+# plus an LLM particulars layer, full-tree, fail-closed.
+on:
+  pull_request:
+    paths:
+      - 'infra/templates/**'
+      - 'docs/**'
+      - '**/*.md'
+      - 'SOUL*'
+      - '**/SOUL*'
+      - 'scripts/check_sanitization.py'
+      - 'scripts/test_check_sanitization.py'
+      - '.github/workflows/sanitization.yml'
+  push:
+    branches: [main]
+
+jobs:
+  sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install scanner deps
+        run: pip install -r scripts/requirements.txt
+      - name: Scanner self-tests
+        run: python -m pytest scripts/test_check_sanitization.py -q
+      - name: Scan base package (full-tree, fail-closed)
+        env:
+          # Required for the semantic (particulars) layer. Without it the gate
+          # fails closed — set this repo secret to enable full enforcement.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/check_sanitization.py --all

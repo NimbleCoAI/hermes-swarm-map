@@ -71,3 +71,5 @@ __pycache__/
 
 # Swarm Map data (never commit runtime data)
 compose/
+
+.venv-scan/
