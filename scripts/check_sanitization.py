@@ -353,8 +353,15 @@ def main(argv, root=".", client_factory=_make_client, require_llm=True):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    args = sys.argv[1:]
+    argv = sys.argv[1:]
+    # --deterministic-only: run just the secrets/PII layer (no API key needed).
+    # Used as an always-on CI gate that's meaningful before ANTHROPIC_API_KEY is
+    # set; the semantic (particulars) layer runs as a separate key-gated step.
+    det_only = "--deterministic-only" in argv
+    argv = [a for a in argv if a != "--deterministic-only"]
     base_root = os.environ.get("SANITIZE_ROOT", ".")
-    if args and args[0] == "--all":
-        args = gather_base_files(base_root)
-    sys.exit(main(args, root=base_root))
+    if argv and argv[0] == "--all":
+        argv = gather_base_files(base_root)
+    if det_only:
+        sys.exit(main(argv, root=base_root, client_factory=lambda: None, require_llm=False))
+    sys.exit(main(argv, root=base_root))
