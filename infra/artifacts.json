@@ -4,7 +4,8 @@
     { "name": "boot_md", "source": "local", "enabled": false }
   ],
   "skills": [
-    { "name": "ocr-and-documents", "source": "local" }
+    { "name": "ocr-and-documents", "source": "local" },
+    { "name": "session-handoff", "source": "local" }
   ],
   "hooks": [
     { "name": "lifecycle-notify", "source": "local" }

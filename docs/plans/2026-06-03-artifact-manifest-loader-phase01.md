@@ -33,14 +33,14 @@ This is a verification task, not code. **Do not start Task 1+ until this is reso
 
 - [ ] **Step 1: Inspect a running agent's loaded plugins.**
 
-On the Mac Mini (`<user>@<host>`), pick a deployed agent and check what the runtime actually loaded. Via the HSM API or by inspecting the container logs at startup for the plugin-load summary (the loader logs discovered/loaded plugins). Confirm whether `captcha_cascade` (a `standalone` plugin) appears as loaded.
-Run (example): `ssh <user>@<host> 'docker logs hermes-<agent> 2>&1 | grep -i "plugin"'`
+Pick a deployed agent and check what the runtime actually loaded. Via the HSM API or by inspecting the container logs at startup for the plugin-load summary (the loader logs discovered/loaded plugins). Confirm whether `captcha_cascade` (a `standalone` plugin) appears as loaded.
+Run (example): `docker logs hermes-<agent> 2>&1 | grep -i "plugin"`
 Expected: a log line listing loaded plugins, OR an indication standalone plugins were skipped.
 
 - [ ] **Step 2: Check the agent's `config.yaml` and env for the gating flags.**
 
 Inspect the deployed agent's `config.yaml` for a `plugins:` / `plugins.enabled` block and its `.env`/compose for `HERMES_ENABLE_PROJECT_PLUGINS`.
-Run (example): `ssh <user>@<host> 'cat ~/.hermes-<agent>/config.yaml; grep -i ENABLE_PROJECT ~/.hermes-<agent>/.env'`
+Run (example): `cat ~/.hermes-<agent>/config.yaml; grep -i ENABLE_PROJECT ~/.hermes-<agent>/.env`
 Expected: determines whether the gating flags are present.
 
 - [ ] **Step 3: Record the verdict and branch the plan.**
@@ -676,7 +676,7 @@ Deploy/import a throwaway agent via the HSM API (not docker compose directly), t
 - [ ] **Step 3: Open the PR**
 
 ```bash
-git push -u origin dev/juniper/artifact-commons-design
+git push -u origin feature/artifact-commons-design
 gh pr create --base main --title "feat: manifest-driven artifact loader (Phase 1) + hsmPort fix" --body "Implements Phase 0 verdict + Phase 1 of docs/specs/2026-06-03-artifact-commons-design.md. Behavior-identical manifest loader, accurate install reporting, loud failure, hsmPort default unified to 3000. No artifacts moved or deleted."
 ```
 
