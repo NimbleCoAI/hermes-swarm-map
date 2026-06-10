@@ -12,7 +12,7 @@ See **AGENTS.md** for architecture, patterns, service layer, and what not to do.
    ```bash
    pnpm vitest run
    ```
-   176 tests must pass. Don't skip or comment out tests.
+   All tests must pass. Don't skip or comment out tests.
 
 3. **This is NOT an Egregore instance.** No `memory/`, no `/save`, no `/handoff`, no `/wrap`. Standard git workflow.
 
