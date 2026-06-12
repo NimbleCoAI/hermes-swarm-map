@@ -263,6 +263,23 @@ export class DockerService {
     return false
   }
 
+  /**
+   * Low-level container state for canary checks after a recreate. Returns null
+   * if the container doesn't exist (e.g. mid-recreate or never started).
+   */
+  inspectState(service: string): { running: boolean; status: string; restartCount: number; startedAt: string } | null {
+    try {
+      const out = execSync(
+        `docker inspect ${service} --format '{{.State.Running}}|{{.State.Status}}|{{.State.RestartCount}}|{{.State.StartedAt}}'`,
+        { stdio: 'pipe', timeout: 5000 },
+      ).toString().trim()
+      const [running, status, rc, startedAt] = out.split('|')
+      return { running: running === 'true', status: status || 'unknown', restartCount: parseInt(rc, 10) || 0, startedAt: startedAt || '' }
+    } catch {
+      return null
+    }
+  }
+
   getLogs(composeFile: string, service: string, lines: number = 50): string {
     try {
       return execSync(

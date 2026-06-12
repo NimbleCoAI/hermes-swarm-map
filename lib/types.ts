@@ -32,6 +32,10 @@ export type Harness = {
   cacheAge?: number
   composeFile?: string
   serviceName?: string
+  // CD: the image ref this agent is intentionally pinned to (digest or tag), and
+  // the digest it last resolved to — for "update available" surfacing + rollback.
+  pinnedImageRef?: string
+  lastKnownDigest?: string
 }
 
 export type Surface = {

@@ -179,3 +179,39 @@ networks:
     name: hermes-${agentName}
 `
 }
+
+/**
+ * Surgically replace the hermes service's source block (`image:` line or
+ * `build:` block) with `image: <ref>`, leaving everything else — including any
+ * wireguard/camofox sidecar images in the VPN variant — untouched. Relies on
+ * generateStandaloneCompose always emitting the source block as the FIRST line
+ * inside the `hermes-<name>:` service. Used by the image-update (CD) path.
+ */
+export function setComposeImage(compose: string, image: string): string {
+  const lines = compose.split('\n')
+  const svcIdx = lines.findIndex((l) => /^  hermes-[\w.-]+:\s*$/.test(l))
+  if (svcIdx < 0 || svcIdx + 1 >= lines.length) {
+    throw new Error('setComposeImage: no hermes-<name> service found in compose')
+  }
+  const srcIdx = svcIdx + 1
+  if (/^ {4}image:\s/.test(lines[srcIdx])) {
+    lines[srcIdx] = `    image: ${image}`
+    return lines.join('\n')
+  }
+  if (/^ {4}build:\s*$/.test(lines[srcIdx])) {
+    let end = srcIdx + 1
+    while (end < lines.length && /^ {6}\S/.test(lines[end])) end++ // 6-space build children
+    lines.splice(srcIdx, end - srcIdx, `    image: ${image}`)
+    return lines.join('\n')
+  }
+  throw new Error(`setComposeImage: unexpected source block under hermes service: "${lines[srcIdx]}"`)
+}
+
+/** Read the hermes service's image ref from a compose string, or null if it's a build: block (local). */
+export function readComposeImage(compose: string): string | null {
+  const lines = compose.split('\n')
+  const svcIdx = lines.findIndex((l) => /^  hermes-[\w.-]+:\s*$/.test(l))
+  if (svcIdx < 0 || svcIdx + 1 >= lines.length) return null
+  const m = lines[svcIdx + 1].match(/^ {4}image:\s+(\S+)/)
+  return m ? m[1] : null
+}
