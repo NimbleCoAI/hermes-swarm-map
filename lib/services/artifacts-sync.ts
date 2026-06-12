@@ -194,25 +194,25 @@ export function applyArtifactSync(
       results.push({ ...item, applied: false, error: (e as Error).message })
     }
   }
-  writeLockForPresent(agentDataDir, repoRoot, plan)
+  writeLockForApplied(agentDataDir, results)
   return results
 }
 
 /**
- * Record/refresh the lock for every artifact we just installed or updated,
+ * Record/refresh the lock ONLY for artifacts whose copy actually succeeded,
  * preserving prior lock entries for artifacts we didn't touch. The recorded
- * hash is the SHIPPED hash (== on-disk after a successful copy), which is what
- * lets a later sync detect user modification.
+ * hash is read from the ON-DISK dest after copy (not the shipped src) so a
+ * partial/failed write can never be locked as a clean shipped hash — which
+ * would otherwise strand the artifact as permanently "user-modified".
  */
-function writeLockForPresent(agentDataDir: string, repoRoot: string, plan: SyncPlan) {
+function writeLockForApplied(agentDataDir: string, results: SyncResult[]) {
   const existing = readLock(agentDataDir)
   const byKey = new Map<string, LockEntry>()
   if (existing) for (const e of existing.artifacts) byKey.set(`${e.type}/${e.name}`, e)
-  for (const item of plan.items) {
-    if (item.action === 'install' || item.action === 'update') {
-      const shipped = hashArtifactTree(srcDirFor(repoRoot, item.type, item.name))
-      if (shipped) byKey.set(`${item.type}/${item.name}`, { type: item.type, name: item.name, hash: shipped })
-    }
+  for (const r of results) {
+    if (!r.applied) continue
+    const onDisk = hashArtifactTree(destDirFor(agentDataDir, r.type, r.name))
+    if (onDisk) byKey.set(`${r.type}/${r.name}`, { type: r.type, name: r.name, hash: onDisk })
   }
   const lock: LockFile = { version: 1, artifacts: Array.from(byKey.values()) }
   fs.writeFileSync(path.join(agentDataDir, LOCK_FILE), JSON.stringify(lock, null, 2))
@@ -221,8 +221,15 @@ function writeLockForPresent(agentDataDir: string, repoRoot: string, plan: SyncP
 /**
  * Ensure config.yaml's `plugins.enabled` list contains `names`, preserving the
  * rest of the file. Text-based (HSM writes config.yaml as a string, no YAML
- * dep). Returns the new content and which names were added. Idempotent. If the
- * file lacks a recognizable plugins block, appends a fresh one.
+ * dep). Returns the new content + which names were added (idempotent).
+ *
+ * Safety: only two shapes are edited — (a) an existing block-style
+ * `plugins:` → `enabled:` list (items appended at its real indentation), or
+ * (b) NO `plugins:` key at all (a fresh block is appended). Any other shape
+ * (a `plugins:` block with an inline `enabled: [...]`, or with no recognizable
+ * block-style `enabled:` child) is left UNTOUCHED and reported as added: [] —
+ * bailing beats risking a duplicate key or a mis-nested list in a hand-edited
+ * config.
  */
 export function ensurePluginsEnabled(
   configYaml: string,
@@ -230,38 +237,51 @@ export function ensurePluginsEnabled(
 ): { content: string; added: string[] } {
   if (names.length === 0) return { content: configYaml, added: [] }
   const lines = configYaml.split('\n')
-  // Find `plugins:` at column 0 and its `enabled:` child.
+
   let pluginsIdx = -1
   for (let i = 0; i < lines.length; i++) {
     if (/^plugins:\s*$/.test(lines[i])) { pluginsIdx = i; break }
   }
-  const already = new Set<string>()
+
+  // (b) No plugins key anywhere → safe to append a fresh, well-formed block.
+  if (pluginsIdx < 0) {
+    // Bail if there's a `plugins:` with inline content (e.g. `plugins: {...}`)
+    // we didn't recognize above — don't risk a duplicate key.
+    if (lines.some((l) => /^plugins:\s*\S/.test(l))) return { content: configYaml, added: [] }
+    const fresh = ['', '# --- Plugins (added by Swarm Map artifacts sync) ---', 'plugins:', '  enabled:', ...names.map((n) => `    - ${n}`), '']
+    const base = configYaml.endsWith('\n') ? configYaml.slice(0, -1) : configYaml
+    return { content: [base, ...fresh].join('\n'), added: [...names] }
+  }
+
+  // (a) Scan the plugins block for a BLOCK-STYLE `enabled:` child.
   let enabledIdx = -1
-  if (pluginsIdx >= 0) {
-    for (let i = pluginsIdx + 1; i < lines.length; i++) {
-      if (/^\S/.test(lines[i])) break // dedented out of plugins block
-      if (/^\s+enabled:\s*$/.test(lines[i])) { enabledIdx = i; continue }
-      const m = lines[i].match(/^\s+-\s+(\S+)\s*$/)
-      if (enabledIdx >= 0 && m) already.add(m[1])
+  let enabledIndent = ''
+  let itemIndent = ''
+  const already = new Set<string>()
+  for (let i = pluginsIdx + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) break // dedented out of the plugins block
+    const blockEnabled = lines[i].match(/^(\s+)enabled:\s*$/)
+    if (blockEnabled) { enabledIdx = i; enabledIndent = blockEnabled[1]; continue }
+    // An inline `enabled: [..]` or `enabled: x` is a shape we won't edit.
+    if (enabledIdx < 0 && /^\s+enabled:\s*\S/.test(lines[i])) return { content: configYaml, added: [] }
+    if (enabledIdx >= 0) {
+      const item = lines[i].match(/^(\s+)-\s+(\S+)\s*$/)
+      if (item) { already.add(item[2]); if (!itemIndent) itemIndent = item[1] }
+      else if (/^\s*\S/.test(lines[i]) && !/^\s+#/.test(lines[i])) break // next key in block
     }
   }
+
+  // plugins: block with no usable block-style enabled: → bail (don't duplicate).
+  if (enabledIdx < 0) return { content: configYaml, added: [] }
+
   const toAdd = names.filter((n) => !already.has(n))
   if (toAdd.length === 0) return { content: configYaml, added: [] }
 
-  if (pluginsIdx >= 0 && enabledIdx >= 0) {
-    const insertAt = (() => {
-      let i = enabledIdx + 1
-      for (; i < lines.length; i++) {
-        if (!/^\s+-\s+\S+/.test(lines[i])) break
-      }
-      return i
-    })()
-    const block = toAdd.map((n) => `    - ${n}`)
-    lines.splice(insertAt, 0, ...block)
-    return { content: lines.join('\n'), added: toAdd }
+  const indent = itemIndent || enabledIndent + '  '
+  let insertAt = enabledIdx + 1
+  for (; insertAt < lines.length; insertAt++) {
+    if (!/^\s+-\s+\S+/.test(lines[insertAt])) break
   }
-  // No usable plugins block — append a fresh one.
-  const fresh = ['', '# --- Plugins (added by Swarm Map artifacts sync) ---', 'plugins:', '  enabled:', ...toAdd.map((n) => `    - ${n}`), '']
-  const base = configYaml.endsWith('\n') ? configYaml.slice(0, -1) : configYaml
-  return { content: [base, ...fresh].join('\n'), added: toAdd }
+  lines.splice(insertAt, 0, ...toAdd.map((n) => `${indent}- ${n}`))
+  return { content: lines.join('\n'), added: toAdd }
 }

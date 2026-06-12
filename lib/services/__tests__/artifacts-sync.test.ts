@@ -128,6 +128,17 @@ describe('applyArtifactSync', () => {
     expect(lock!.artifacts.find((a) => a.name === 'keep')).toBeFalsy() // skipped → not locked
   })
 
+  it('does NOT lock an artifact whose copy failed (no permanent strand)', () => {
+    writeTemplate('plugins', 'a', { 'p.py': 'v1' })
+    const m = manifest({ plugins: [{ name: 'a', source: 'local' }] })
+    const plan = planArtifactSync(dataDir, m, repoRoot)
+    // sabotage: shipped source vanishes between plan and apply → copy throws
+    fs.rmSync(path.join(repoRoot, 'infra/templates/plugins/a'), { recursive: true })
+    const results = applyArtifactSync(dataDir, plan, repoRoot)
+    expect(results[0]).toMatchObject({ applied: false })
+    expect(readLock(dataDir)?.artifacts.find((x) => x.name === 'a')).toBeFalsy()
+  })
+
   it('is idempotent — a second sync re-plans the now-locked artifact as a pristine no-op-or-update', () => {
     writeTemplate('plugins', 'a', { 'p.py': 'v1' })
     const m = manifest({ plugins: [{ name: 'a', source: 'local' }] })
@@ -165,5 +176,34 @@ describe('ensurePluginsEnabled', () => {
 
   it('no-ops on empty input', () => {
     expect(ensurePluginsEnabled(cfg, []).content).toBe(cfg)
+  })
+
+  it('matches the real generateDefaultConfig shape (2-space enabled, 4-space items)', () => {
+    const real = '\n# --- Plugins (standalone plugins enabled by Swarm Map) ---\nplugins:\n  enabled:\n    - swarm_map_policy\n'
+    const { content, added } = ensurePluginsEnabled(real, ['captcha_cascade'])
+    expect(added).toEqual(['captcha_cascade'])
+    expect(content).toMatch(/  enabled:\n    - swarm_map_policy\n    - captcha_cascade/)
+  })
+
+  it('BAILS (no duplicate plugins key) on an inline enabled: [] list', () => {
+    const inline = `plugins:\n  enabled: []\n`
+    const { content, added } = ensurePluginsEnabled(inline, ['p1'])
+    expect(added).toEqual([])
+    expect(content).toBe(inline)
+    expect(content.match(/^plugins:/gm)?.length).toBe(1) // no second plugins block
+  })
+
+  it('respects deeper item indentation instead of mis-nesting at 4 spaces', () => {
+    const deep = `plugins:\n    enabled:\n        - a\n`
+    const { content, added } = ensurePluginsEnabled(deep, ['b'])
+    expect(added).toEqual(['b'])
+    expect(content).toMatch(/        - a\n        - b/) // 8-space items preserved
+  })
+
+  it('BAILS on a plugins block with no block-style enabled child', () => {
+    const odd = `plugins:\n  disabled:\n    - x\n`
+    const { content, added } = ensurePluginsEnabled(odd, ['p1'])
+    expect(added).toEqual([])
+    expect(content).toBe(odd)
   })
 })
