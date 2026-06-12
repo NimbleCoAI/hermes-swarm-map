@@ -33,6 +33,29 @@ describe('setComposeImage', () => {
     expect(out).not.toContain('build:')
   })
 
+  it('replaces a build: block that has nested args/list children without orphaning lines', () => {
+    const c = [
+      '# x',
+      'services:',
+      '  hermes-z:',
+      '    build:',
+      '      context: /src',
+      '      dockerfile: Dockerfile',
+      '      args:',
+      '        - FOO=bar',
+      '        - BAZ=qux',
+      '    container_name: hermes-z',
+      '    command: gateway',
+      '',
+    ].join('\n')
+    const out = setComposeImage(c, REF)
+    expect(readComposeImage(out)).toBe(REF)
+    expect(out).not.toContain('FOO=bar') // no orphaned build children
+    expect(out).not.toContain('context:')
+    expect(out).toContain('    container_name: hermes-z') // sibling key preserved
+    expect(out).toContain('    command: gateway')
+  })
+
   it('is idempotent', () => {
     const c = generateStandaloneCompose('delta', 8642, '/data/delta', { imageOrBuild: { image: 'x:1' } })
     expect(setComposeImage(setComposeImage(c, REF), REF)).toBe(setComposeImage(c, REF))

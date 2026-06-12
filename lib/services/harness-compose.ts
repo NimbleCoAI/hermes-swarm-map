@@ -200,7 +200,10 @@ export function setComposeImage(compose: string, image: string): string {
   }
   if (/^ {4}build:\s*$/.test(lines[srcIdx])) {
     let end = srcIdx + 1
-    while (end < lines.length && /^ {6}\S/.test(lines[end])) end++ // 6-space build children
+    // Consume every line nested under build: — any indent deeper than the
+    // 4-space service-key level (context:, dockerfile:, args:, 8-space list
+    // items, …). Stops at the next 4-space sibling key or a blank line.
+    while (end < lines.length && /^ {5,}\S/.test(lines[end])) end++
     lines.splice(srcIdx, end - srcIdx, `    image: ${image}`)
     return lines.join('\n')
   }

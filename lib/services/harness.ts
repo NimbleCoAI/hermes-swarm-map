@@ -965,6 +965,7 @@ export class HarnessService {
     const harness = this.get(id)
     const target = harness && this.resolveComposeTarget(harness)
     if (!harness || !target) throw new Error(`Harness ${id} not found`)
+    if (!fs.existsSync(target.composeFile)) throw new Error(`Harness ${id} compose file not found at ${target.composeFile}`)
     const compose = fs.readFileSync(target.composeFile, 'utf-8')
     fs.writeFileSync(target.composeFile, setComposeImage(compose, ref))
     const parsed = parseImageRef(ref)

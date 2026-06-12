@@ -44,6 +44,14 @@ describe('setAgentImage', () => {
   })
 })
 
+describe('setAgentImage error paths', () => {
+  it('throws a friendly not-found error when the compose file is missing', async () => {
+    fs.rmSync(composeFile)
+    await expect(svc.setAgentImage('h_a', 'ghcr.io/x:1', fakeRegistry)).rejects.toThrow(/not found/i)
+    expect(docker.restart).not.toHaveBeenCalled() // no recreate on a failed pin
+  })
+})
+
 describe('currentImage / imageStatus', () => {
   it('reports local-build before a pin, then the pinned ref after', async () => {
     expect(svc.currentImage('h_a')).toBe('local-build')
