@@ -18,6 +18,11 @@ Hermes Swarm Map is an open-source admin GUI + REST API for orchestrating Hermes
 
 > **Where does this feature belong — in the Docker image or in HSM?** See [Image vs HSM Boundary](docs/architecture/image-vs-hsm-boundary.md) for the decision framework.
 
+> **Touching templates, artifacts, or anything agents receive at create/update time?** Read these FIRST — there is prior design work and a hard constraint:
+> - [Artifact Commons + Manifest Loader](docs/specs/2026-06-03-artifact-commons-design.md) — artifacts speak the manifest (`infra/artifacts.json`), never a hardcoded list
+> - [Opinionated Config](docs/plans/opinionated-config.md) — what HSM scaffolds into `/opt/data` and why
+> - **The no-clobber rule:** an agent's data dir is user-owned once created. Baseline templates install at **create/duplicate only** — there is currently no update-existing-agents path (see issue #82). Any future sync/update mechanism must never overwrite user-added or user-modified artifacts (additive-only is not enough — check pristineness against shipped hashes), must dry-run, and must report what it skipped.
+
 **Next.js fullstack monorepo.** API routes in `app/api/` shell out to Docker via the service layer. No separate backend process — Next.js IS the backend.
 
 **Data at `~/.hermes-swarm-map/`** (configurable via `DATA_DIR`). Holds configs, encryption key, audit logs, and standalone compose files for new agents. Not in the repo.
