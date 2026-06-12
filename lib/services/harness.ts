@@ -14,7 +14,10 @@ import { installBaselineTemplates } from './templates'
 import { defaultEnabledPlugins, loadManifest } from './artifacts-manifest'
 import { planArtifactSync, applyArtifactSync, ensurePluginsEnabled, SyncResult } from './artifacts-sync'
 import type { ToolsService } from './tools'
-import { generateStandaloneCompose } from './harness-compose'
+import { generateStandaloneCompose, setComposeImage, readComposeImage } from './harness-compose'
+import { RegistryService, parseImageRef } from './registry'
+
+const DEFAULT_IMAGE_REPO = 'nimblecoai/hermes-agent-mt'
 import { hsmBaseUrl } from './hsm-url'
 
 const HARNESSES_FILE = 'harnesses.json'
@@ -905,6 +908,98 @@ export class HarnessService {
       pluginsEnabled,
       restarted: changed,
     }
+  }
+
+  // --- Runtime-image CD (version-awareness + manual pinned update) ---
+
+  /** The image ref an agent's compose currently runs, or 'local-build' if it builds from source. */
+  currentImage(id: string): string | null {
+    const harness = this.get(id)
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!target) return null
+    try {
+      const compose = fs.readFileSync(target.composeFile, 'utf-8')
+      return readComposeImage(compose) ?? 'local-build'
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Version status for an agent: what it runs now, what it's pinned to, and the
+   * digest the default repo's `:latest` resolves to — so the UI can flag
+   * "update available". Registry failures degrade to latest=null (never throws).
+   */
+  async imageStatus(id: string, registry: RegistryService = new RegistryService()): Promise<{
+    current: string | null
+    pinned?: string
+    lastKnownDigest?: string
+    latestTag: string
+    latestDigest: string | null
+    updateAvailable: boolean
+  }> {
+    const harness = this.get(id)
+    if (!harness) throw new Error(`Harness ${id} not found`)
+    const current = this.currentImage(id)
+    const repo = current && current !== 'local-build' ? parseImageRef(current).repo : DEFAULT_IMAGE_REPO
+    const latestDigest = await registry.getDigest(repo, 'latest')
+    const updateAvailable =
+      !!latestDigest && (current === 'local-build' || (!!harness.lastKnownDigest && harness.lastKnownDigest !== latestDigest))
+    return {
+      current,
+      pinned: harness.pinnedImageRef,
+      lastKnownDigest: harness.lastKnownDigest,
+      latestTag: `${repo}:latest`,
+      latestDigest,
+      updateAvailable,
+    }
+  }
+
+  /**
+   * Pin an agent to an image ref and roll it: surgically rewrite the compose
+   * source block to `image: <ref>`, persist the pin (+ resolved digest for
+   * rollback/drift), and recreate the container (which pulls the ref if absent).
+   * Does NOT touch the build for any other service (wireguard/camofox).
+   */
+  async setAgentImage(id: string, ref: string, registry: RegistryService = new RegistryService()): Promise<{ ok: boolean; serviceName: string; ref: string; digest: string | null }> {
+    const harness = this.get(id)
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!harness || !target) throw new Error(`Harness ${id} not found`)
+    if (!fs.existsSync(target.composeFile)) throw new Error(`Harness ${id} compose file not found at ${target.composeFile}`)
+    const compose = fs.readFileSync(target.composeFile, 'utf-8')
+    fs.writeFileSync(target.composeFile, setComposeImage(compose, ref))
+    const parsed = parseImageRef(ref)
+    const digest = parsed.digest ?? (parsed.tag ? await registry.getDigest(parsed.repo, parsed.tag) : null)
+    this.updateConfig(id, { pinnedImageRef: ref, lastKnownDigest: digest ?? harness.lastKnownDigest })
+    this.restart(id, 'recreate')
+    this.audit.append({ who: 'admin', what: `image:set:${ref}`, target: harness.name })
+    return { ok: true, serviceName: target.serviceName, ref, digest }
+  }
+
+  /**
+   * Canary signal after a recreate: is the container up and stable? Honest about
+   * "starting" (running but very young) vs "healthy" vs "unhealthy" (not running
+   * / restart-looping). No assumption of an HTTP health endpoint.
+   */
+  agentHealth(id: string): { status: 'healthy' | 'starting' | 'unhealthy'; running: boolean; restartCount: number; uptimeSec: number | null } {
+    const harness = this.get(id)
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!harness || !target) throw new Error(`Harness ${id} not found`)
+    const state = this.docker.inspectState(target.serviceName)
+    if (!state || !state.running) {
+      return { status: 'unhealthy', running: false, restartCount: state?.restartCount ?? 0, uptimeSec: null }
+    }
+    const started = state.startedAt ? Date.parse(state.startedAt) : NaN
+    const uptimeSec = Number.isNaN(started) ? null : Math.max(0, Math.floor((this.now() - started) / 1000))
+    // Young-but-running = still booting; restart-looping = unhealthy.
+    if (state.restartCount > 2) return { status: 'unhealthy', running: true, restartCount: state.restartCount, uptimeSec }
+    if (uptimeSec !== null && uptimeSec < 8) return { status: 'starting', running: true, restartCount: state.restartCount, uptimeSec }
+    return { status: 'healthy', running: true, restartCount: state.restartCount, uptimeSec }
+  }
+
+  // Wrapped for test injection (Date is otherwise unmockable mid-suite).
+  protected now(): number {
+    return Date.now()
   }
 
   start(id: string): void {
