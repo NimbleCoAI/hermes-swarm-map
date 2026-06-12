@@ -1,4 +1,4 @@
-FROM bbernhard/signal-cli-rest-api:0.199-dev
+FROM bbernhard/signal-cli-rest-api:0.100
 
 # Override bbernhard's default REST API entrypoint to run
 # signal-cli in native HTTP daemon mode (SSE + JSON-RPC).
