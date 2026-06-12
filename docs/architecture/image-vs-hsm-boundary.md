@@ -14,9 +14,9 @@ The immutable runtime. Code lives at `/opt/hermes/`, installed via Dockerfile. S
 
 ### HSM Scaffolding (hermes-swarm-map)
 
-Per-deployment config, plugins, hooks, and skills installed into `/opt/data/` at agent creation time.
+Per-deployment config, plugins, hooks, and skills installed into `/opt/data/` at agent creation time, and syncable onto already-created agents via `POST /api/harnesses/:id/artifacts/sync` (additive + no-clobber — see [Agent Updates](agent-updates.md)).
 
-- Changes take effect on next agent create or template reinstall
+- Changes take effect on next agent create/duplicate, or via the artifacts-sync endpoint for existing agents
 - Deployment-specific — each HSM instance can have different defaults
 - Two creation paths: setup wizard (`app/api/setup/deploy/route.ts`) and harness service (`lib/services/harness.ts`)
 - See also: [Opinionated Config Plan](../plans/opinionated-config.md) for implementation details of what HSM scaffolds
