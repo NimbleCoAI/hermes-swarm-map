@@ -11,7 +11,8 @@ import type { ConfigService } from './config'
 import { getCostToday, getInvocationsToday } from './usage'
 import { markRestarting, isRestarting, clearRestarting } from './restart-tracker'
 import { installBaselineTemplates } from './templates'
-import { defaultEnabledPlugins } from './artifacts-manifest'
+import { defaultEnabledPlugins, loadManifest } from './artifacts-manifest'
+import { planArtifactSync, applyArtifactSync, ensurePluginsEnabled, SyncResult } from './artifacts-sync'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose } from './harness-compose'
 import { hsmBaseUrl } from './hsm-url'
@@ -836,6 +837,74 @@ export class HarnessService {
     }
     this.restart(id, 'recreate')
     return { ok: true, serviceName: harness.serviceName }
+  }
+
+  /**
+   * Sync an already-created agent's artifacts (plugins/skills/hooks) against the
+   * repo manifest — the missing lifecycle path (#82). installBaselineTemplates
+   * only runs at create/duplicate, so existing agents never gain artifacts added
+   * to infra/artifacts.json later. This installs MISSING artifacts and updates
+   * provably-unmodified ones (see artifacts-sync.ts no-clobber model), enables
+   * any newly-installed plugins in config.yaml, then recreates the container so
+   * the runtime loads them. dryRun returns the plan without writing or restarting.
+   */
+  syncArtifacts(
+    id: string,
+    opts: { dryRun?: boolean; force?: boolean } = {},
+  ): { ok: boolean; serviceName: string; dryRun: boolean; results: SyncResult[]; pluginsEnabled: string[]; restarted: boolean } {
+    const harness = this.get(id)
+    if (!harness?.serviceName) {
+      throw new Error(`Harness ${id} not found`)
+    }
+    const dataDir = guessDataDir(harness.serviceName, harness.serviceName)
+    const repoRoot = process.cwd()
+    const manifest = loadManifest(path.join(repoRoot, 'infra', 'artifacts.json'))
+    const plan = planArtifactSync(dataDir, manifest, repoRoot, { force: opts.force })
+
+    if (opts.dryRun) {
+      return {
+        ok: true,
+        serviceName: harness.serviceName,
+        dryRun: true,
+        results: plan.items.map((i) => ({ ...i, applied: false })),
+        pluginsEnabled: plan.enablePlugins,
+        restarted: false,
+      }
+    }
+
+    const results = applyArtifactSync(dataDir, plan, repoRoot)
+    const changed = results.some((r) => r.applied)
+
+    // Enable any newly-installed/updated plugins in config.yaml so the runtime loads them.
+    let pluginsEnabled: string[] = []
+    const toEnable = plan.enablePlugins.filter((n) =>
+      results.some((r) => r.name === n && r.applied),
+    )
+    if (toEnable.length > 0) {
+      const configPath = path.join(dataDir, 'config.yaml')
+      try {
+        const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : ''
+        const { content, added } = ensurePluginsEnabled(current, toEnable)
+        if (added.length > 0) {
+          fs.writeFileSync(configPath, content)
+          pluginsEnabled = added
+        }
+      } catch {
+        // config.yaml unwritable — artifacts are still installed; surface nothing fatal.
+      }
+    }
+
+    // Only bounce the container if something actually changed.
+    if (changed) this.restart(id, 'recreate')
+    this.audit.append({ who: 'admin', what: 'artifacts:sync', target: harness.name })
+    return {
+      ok: true,
+      serviceName: harness.serviceName,
+      dryRun: false,
+      results,
+      pluginsEnabled,
+      restarted: changed,
+    }
   }
 
   start(id: string): void {
