@@ -47,6 +47,16 @@ function parseEnvFilePairs(envPath: string): Record<string, string> {
   return result
 }
 
+// Normalize a harness name to a lowercase slug. Docker image/service/network
+// references must be lowercase, and macOS's case-insensitive filesystem makes a
+// capitalized name (e.g. "Mare") collide with its lowercase compose/data dirs —
+// so a duplicate silently reuses the capitalized compose and `up` then fails
+// with "no such service: hermes-mare". Forcing lowercase at creation prevents
+// the whole class. Mirrors the slug logic already used in createHarness().
+export function toHarnessSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
 // Scan compose dirs AND live Docker port bindings to find next available port
 function nextAvailablePort(composeBaseDir: string): number {
   const usedPorts = new Set<number>()
@@ -1023,6 +1033,9 @@ export class HarnessService {
   }
 
   async duplicateOverlay(sourceId: string, newName: string): Promise<Partial<Harness> | undefined> {
+    // Force a lowercase slug (see toHarnessSlug) so the duplicate's compose,
+    // data dir, and service name are all consistent and docker-valid.
+    newName = toHarnessSlug(newName)
     const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
     const source = overlays.find((h) => h.id === sourceId)
     if (!source) return undefined
@@ -1169,6 +1182,10 @@ export class HarnessService {
   }
 
   async createOverlay(input: { name: string; tier?: HabitatTier; platform?: string; channel?: string; models?: string[]; tools?: string[] }): Promise<Partial<Harness>> {
+    // Force a lowercase slug so all docker identifiers + data/compose dirs are
+    // consistent (see toHarnessSlug — capital names break docker on case-
+    // insensitive filesystems).
+    input = { ...input, name: toHarnessSlug(input.name) }
     const overlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
 
     // Check for duplicate name
