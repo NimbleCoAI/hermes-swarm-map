@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
+import { validateCascadeEntries, type CascadeEntry } from '@/lib/model-catalog'
 import { readModelConfig, readModelProvider, readFallbackProviders, guessDataDir } from '@/lib/services/harness'
 import type { FallbackProvider } from '@/lib/services/harness'
 import fs from 'fs'
@@ -85,6 +86,24 @@ export async function PUT(
 
   if (cascade.length === 0) {
     return NextResponse.json({ error: 'At least one model is required' }, { status: 400 })
+  }
+
+  // Validate every (provider, model) pair against the model catalog before
+  // writing config.yaml and restarting the agent. Pushing an unknown / empty
+  // model id onto a live agent can crash-loop it. Free-form providers
+  // (ollama / openrouter / custom) and any non-catalogued provider are accepted
+  // as-is — see validateCascadeEntries / FREEFORM_PROVIDERS in lib/model-catalog.
+  const entriesToValidate: CascadeEntry[] =
+    fallbackProvidersToWrite && fallbackProvidersToWrite.length > 0
+      ? fallbackProvidersToWrite.map((fp) => ({ provider: fp.provider, model: fp.model }))
+      : cascade.map((model) => ({ provider, model }))
+
+  const modelErrors = validateCascadeEntries(entriesToValidate)
+  if (modelErrors.length > 0) {
+    return NextResponse.json(
+      { error: `Invalid model cascade: ${modelErrors.join('; ')}` },
+      { status: 400 }
+    )
   }
 
   // Build the model section of config.yaml
