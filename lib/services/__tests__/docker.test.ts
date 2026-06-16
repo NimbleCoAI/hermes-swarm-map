@@ -101,4 +101,79 @@ describe('DockerService', () => {
     )
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
+
+  describe('rebuild syncs the build source before building', () => {
+    // Stub a clean, fast-forwardable git checkout. Each git call returns the
+    // right value based on the subcommand.
+    function stubCleanGit(opts?: { dirty?: string; branch?: string; noUpstream?: boolean; nonFf?: boolean }) {
+      const branch = opts?.branch ?? 'main'
+      mockExecSync.mockImplementation((cmd: string) => {
+        if (cmd.includes('rev-parse --is-inside-work-tree')) return Buffer.from('true')
+        if (cmd.includes('status --porcelain')) return Buffer.from(opts?.dirty ?? '')
+        if (cmd.includes('rev-parse --abbrev-ref HEAD')) return Buffer.from(branch)
+        if (cmd.includes('symbolic-full-name @{u}')) {
+          if (opts?.noUpstream) throw new Error('no upstream')
+          return Buffer.from(`origin/${branch}`)
+        }
+        if (cmd.includes('fetch')) return Buffer.from('')
+        if (cmd.includes('merge --ff-only')) {
+          if (opts?.nonFf) throw new Error('not possible to fast-forward')
+          return Buffer.from('Updating')
+        }
+        if (cmd.includes('rev-parse --short HEAD')) return Buffer.from('abc1234')
+        return Buffer.from('')
+      })
+    }
+
+    it('fetches and fast-forwards the source, then builds', () => {
+      stubCleanGit()
+      docker.restart('/path/compose.yml', 'audrey', 'rebuild', undefined, '/src/hermes')
+      const calls = mockExecSync.mock.calls.map((c) => c[0] as string)
+      expect(calls.some((c) => c.includes('git -C /src/hermes fetch'))).toBe(true)
+      expect(calls.some((c) => c.includes('git -C /src/hermes merge --ff-only origin/main'))).toBe(true)
+      // build still fires
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['--build', '--force-recreate', 'audrey']),
+        expect.any(Object),
+      )
+    })
+
+    it('FAILS LOUD and does NOT build when the source is dirty', () => {
+      stubCleanGit({ dirty: ' M lib/foo.ts' })
+      expect(() => docker.restart('/c.yml', 'audrey', 'rebuild', undefined, '/src/hermes')).toThrow(/uncommitted changes/)
+      expect(mockSpawn).not.toHaveBeenCalled()
+    })
+
+    it('FAILS LOUD and does NOT build when the source cannot fast-forward', () => {
+      stubCleanGit({ nonFf: true })
+      expect(() => docker.restart('/c.yml', 'audrey', 'rebuild', undefined, '/src/hermes')).toThrow(/cannot fast-forward|diverged/)
+      expect(mockSpawn).not.toHaveBeenCalled()
+    })
+
+    it('FAILS LOUD when the source has no upstream tracking branch', () => {
+      stubCleanGit({ noUpstream: true })
+      expect(() => docker.restart('/c.yml', 'audrey', 'rebuild', undefined, '/src/hermes')).toThrow(/no upstream/)
+      expect(mockSpawn).not.toHaveBeenCalled()
+    })
+
+    it('FAILS LOUD when the source is in detached HEAD', () => {
+      stubCleanGit({ branch: 'HEAD' })
+      expect(() => docker.restart('/c.yml', 'audrey', 'rebuild', undefined, '/src/hermes')).toThrow(/detached HEAD/)
+      expect(mockSpawn).not.toHaveBeenCalled()
+    })
+
+    it('does NOT sync for non-build modes (quick/recreate)', () => {
+      docker.restart('/c.yml', 'audrey', 'quick', undefined, '/src/hermes')
+      const calls = mockExecSync.mock.calls.map((c) => c[0] as string)
+      expect(calls.some((c) => c.includes('git -C'))).toBe(false)
+    })
+
+    it('does NOT sync when no build source is provided (image-only harness)', () => {
+      docker.restart('/c.yml', 'audrey', 'rebuild')
+      const calls = mockExecSync.mock.calls.map((c) => c[0] as string)
+      expect(calls.some((c) => c.includes('git -C'))).toBe(false)
+      expect(mockSpawn).toHaveBeenCalled()
+    })
+  })
 })

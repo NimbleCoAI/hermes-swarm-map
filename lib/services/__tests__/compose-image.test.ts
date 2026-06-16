@@ -1,8 +1,37 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
-import { generateStandaloneCompose, setComposeImage, readComposeImage } from '../harness-compose'
+import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from '../harness-compose'
 
 const REF = 'ghcr.io/nimblecoai/hermes-agent-mt:2026-06-12'
+
+describe('readComposeBuildContext', () => {
+  it('reads the long-form build context this generator emits', () => {
+    const c = generateStandaloneCompose('delta', 8642, '/data/delta', { imageOrBuild: { build: '/src/hermes-agent-mt' } })
+    expect(c).toContain('build:')
+    expect(c).toContain('context: /src/hermes-agent-mt')
+    expect(readComposeBuildContext(c)).toBe('/src/hermes-agent-mt')
+  })
+
+  it('reads the shorthand `build: /path` form (older hand-written composes)', () => {
+    const c = [
+      'services:',
+      '  hermes-cyborg:',
+      '    build: /Users/juni/Documents/GitHub/hermes-agent-mt',
+      '    container_name: hermes-cyborg',
+    ].join('\n')
+    expect(readComposeBuildContext(c)).toBe('/Users/juni/Documents/GitHub/hermes-agent-mt')
+  })
+
+  it('returns null for an image-only compose (nothing to git-sync)', () => {
+    const c = generateStandaloneCompose('epsilon', 8642, '/data/epsilon', { imageOrBuild: { image: REF } })
+    expect(readComposeBuildContext(c)).toBeNull()
+  })
+
+  it('reads the build context from the VPN variant', () => {
+    const c = generateStandaloneCompose('zeta', 8642, '/data/zeta', { imageOrBuild: { build: '/src/z' }, vpnEnabled: true, camofoxImage: 'ghcr.io/nimblecoai/camofox:latest' })
+    expect(readComposeBuildContext(c)).toBe('/src/z')
+  })
+})
 
 describe('setComposeImage', () => {
   it('replaces an existing image: line', () => {
