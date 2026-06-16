@@ -140,6 +140,13 @@ export function validateCascadeEntries(
 ): string[] {
   const errors: string[] = []
 
+  // An empty set means we read NO env vars for this agent — almost always a
+  // missing/unreadable .env (a live agent's .env has many vars), not a genuinely
+  // keyless agent. Treating that as "no credentials" would false-reject every
+  // enforced-provider model. So when the set is empty we skip credential
+  // validation entirely and fail open — the empty-id guard remains the floor.
+  const credCheckActive = presentEnvVars.size > 0
+
   for (const entry of entries) {
     const provider = (entry.provider ?? '').trim()
     const model = (entry.model ?? '').trim()
@@ -153,7 +160,7 @@ export function validateCascadeEntries(
       continue
     }
 
-    if (isProviderUnserviceable(provider, presentEnvVars)) {
+    if (credCheckActive && isProviderUnserviceable(provider, presentEnvVars)) {
       const vars = REQUIRED_KEY_BY_PROVIDER[provider.toLowerCase()]?.join(' or ')
       errors.push(
         `Model "${model}" uses provider "${provider}", but this agent has no ` +

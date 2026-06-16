@@ -40,6 +40,22 @@ describe('validateCascadeEntries', () => {
     expect(errors).toEqual([])
   })
 
+  it('fails open when no env vars were read at all (missing/unreadable .env)', () => {
+    // Empty set = we couldn't read the agent's .env. Must NOT reject an
+    // enforced-provider model on credential grounds — only the empty-id guard applies.
+    const errors = validateCascadeEntries(
+      [{ provider: 'anthropic', model: 'claude-opus-4-8' }],
+      new Set()
+    )
+    expect(errors).toEqual([])
+  })
+
+  it('still rejects an empty model id even when env is empty (floor guard holds)', () => {
+    const errors = validateCascadeEntries([{ provider: 'anthropic', model: '' }], new Set())
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatch(/missing model/i)
+  })
+
   it('accepts a multi-entry cascade when every provider has its key', () => {
     const env = new Set(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY'])
     const errors = validateCascadeEntries(
@@ -67,7 +83,9 @@ describe('validateCascadeEntries', () => {
   })
 
   it('reports every un-serviceable entry, not just the first', () => {
-    const env = new Set<string>() // agent has no keys at all
+    // Non-empty env (so the credential check is active) that simply lacks the
+    // openrouter + openai keys — both entries are definitively un-serviceable.
+    const env = new Set(['ANTHROPIC_API_KEY'])
     const errors = validateCascadeEntries(
       [
         { provider: 'openrouter', model: 'or-model' },
