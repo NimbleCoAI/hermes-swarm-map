@@ -29,6 +29,30 @@ const EXCLUDED_SERVICES = new Set(['litellm', 'vertex-proxy'])
 const BASE_PORT = 8642
 const PORT_STEP = 10
 
+// Per-platform mention-gating env vars. An empty value (KEY=) reads as false at
+// runtime (gateway/platforms/signal.py), but HSM's secure default is
+// require-mention — so an imported/legacy .env with a bare KEY= would silently
+// un-gate the agent while the UI still showed "@mention only".
+const MENTION_GATING_ENV_VARS = [
+  'SIGNAL_REQUIRE_MENTION',
+  'TELEGRAM_REQUIRE_MENTION',
+  'MATTERMOST_REQUIRE_MENTION',
+]
+
+// Rewrite any empty (or whitespace-only) mention-gating value to the secure
+// default 'true', so the stored value is unambiguous and the runtime gate
+// matches the UI. Absent lines and explicit values (including 'false', a
+// deliberate respond-to-all choice) are left untouched.
+export function normalizeEmptyMentionGating(envContent: string): string {
+  let out = envContent
+  for (const v of MENTION_GATING_ENV_VARS) {
+    // [ \t\r]* so a CRLF .env (KEY=\r\n) heals too — without \r the trailing
+    // carriage return defeats the end-of-line anchor.
+    out = out.replace(new RegExp(`^(${v})=[ \\t\\r]*$`, 'm'), '$1=true')
+  }
+  return out
+}
+
 // Parse a .env file into key=value pairs
 function parseEnvFilePairs(envPath: string): Record<string, string> {
   const result: Record<string, string> = {}
@@ -1319,6 +1343,14 @@ export class HarnessService {
     let envContent = ''
     try { envContent = fs.readFileSync(envPath, 'utf-8') } catch {}
 
+    // Heal any empty mention-gating values (KEY=) the imported .env carries —
+    // they read as false at runtime despite HSM's require-mention default, so a
+    // bare line would silently un-gate the agent. (Append-missing below only
+    // covers absent keys, not present-but-empty ones.)
+    const healedEnv = normalizeEmptyMentionGating(envContent)
+    const mentionGatingHealed = healedEnv !== envContent
+    envContent = healedEnv
+
     const envVarsAdded: string[] = []
     const existingVars = new Set(
       envContent.split('\n')
@@ -1337,6 +1369,8 @@ export class HarnessService {
     if (newLines.length > 0) {
       const separator = envContent.endsWith('\n') ? '' : '\n'
       envContent += `${separator}\n# HSM integration (added by import)\n${newLines.join('\n')}\n`
+    }
+    if (newLines.length > 0 || mentionGatingHealed) {
       fs.writeFileSync(envPath, envContent, { mode: 0o600 })
     }
 

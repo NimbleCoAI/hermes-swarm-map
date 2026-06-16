@@ -23,7 +23,7 @@ vi.mock('@/lib/resolvers', () => ({
 vi.mock('@/lib/services/harness-compose', () => ({ generateStandaloneCompose: vi.fn(() => '') }))
 vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
 
-import { PUT } from './route'
+import { GET, PUT } from './route'
 import { services } from '@/lib/services'
 import { expandSignalAllowlist } from '@/lib/resolvers'
 
@@ -84,5 +84,42 @@ describe('Settings API — PUT', () => {
     await PUT(makeRequest(body), makeParams('h_test'))
 
     expect(expandSignalAllowlist).toHaveBeenCalledWith('h_test', ['+15550001234'])
+  })
+})
+
+describe('Settings API — GET mention-gating reflects the runtime', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  async function getWithEnv(envContent: string) {
+    // GET reads the .env (and best-effort resolved-identities.json) via readFileSync.
+    // Returning the .env for every path is fine — the JSON.parse of it fails soft → {}.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(envContent as never)
+    const res = await GET(makeRequest({}) as Request, makeParams('h_test'))
+    return res.json() as Promise<{ mentionGating: boolean }>
+  }
+
+  it('reports gated when the value is explicitly truthy', async () => {
+    expect((await getWithEnv('SIGNAL_REQUIRE_MENTION=true\n')).mentionGating).toBe(true)
+  })
+
+  it('reports NOT gated when the value is empty — the runtime treats "" as false', async () => {
+    // This is the Mare bug: an empty value reads as false at runtime, but the UI
+    // used to claim "@mention only", so the agent answered every message while
+    // the setting appeared on.
+    expect((await getWithEnv('SIGNAL_REQUIRE_MENTION=\n')).mentionGating).toBe(false)
+  })
+
+  it('reports NOT gated when the value is an explicit false', async () => {
+    expect((await getWithEnv('SIGNAL_REQUIRE_MENTION=false\n')).mentionGating).toBe(false)
+  })
+
+  it('reports NOT gated when the line is absent — runtime default is not-gated', async () => {
+    expect((await getWithEnv('GITHUB_TOKEN=x\n')).mentionGating).toBe(false)
   })
 })
