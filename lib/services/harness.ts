@@ -14,7 +14,7 @@ import { installBaselineTemplates } from './templates'
 import { defaultEnabledPlugins, loadManifest } from './artifacts-manifest'
 import { planArtifactSync, applyArtifactSync, ensurePluginsEnabled, SyncResult } from './artifacts-sync'
 import type { ToolsService } from './tools'
-import { generateStandaloneCompose, setComposeImage, readComposeImage } from './harness-compose'
+import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from './harness-compose'
 import { RegistryService, parseImageRef } from './registry'
 
 const DEFAULT_IMAGE_REPO = 'nimblecoai/hermes-agent-mt'
@@ -865,9 +865,51 @@ export class HarnessService {
     if (!target) {
       throw new Error(`Harness ${id} has no compose file configured`)
     }
+    // For build modes, resolve the local source the build will read so the
+    // docker layer can sync it to its configured ref FIRST (fail loud if it
+    // can't), instead of silently building whatever's checked out.
+    const buildSource =
+      mode === 'rebuild' || mode === 'purge'
+        ? this.resolveBuildSource(target.composeFile)
+        : undefined
     markRestarting(id, mode)
-    this.docker.restart(target.composeFile, target.serviceName, mode)
+    try {
+      this.docker.restart(target.composeFile, target.serviceName, mode, undefined, buildSource)
+    } catch (err) {
+      // A build-source sync that fails loud must NOT leave the harness wedged
+      // in the "restarting" state — clear it so the user can retry after fixing.
+      clearRestarting(id)
+      this.audit.append({
+        who: 'admin',
+        what: `restart:${mode}:failed`,
+        target: harness!.name,
+        meta: { error: err instanceof Error ? err.message : String(err) },
+      })
+      throw err
+    }
     this.audit.append({ who: 'admin', what: `restart:${mode}`, target: harness!.name })
+  }
+
+  /**
+   * Resolve the local build-source directory a rebuild will read from.
+   * Prefers the harness's own compose `build:` context (authoritative — it's
+   * exactly what `--build` consumes, and honors any per-harness override),
+   * falling back to the global `hermesDir` setting. Returns null for
+   * image-only harnesses (nothing to sync).
+   */
+  private resolveBuildSource(composeFile: string): string | null {
+    try {
+      const compose = fs.readFileSync(composeFile, 'utf-8')
+      const ctx = readComposeBuildContext(compose)
+      if (ctx) return expandPath(ctx)
+      // Image-only compose → no local build to sync.
+      if (readComposeImage(compose)) return null
+    } catch {
+      // fall through to settings default
+    }
+    const settings = this.config?.getSettings()
+    if (settings?.useLocalBuild && settings.hermesDir) return expandPath(settings.hermesDir)
+    return null
   }
 
   /**

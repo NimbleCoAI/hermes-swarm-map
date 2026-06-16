@@ -218,3 +218,34 @@ export function readComposeImage(compose: string): string | null {
   const m = lines[svcIdx + 1].match(/^ {4}image:\s+(\S+)/)
   return m ? m[1] : null
 }
+
+/**
+ * Read the hermes service's build-context directory from a compose string, or
+ * null if it runs from a prebuilt `image:` (no local build).
+ *
+ * Handles both forms emitted/seen in the wild:
+ *   - long form:  `    build:\n      context: /path`
+ *   - shorthand:  `    build: /path`
+ *
+ * This is the actual filesystem source a `--build` reads from, so it's the
+ * authoritative thing to git-sync before a rebuild.
+ */
+export function readComposeBuildContext(compose: string): string | null {
+  const lines = compose.split('\n')
+  const svcIdx = lines.findIndex((l) => /^  hermes-[\w.-]+:\s*$/.test(l))
+  if (svcIdx < 0 || svcIdx + 1 >= lines.length) return null
+  const srcLine = lines[svcIdx + 1]
+
+  // Shorthand: `    build: /path`
+  const shorthand = srcLine.match(/^ {4}build:\s+(\S.*)$/)
+  if (shorthand) return shorthand[1].trim()
+
+  // Long form: `    build:` then a nested `      context: /path`
+  if (/^ {4}build:\s*$/.test(srcLine)) {
+    for (let i = svcIdx + 2; i < lines.length && /^ {5,}\S/.test(lines[i]); i++) {
+      const ctx = lines[i].match(/^ {6,}context:\s+(\S.*)$/)
+      if (ctx) return ctx[1].trim()
+    }
+  }
+  return null
+}

@@ -178,8 +178,90 @@ export class DockerService {
     }
   }
 
-  restart(composeFile: string, service: string, mode: RestartMode, projectName?: string): void {
+  /**
+   * Bring a local build-source checkout up to the code it's SUPPOSED to build
+   * before a `--build` reads it. Without this, a rebuild silently ships
+   * whatever happens to be checked out — which already burned us once when a
+   * checkout sat 1 commit behind main and a rebuild shipped stale code.
+   *
+   * Behavior (fail loud over ship stale):
+   *   - not a git repo            → throw
+   *   - dirty working tree        → throw (don't stash/discard someone's WIP)
+   *   - no upstream tracking ref  → throw
+   *   - can't fast-forward        → throw (diverged / detached — needs a human)
+   *   - otherwise                 → fetch + `merge --ff-only @{u}`
+   *
+   * Returns the ref it synced to and the commit it will build from, for logging.
+   */
+  syncBuildSource(sourceDir: string): { branch: string; commit: string; upstream: string } {
+    const git = (args: string) =>
+      execSync(`git -C ${sourceDir} ${args}`, { stdio: 'pipe', timeout: 120000 })
+        .toString()
+        .trim()
+
+    // Must be a git work tree.
+    try {
+      if (git('rev-parse --is-inside-work-tree') !== 'true') {
+        throw new Error('not a git work tree')
+      }
+    } catch (err) {
+      throw new Error(
+        `rebuild: build source ${sourceDir} is not a git repo — refusing to build (would ship un-synced code). ${err instanceof Error ? err.message : ''}`,
+      )
+    }
+
+    // Refuse to build over uncommitted local changes — could ship un-pushed
+    // edits, and a stash here could silently drop someone's WIP.
+    const dirty = git('status --porcelain')
+    if (dirty) {
+      throw new Error(
+        `rebuild: build source ${sourceDir} has uncommitted changes — refusing to build (would ship un-synced code). Commit/stash/clean it, then rebuild.`,
+      )
+    }
+
+    const branch = git('rev-parse --abbrev-ref HEAD')
+    if (branch === 'HEAD') {
+      throw new Error(
+        `rebuild: build source ${sourceDir} is in detached HEAD — refusing to build. Check out the intended branch, then rebuild.`,
+      )
+    }
+
+    // Resolve the configured upstream tracking ref (e.g. origin/main).
+    let upstream: string
+    try {
+      upstream = git('rev-parse --abbrev-ref --symbolic-full-name @{u}')
+    } catch {
+      throw new Error(
+        `rebuild: build source ${sourceDir} (branch ${branch}) has no upstream tracking branch — refusing to build. Set one with \`git branch --set-upstream-to\`, then rebuild.`,
+      )
+    }
+
+    // Fetch then fast-forward only. A non-ff (diverged history) fails loud.
+    git('fetch')
+    try {
+      git(`merge --ff-only ${upstream}`)
+    } catch {
+      throw new Error(
+        `rebuild: build source ${sourceDir} (branch ${branch}) cannot fast-forward to ${upstream} — local history has diverged. Refusing to build. Reconcile manually, then rebuild.`,
+      )
+    }
+
+    const commit = git('rev-parse --short HEAD')
+    return { branch, commit, upstream }
+  }
+
+  restart(composeFile: string, service: string, mode: RestartMode, projectName?: string, buildSource?: string | null): void {
     const projectFlag = projectName ? `-p ${projectName} ` : ''
+
+    // For modes that run `--build`, sync the local source to the code it's
+    // supposed to build FIRST. Throws (fail loud) rather than shipping stale.
+    if ((mode === 'rebuild' || mode === 'purge') && buildSource) {
+      const synced = this.syncBuildSource(buildSource)
+      // eslint-disable-next-line no-console
+      console.log(
+        `[rebuild] ${service}: building ${buildSource} @ ${synced.branch} ${synced.commit} (synced to ${synced.upstream})`,
+      )
+    }
 
     switch (mode) {
       case 'quick': {
