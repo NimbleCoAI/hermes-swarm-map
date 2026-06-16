@@ -7,8 +7,9 @@ services:
       - "autoheal=true"
     environment:
       - MODE=json-rpc
-    ports:
-      - "8080:8080"
+    # No published port: signal-cli >=0.14.2 rejects non-localhost Host
+    # headers (421), so the host port is owned by signal-host-proxy below,
+    # which rewrites Host before forwarding.
     volumes:
       - ${HOME}/.hermes-swarm/signal-data:/home/.local/share/signal-cli
       # Agent data dirs mounted at host paths so signal-cli can read attachments
@@ -29,6 +30,21 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
+    networks:
+      - hermes-net
+
+  # Host-header rewriting proxy — see host-proxy.conf. Owns the published
+  # port 8080 that agents reach via host.docker.internal.
+  signal-host-proxy:
+    image: nginx:alpine
+    container_name: signal-host-proxy
+    restart: unless-stopped
+    depends_on:
+      - signal-cli-daemon
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./host-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - hermes-net
 
