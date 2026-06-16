@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 import { validateCascadeEntries, type CascadeEntry } from '@/lib/model-catalog'
-import { readModelConfig, readModelProvider, readFallbackProviders, guessDataDir } from '@/lib/services/harness'
+import { readModelConfig, readModelProvider, readFallbackProviders, guessDataDir, readAgentEnvVarNames } from '@/lib/services/harness'
 import type { FallbackProvider } from '@/lib/services/harness'
 import fs from 'fs'
 import path from 'path'
@@ -88,17 +88,21 @@ export async function PUT(
     return NextResponse.json({ error: 'At least one model is required' }, { status: 400 })
   }
 
-  // Validate every (provider, model) pair against the model catalog before
-  // writing config.yaml and restarting the agent. Pushing an unknown / empty
-  // model id onto a live agent can crash-loop it. Free-form providers
-  // (ollama / openrouter / custom) and any non-catalogued provider are accepted
-  // as-is — see validateCascadeEntries / FREEFORM_PROVIDERS in lib/model-catalog.
+  // Guard the write/restart path before touching config.yaml. Two checks:
+  //  1. Empty model id → always rejected (the unambiguous crash case).
+  //  2. Provider-credential presence → reject ONLY when a cascade entry's
+  //     provider is DEFINITIVELY un-serviceable for THIS agent (it needs a key,
+  //     we know which env var, and it's absent in the agent's .env). The
+  //     motivating case: pushing an openrouter model onto an agent with no
+  //     OPENROUTER_API_KEY → restart → crash-loop. All uncertainty fails open
+  //     (a valid config must never be blocked). See validateCascadeEntries.
+  const presentEnvVars = readAgentEnvVarNames(dataDir)
   const entriesToValidate: CascadeEntry[] =
     fallbackProvidersToWrite && fallbackProvidersToWrite.length > 0
       ? fallbackProvidersToWrite.map((fp) => ({ provider: fp.provider, model: fp.model }))
       : cascade.map((model) => ({ provider, model }))
 
-  const modelErrors = validateCascadeEntries(entriesToValidate)
+  const modelErrors = validateCascadeEntries(entriesToValidate, presentEnvVars)
   if (modelErrors.length > 0) {
     return NextResponse.json(
       { error: `Invalid model cascade: ${modelErrors.join('; ')}` },

@@ -455,6 +455,37 @@ export function readModelProvider(dataDir: string): string {
   }
 }
 
+/**
+ * Read the set of env-var NAMES configured (with a real value) in an agent's
+ * .env file. Used to decide which model providers the agent can actually serve.
+ *
+ * Mirrors keys.ts `parseEnvFile` semantics: skips comments/blank lines and
+ * entries whose value is empty or an unexpanded `${...}` reference (a value the
+ * runtime can't authenticate with). Returns names only — never reads values
+ * into memory. Missing/unreadable .env → empty set (callers fail open).
+ */
+export function readAgentEnvVarNames(dataDir: string): Set<string> {
+  const names = new Set<string>()
+  try {
+    const envPath = path.join(dataDir, '.env')
+    const content = fs.readFileSync(envPath, 'utf-8')
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim()
+      if (!line || line.startsWith('#')) continue
+      const eq = line.indexOf('=')
+      if (eq === -1) continue
+      const varName = line.slice(0, eq).trim()
+      const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+      if (varName && value && !value.startsWith('${')) {
+        names.add(varName)
+      }
+    }
+  } catch {
+    // No .env / unreadable → empty set. Credential validation fails open.
+  }
+  return names
+}
+
 function readSoul(dataDir: string, maxChars = 200): string {
   try {
     const soulPath = path.join(dataDir, 'SOUL.md')
