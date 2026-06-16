@@ -11,9 +11,13 @@ import type { ConfigService } from './config'
 import { getCostToday, getInvocationsToday } from './usage'
 import { markRestarting, isRestarting, clearRestarting } from './restart-tracker'
 import { installBaselineTemplates } from './templates'
-import { defaultEnabledPlugins } from './artifacts-manifest'
+import { defaultEnabledPlugins, loadManifest } from './artifacts-manifest'
+import { planArtifactSync, applyArtifactSync, ensurePluginsEnabled, SyncResult } from './artifacts-sync'
 import type { ToolsService } from './tools'
-import { generateStandaloneCompose } from './harness-compose'
+import { generateStandaloneCompose, setComposeImage, readComposeImage } from './harness-compose'
+import { RegistryService, parseImageRef } from './registry'
+
+const DEFAULT_IMAGE_REPO = 'nimblecoai/hermes-agent-mt'
 import { hsmBaseUrl } from './hsm-url'
 
 const HARNESSES_FILE = 'harnesses.json'
@@ -24,6 +28,30 @@ const EXCLUDED_SERVICES = new Set(['litellm', 'vertex-proxy'])
 // Default port for new agents — Hermes standard is 8642+
 const BASE_PORT = 8642
 const PORT_STEP = 10
+
+// Per-platform mention-gating env vars. An empty value (KEY=) reads as false at
+// runtime (gateway/platforms/signal.py), but HSM's secure default is
+// require-mention — so an imported/legacy .env with a bare KEY= would silently
+// un-gate the agent while the UI still showed "@mention only".
+const MENTION_GATING_ENV_VARS = [
+  'SIGNAL_REQUIRE_MENTION',
+  'TELEGRAM_REQUIRE_MENTION',
+  'MATTERMOST_REQUIRE_MENTION',
+]
+
+// Rewrite any empty (or whitespace-only) mention-gating value to the secure
+// default 'true', so the stored value is unambiguous and the runtime gate
+// matches the UI. Absent lines and explicit values (including 'false', a
+// deliberate respond-to-all choice) are left untouched.
+export function normalizeEmptyMentionGating(envContent: string): string {
+  let out = envContent
+  for (const v of MENTION_GATING_ENV_VARS) {
+    // [ \t\r]* so a CRLF .env (KEY=\r\n) heals too — without \r the trailing
+    // carriage return defeats the end-of-line anchor.
+    out = out.replace(new RegExp(`^(${v})=[ \\t\\r]*$`, 'm'), '$1=true')
+  }
+  return out
+}
 
 // Parse a .env file into key=value pairs
 function parseEnvFilePairs(envPath: string): Record<string, string> {
@@ -451,6 +479,37 @@ export function readModelProvider(dataDir: string): string {
   }
 }
 
+/**
+ * Read the set of env-var NAMES configured (with a real value) in an agent's
+ * .env file. Used to decide which model providers the agent can actually serve.
+ *
+ * Mirrors keys.ts `parseEnvFile` semantics: skips comments/blank lines and
+ * entries whose value is empty or an unexpanded `${...}` reference (a value the
+ * runtime can't authenticate with). Returns names only — never reads values
+ * into memory. Missing/unreadable .env → empty set (callers fail open).
+ */
+export function readAgentEnvVarNames(dataDir: string): Set<string> {
+  const names = new Set<string>()
+  try {
+    const envPath = path.join(dataDir, '.env')
+    const content = fs.readFileSync(envPath, 'utf-8')
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim()
+      if (!line || line.startsWith('#')) continue
+      const eq = line.indexOf('=')
+      if (eq === -1) continue
+      const varName = line.slice(0, eq).trim()
+      const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+      if (varName && value && !value.startsWith('${')) {
+        names.add(varName)
+      }
+    }
+  } catch {
+    // No .env / unreadable → empty set. Credential validation fails open.
+  }
+  return names
+}
+
 function readSoul(dataDir: string, maxChars = 200): string {
   try {
     const soulPath = path.join(dataDir, 'SOUL.md')
@@ -838,6 +897,166 @@ export class HarnessService {
     return { ok: true, serviceName: harness.serviceName }
   }
 
+  /**
+   * Sync an already-created agent's artifacts (plugins/skills/hooks) against the
+   * repo manifest — the missing lifecycle path (#82). installBaselineTemplates
+   * only runs at create/duplicate, so existing agents never gain artifacts added
+   * to infra/artifacts.json later. This installs MISSING artifacts and updates
+   * provably-unmodified ones (see artifacts-sync.ts no-clobber model), enables
+   * any newly-installed plugins in config.yaml, then recreates the container so
+   * the runtime loads them. dryRun returns the plan without writing or restarting.
+   */
+  syncArtifacts(
+    id: string,
+    opts: { dryRun?: boolean; force?: boolean } = {},
+  ): { ok: boolean; serviceName: string; dryRun: boolean; results: SyncResult[]; pluginsEnabled: string[]; restarted: boolean } {
+    const harness = this.get(id)
+    if (!harness?.serviceName) {
+      throw new Error(`Harness ${id} not found`)
+    }
+    const dataDir = guessDataDir(harness.serviceName, harness.serviceName)
+    const repoRoot = process.cwd()
+    const manifest = loadManifest(path.join(repoRoot, 'infra', 'artifacts.json'))
+    const plan = planArtifactSync(dataDir, manifest, repoRoot, { force: opts.force })
+
+    if (opts.dryRun) {
+      return {
+        ok: true,
+        serviceName: harness.serviceName,
+        dryRun: true,
+        results: plan.items.map((i) => ({ ...i, applied: false })),
+        pluginsEnabled: plan.enablePlugins,
+        restarted: false,
+      }
+    }
+
+    const results = applyArtifactSync(dataDir, plan, repoRoot)
+    const changed = results.some((r) => r.applied)
+
+    // Enable any newly-installed/updated plugins in config.yaml so the runtime loads them.
+    let pluginsEnabled: string[] = []
+    const toEnable = plan.enablePlugins.filter((n) =>
+      results.some((r) => r.name === n && r.applied),
+    )
+    if (toEnable.length > 0) {
+      const configPath = path.join(dataDir, 'config.yaml')
+      try {
+        const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : ''
+        const { content, added } = ensurePluginsEnabled(current, toEnable)
+        if (added.length > 0) {
+          fs.writeFileSync(configPath, content)
+          pluginsEnabled = added
+        }
+      } catch {
+        // config.yaml unwritable — artifacts are still installed; surface nothing fatal.
+      }
+    }
+
+    // Only bounce the container if something actually changed.
+    if (changed) this.restart(id, 'recreate')
+    this.audit.append({ who: 'admin', what: 'artifacts:sync', target: harness.name })
+    return {
+      ok: true,
+      serviceName: harness.serviceName,
+      dryRun: false,
+      results,
+      pluginsEnabled,
+      restarted: changed,
+    }
+  }
+
+  // --- Runtime-image CD (version-awareness + manual pinned update) ---
+
+  /** The image ref an agent's compose currently runs, or 'local-build' if it builds from source. */
+  currentImage(id: string): string | null {
+    const harness = this.get(id)
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!target) return null
+    try {
+      const compose = fs.readFileSync(target.composeFile, 'utf-8')
+      return readComposeImage(compose) ?? 'local-build'
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Version status for an agent: what it runs now, what it's pinned to, and the
+   * digest the default repo's `:latest` resolves to — so the UI can flag
+   * "update available". Registry failures degrade to latest=null (never throws).
+   */
+  async imageStatus(id: string, registry: RegistryService = new RegistryService()): Promise<{
+    current: string | null
+    pinned?: string
+    lastKnownDigest?: string
+    latestTag: string
+    latestDigest: string | null
+    updateAvailable: boolean
+  }> {
+    const harness = this.get(id)
+    if (!harness) throw new Error(`Harness ${id} not found`)
+    const current = this.currentImage(id)
+    const repo = current && current !== 'local-build' ? parseImageRef(current).repo : DEFAULT_IMAGE_REPO
+    const latestDigest = await registry.getDigest(repo, 'latest')
+    const updateAvailable =
+      !!latestDigest && (current === 'local-build' || (!!harness.lastKnownDigest && harness.lastKnownDigest !== latestDigest))
+    return {
+      current,
+      pinned: harness.pinnedImageRef,
+      lastKnownDigest: harness.lastKnownDigest,
+      latestTag: `${repo}:latest`,
+      latestDigest,
+      updateAvailable,
+    }
+  }
+
+  /**
+   * Pin an agent to an image ref and roll it: surgically rewrite the compose
+   * source block to `image: <ref>`, persist the pin (+ resolved digest for
+   * rollback/drift), and recreate the container (which pulls the ref if absent).
+   * Does NOT touch the build for any other service (wireguard/camofox).
+   */
+  async setAgentImage(id: string, ref: string, registry: RegistryService = new RegistryService()): Promise<{ ok: boolean; serviceName: string; ref: string; digest: string | null }> {
+    const harness = this.get(id)
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!harness || !target) throw new Error(`Harness ${id} not found`)
+    if (!fs.existsSync(target.composeFile)) throw new Error(`Harness ${id} compose file not found at ${target.composeFile}`)
+    const compose = fs.readFileSync(target.composeFile, 'utf-8')
+    fs.writeFileSync(target.composeFile, setComposeImage(compose, ref))
+    const parsed = parseImageRef(ref)
+    const digest = parsed.digest ?? (parsed.tag ? await registry.getDigest(parsed.repo, parsed.tag) : null)
+    this.updateConfig(id, { pinnedImageRef: ref, lastKnownDigest: digest ?? harness.lastKnownDigest })
+    this.restart(id, 'recreate')
+    this.audit.append({ who: 'admin', what: `image:set:${ref}`, target: harness.name })
+    return { ok: true, serviceName: target.serviceName, ref, digest }
+  }
+
+  /**
+   * Canary signal after a recreate: is the container up and stable? Honest about
+   * "starting" (running but very young) vs "healthy" vs "unhealthy" (not running
+   * / restart-looping). No assumption of an HTTP health endpoint.
+   */
+  agentHealth(id: string): { status: 'healthy' | 'starting' | 'unhealthy'; running: boolean; restartCount: number; uptimeSec: number | null } {
+    const harness = this.get(id)
+    const target = harness && this.resolveComposeTarget(harness)
+    if (!harness || !target) throw new Error(`Harness ${id} not found`)
+    const state = this.docker.inspectState(target.serviceName)
+    if (!state || !state.running) {
+      return { status: 'unhealthy', running: false, restartCount: state?.restartCount ?? 0, uptimeSec: null }
+    }
+    const started = state.startedAt ? Date.parse(state.startedAt) : NaN
+    const uptimeSec = Number.isNaN(started) ? null : Math.max(0, Math.floor((this.now() - started) / 1000))
+    // Young-but-running = still booting; restart-looping = unhealthy.
+    if (state.restartCount > 2) return { status: 'unhealthy', running: true, restartCount: state.restartCount, uptimeSec }
+    if (uptimeSec !== null && uptimeSec < 8) return { status: 'starting', running: true, restartCount: state.restartCount, uptimeSec }
+    return { status: 'healthy', running: true, restartCount: state.restartCount, uptimeSec }
+  }
+
+  // Wrapped for test injection (Date is otherwise unmockable mid-suite).
+  protected now(): number {
+    return Date.now()
+  }
+
   start(id: string): void {
     const harness = this.get(id)
     const target = harness && this.resolveComposeTarget(harness)
@@ -1124,6 +1343,14 @@ export class HarnessService {
     let envContent = ''
     try { envContent = fs.readFileSync(envPath, 'utf-8') } catch {}
 
+    // Heal any empty mention-gating values (KEY=) the imported .env carries —
+    // they read as false at runtime despite HSM's require-mention default, so a
+    // bare line would silently un-gate the agent. (Append-missing below only
+    // covers absent keys, not present-but-empty ones.)
+    const healedEnv = normalizeEmptyMentionGating(envContent)
+    const mentionGatingHealed = healedEnv !== envContent
+    envContent = healedEnv
+
     const envVarsAdded: string[] = []
     const existingVars = new Set(
       envContent.split('\n')
@@ -1142,6 +1369,8 @@ export class HarnessService {
     if (newLines.length > 0) {
       const separator = envContent.endsWith('\n') ? '' : '\n'
       envContent += `${separator}\n# HSM integration (added by import)\n${newLines.join('\n')}\n`
+    }
+    if (newLines.length > 0 || mentionGatingHealed) {
       fs.writeFileSync(envPath, envContent, { mode: 0o600 })
     }
 

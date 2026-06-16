@@ -143,6 +143,7 @@ Any AI agent (Claude Code, Hermes, etc.) can orchestrate your fleet via the REST
 | `GET` | `/api/harnesses/:id/models` | Model cascade config |
 | `PUT` | `/api/harnesses/:id/models` | Update cascade (`{ cascade: [...] }`) |
 | `POST` | `/api/harnesses/:id/duplicate` | Clone harness config (`{ name }`) |
+| `POST` | `/api/harnesses/:id/artifacts/sync` | Install missing manifest artifacts onto an existing agent, no-clobber (`{ dryRun?, force? }`) |
 | `POST` | `/api/setup/deploy` | Deploy new agent (full wizard payload) |
 | `POST` | `/api/setup/detect` | Scan for Hermes compose directories |
 | `GET` | `/api/keys` | List keys (masked, from agent .env files) |

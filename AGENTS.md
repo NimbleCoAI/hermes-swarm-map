@@ -21,7 +21,8 @@ Hermes Swarm Map is an open-source admin GUI + REST API for orchestrating Hermes
 > **Touching templates, artifacts, or anything agents receive at create/update time?** Read these FIRST — there is prior design work and a hard constraint:
 > - [Artifact Commons + Manifest Loader](docs/specs/2026-06-03-artifact-commons-design.md) — artifacts speak the manifest (`infra/artifacts.json`), never a hardcoded list
 > - [Opinionated Config](docs/plans/opinionated-config.md) — what HSM scaffolds into `/opt/data` and why
-> - **The no-clobber rule:** an agent's data dir is user-owned once created. Baseline templates install at **create/duplicate only** — there is currently no update-existing-agents path (see issue #82). Any future sync/update mechanism must never overwrite user-added or user-modified artifacts (additive-only is not enough — check pristineness against shipped hashes), must dry-run, and must report what it skipped.
+> - [Agent Updates](docs/architecture/agent-updates.md) — the two update surfaces (baked image vs hot-mounted artifacts) and the rebuild/recreate/sync verbs
+> - **The no-clobber rule:** an agent's data dir is user-owned once created. Baseline templates install at create/duplicate; existing agents are updated via `POST /api/harnesses/:id/artifacts/sync` (`lib/services/artifacts-sync.ts`). That endpoint — and anything like it — must never overwrite user-added or user-modified artifacts: it installs only what's missing, and updates an existing artifact only when a content-hash lock (`.artifacts-lock.json`) proves it's unmodified. Honor that model; don't regress it to a blind copy.
 
 **Next.js fullstack monorepo.** API routes in `app/api/` shell out to Docker via the service layer. No separate backend process — Next.js IS the backend.
 

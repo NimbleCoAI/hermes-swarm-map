@@ -129,12 +129,21 @@ export async function GET(
     }
   }
 
-  // Read mention-gating — default true (require mention) unless any platform explicitly set to 'false'
-  let mentionGating = true
+  // Read mention-gating from the .env the way the runtime resolves that env var,
+  // so the UI can't claim "@mention only" while the agent answers everything. The
+  // runtime (gateway/platforms/signal.py) gates only when the value is explicitly
+  // truthy; an empty or absent value reads as false there. An empty value (KEY=)
+  // is the exact gap that let a legacy agent respond to every message while this
+  // showed as on — so treat anything that isn't truthy as not-gated, not just
+  // 'false'. (Note: a YAML `require_mention` in the agent's gateway config
+  // outranks the env var at runtime; this reads only the .env, so a YAML override
+  // is not reflected here. Env-var/.env is HSM's source of truth for these.)
+  const MENTION_TRUTHY = new Set(['true', '1', 'yes', 'on'])
+  let mentionGating = false
   for (const varName of Object.values(MENTION_GATING_VARS)) {
     const val = env[varName]
-    if (val === 'false') {
-      mentionGating = false
+    if (val !== undefined && MENTION_TRUTHY.has(val.trim().toLowerCase())) {
+      mentionGating = true
       break
     }
   }
