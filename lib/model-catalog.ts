@@ -32,9 +32,15 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
   ],
 }
 
-// Map env var patterns to provider names (same as keys.ts PROVIDER_PATTERNS)
+export type CascadeEntry = { provider: string; model: string }
+
+// Map env var name → provider, used by the /suggest route to detect which
+// providers an agent has credentials for (read-only; suggestion building only).
+// This is NOT the validation allowlist — see REQUIRED_KEY_BY_PROVIDER below for
+// the conservative set we actually enforce on the write path.
 export const ENV_TO_PROVIDER: Record<string, string> = {
   ANTHROPIC_API_KEY: 'anthropic',
+  ANTHROPIC_TOKEN: 'anthropic',
   OPENAI_API_KEY: 'openai',
   GOOGLE_API_KEY: 'google',
   VERTEX_PROJECT_ID: 'google',
@@ -42,4 +48,127 @@ export const ENV_TO_PROVIDER: Record<string, string> = {
   OPENROUTER_API_KEY: 'openrouter',
   AWS_BEARER_TOKEN_BEDROCK: 'bedrock',
   AWS_ACCESS_KEY_ID: 'bedrock',
+}
+
+// --- Provider serviceability (credential presence) --------------------------
+//
+// What actually crash-loops an agent is NOT "the model isn't in our suggestions
+// list" — it's pushing a model whose provider has no configured credential for
+// THIS agent (e.g. `moonshotai/kimi-k2.7-code` via openrouter when the agent
+// has no OPENROUTER_API_KEY → the agent restarts onto it and crash-loops).
+//
+// So we validate provider-credential PRESENCE, not catalog membership. The bar
+// is zero false-rejections of legitimate models: we reject a cascade entry ONLY
+// when we can POSITIVELY determine its provider is un-serviceable. On any
+// uncertainty we FAIL OPEN (allow the entry).
+
+// Providers that need NO credential — always serviceable.
+//   - ollama: local model server reached by base_url
+//   - custom: proxy / self-hosted endpoint reached by base_url
+// (The config template also rewrites provider `ollama` → `custom`.)
+export const NO_KEY_PROVIDERS = new Set(['ollama', 'custom'])
+
+// Providers we can confidently enforce: each needs exactly one well-known
+// credential and authenticates only that way. If the env var is ABSENT for an
+// agent, the provider is definitively un-serviceable for it.
+//
+// Deliberately conservative — only single-credential providers are listed.
+// `google`/`gemini` are intentionally OMITTED: Google auth has several modes
+// (GOOGLE_API_KEY, Vertex project + ADC, service-account JSON), so we cannot
+// confidently call it un-serviceable from a single missing var → we fail open.
+// `bedrock` is handled separately (AWS multi-var creds, fail-open default).
+const REQUIRED_KEY_BY_PROVIDER: Record<string, string[]> = {
+  anthropic: ['ANTHROPIC_API_KEY', 'ANTHROPIC_TOKEN'],
+  openai: ['OPENAI_API_KEY'],
+  openrouter: ['OPENROUTER_API_KEY'],
+}
+
+/**
+ * Decide whether a cascade entry's provider is DEFINITIVELY un-serviceable for
+ * an agent, given the set of env-var names present in that agent's .env.
+ *
+ * Returns true ONLY when we are confident: the provider needs a key, we know
+ * which env var(s), and none of them are present. Every other case (no-key
+ * provider, unknown provider, ambiguous auth, bedrock with indeterminate creds)
+ * returns false → FAIL OPEN.
+ */
+function isProviderUnserviceable(provider: string, presentEnvVars: Set<string>): boolean {
+  const p = provider.trim().toLowerCase()
+
+  // No-key providers (or no provider supplied) are always serviceable.
+  if (!p || NO_KEY_PROVIDERS.has(p)) return false
+
+  // Bedrock uses AWS_* multi-var creds (AWS_BEARER_TOKEN_BEDROCK /
+  // AWS_ACCESS_KEY_ID / AWS_PROFILE), or an instance role / ~/.aws that won't
+  // appear in the agent .env at all. Presence of an AWS var would confirm it's
+  // serviceable; ABSENCE is NOT proof it's un-serviceable. So we never reject
+  // bedrock on env-var grounds — fail open.
+  if (p === 'bedrock') return false
+
+  const requiredVars = REQUIRED_KEY_BY_PROVIDER[p]
+  if (!requiredVars) {
+    // Unknown / ambiguous provider (e.g. google, gemini, nous, custom proxies):
+    // we have no authoritative single credential to check → fail open.
+    return false
+  }
+
+  // We know this provider needs a specific key and authenticates only that way.
+  // Un-serviceable iff none of its credential vars are present.
+  return !requiredVars.some((v) => presentEnvVars.has(v))
+}
+
+/**
+ * Validate a list of (provider, model) cascade entries before they are written
+ * to a live agent's config.yaml.
+ *
+ * Two checks, both deliberately conservative:
+ *
+ *  1. Empty / missing model id → always rejected (the unambiguous crash case).
+ *  2. Provider-credential presence → an entry is rejected ONLY when its provider
+ *     is DEFINITIVELY un-serviceable for this agent (we know it needs a key, we
+ *     know which env var, and it is absent). All uncertainty fails open.
+ *
+ * `presentEnvVars` is the set of env-var NAMES configured in the agent's .env
+ * (read via readAgentEnvVarNames). When omitted/empty, only the empty-id guard
+ * applies — credential validation fails open entirely.
+ *
+ * Returns a list of human-readable error strings (empty list = valid).
+ */
+export function validateCascadeEntries(
+  entries: CascadeEntry[],
+  presentEnvVars: Set<string> = new Set()
+): string[] {
+  const errors: string[] = []
+
+  // An empty set means we read NO env vars for this agent — almost always a
+  // missing/unreadable .env (a live agent's .env has many vars), not a genuinely
+  // keyless agent. Treating that as "no credentials" would false-reject every
+  // enforced-provider model. So when the set is empty we skip credential
+  // validation entirely and fail open — the empty-id guard remains the floor.
+  const credCheckActive = presentEnvVars.size > 0
+
+  for (const entry of entries) {
+    const provider = (entry.provider ?? '').trim()
+    const model = (entry.model ?? '').trim()
+
+    if (!model) {
+      errors.push(
+        provider
+          ? `Missing model id for provider "${provider}"`
+          : 'Missing model id'
+      )
+      continue
+    }
+
+    if (credCheckActive && isProviderUnserviceable(provider, presentEnvVars)) {
+      const vars = REQUIRED_KEY_BY_PROVIDER[provider.toLowerCase()]?.join(' or ')
+      errors.push(
+        `Model "${model}" uses provider "${provider}", but this agent has no ` +
+          `credential for it${vars ? ` (expected ${vars})` : ''}. ` +
+          `Add the key before assigning this model, or the agent will crash-loop on restart.`
+      )
+    }
+  }
+
+  return errors
 }
