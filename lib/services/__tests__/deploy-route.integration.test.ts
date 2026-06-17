@@ -143,6 +143,16 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     expect(cfg).toContain('matilde')
   })
 
+  it('P2: a template install failure removes the half-written agent dir (no leftover .env)', async () => {
+    tmpl.get.mockReturnValue({ id: 'matilde', name: 'Matilde', description: '', artifacts: [], recommends: {} })
+    tmpl.install.mockRejectedValue(new Error('Refused: injection scan'))
+    const res = await deploy({
+      name: 'sci', provider: 'anthropic', primaryModel: 'claude-opus-4-6', template: 'matilde', llmKey: 'sk-ant-api-x',
+    })
+    expect(res.status).toBe(500)
+    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-sci'))).toBe(false)
+  })
+
   it('P2: rejects an unknown template id with 400 and installs nothing', async () => {
     tmpl.get.mockReturnValue(undefined)
     const res = await deploy({

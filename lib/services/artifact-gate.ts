@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { scanForThreats } from './threat-patterns'
+import { scanForThreats, type ThreatScope } from './threat-patterns'
 
 export interface ArtifactFinding {
   file: string // path relative to the artifact dir
@@ -48,8 +48,13 @@ function walk(dir: string, base: string, out: WalkEntry[]): void {
  * blanks the scan (audit fixes). Returns `ok: false` with per-file findings if
  * anything trips, so the caller can refuse the install (loud failure) rather
  * than copying a poisoned artifact onto disk.
+ *
+ * `scope` selects the threat-pattern set: 'context' (default) for general
+ * artifacts; 'strict' for highest-trust content the agent obeys as instructions
+ * — SOUL (identity prompt) and use-case skill installs — which additionally
+ * screens exfil / persistence / config-mod / hardcoded-secret patterns.
  */
-export function gateArtifactDir(dir: string): GateResult {
+export function gateArtifactDir(dir: string, scope: ThreatScope = 'context'): GateResult {
   const entries: WalkEntry[] = []
   walk(dir, dir, entries)
 
@@ -81,7 +86,7 @@ export function gateArtifactDir(dir: string): GateResult {
     // "binary" and blank the scan, so `\0` + injection passed clean). Strip NUL
     // bytes so any payload after one is still matched. Genuine large binaries
     // are caught by the oversized check above.
-    const ids = scanForThreats(buf.toString('utf-8').replace(/\0/g, ''), 'context')
+    const ids = scanForThreats(buf.toString('utf-8').replace(/\0/g, ''), scope)
     if (ids.length > 0) {
       findings.push({ file: norm, ids })
     }

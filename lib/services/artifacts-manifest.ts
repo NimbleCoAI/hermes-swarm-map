@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { gateArtifactDir } from './artifact-gate'
 import { fetchGitArtifact } from './git-fetch'
+import type { ThreatScope } from './threat-patterns'
 
 export type ArtifactType = 'plugins' | 'skills' | 'hooks'
 
@@ -142,6 +143,9 @@ export interface InstallOpts {
   gitBaseUrl?: string
   gitToken?: string
   cacheRoot?: string
+  // Threat-pattern scope for the install-time gate. Defaults to 'context';
+  // use-case template installs pass 'strict' (SOUL/skills the agent obeys).
+  scope?: ThreatScope
 }
 
 // Sources supported:
@@ -171,6 +175,12 @@ export async function installArtifacts(
 
   for (const type of types) {
     for (const entry of manifest[type]) {
+      // Defense in depth: the artifact name becomes a path segment and a
+      // config.yaml plugins.enabled entry. Reject traversal / unsafe names even
+      // though names come from a server-side manifest (audit: Low).
+      if (!GIT_NAME_RE.test(entry.name) || entry.name.includes('..')) {
+        throw new Error(`unsafe artifact name "${entry.name}" for ${type}`)
+      }
       const destDir = path.join(agentDataDir, type, entry.name)
 
       // Never clobber an agent's existing (possibly customized) artifact — e.g.
@@ -186,7 +196,7 @@ export async function installArtifacts(
       const git = parseGitSource(entry.source)
       if (git) {
         const fetchedDir = gitFetch(git)
-        const gate = gateArtifactDir(fetchedDir)
+        const gate = gateArtifactDir(fetchedDir, opts.scope)
         if (!gate.ok) {
           const summary = gate.findings.map((f) => `${f.file} [${f.ids.join(',')}]`).join('; ')
           throw new Error(

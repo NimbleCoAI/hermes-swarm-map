@@ -109,7 +109,9 @@ export async function installUseCaseTemplate(
   for (const a of template.artifacts) {
     manifest[a.type].push({ name: a.name, source: a.source, enabled: a.enabled })
   }
-  const results = await installArtifacts(agentDataDir, manifest, process.cwd(), { gitToken, cacheRoot, gitFetch })
+  // 'strict' scope: template skills/plugins are content the agent obeys, so
+  // screen the exfil/persistence/config-mod/secret pattern set too (audit: High).
+  const results = await installArtifacts(agentDataDir, manifest, process.cwd(), { gitToken, cacheRoot, gitFetch, scope: 'strict' })
 
   if (template.soul) {
     await seedSoulFromGit(agentDataDir, template.soul, gitFetch, cacheRoot)
@@ -143,7 +145,8 @@ async function seedSoulFromGit(
   // Gate the SOUL file in isolation: copy just it into a scratch dir and scan.
   const scratch = fs.mkdtempSync(path.join(cacheRoot, 'soul-gate-'))
   await cp(soulSrc, path.join(scratch, 'SOUL.md'))
-  const gate = gateArtifactDir(scratch)
+  // SOUL becomes the agent's identity prompt — gate it at the strictest scope.
+  const gate = gateArtifactDir(scratch, 'strict')
   if (!gate.ok) {
     const summary = gate.findings.map((f) => `${f.file} [${f.ids.join(',')}]`).join('; ')
     throw new Error(`Refused SOUL from ${soul.source}: failed the injection scan (${summary}).`)
