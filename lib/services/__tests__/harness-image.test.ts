@@ -40,7 +40,9 @@ describe('setAgentImage', () => {
     const res = await svc.setAgentImage('h_a', 'ghcr.io/nimblecoai/hermes-agent-mt:2026-06-12', fakeRegistry)
     expect(res.ok).toBe(true)
     expect(readComposeImage(fs.readFileSync(composeFile, 'utf-8'))).toBe('ghcr.io/nimblecoai/hermes-agent-mt:2026-06-12')
-    expect(docker.restart).toHaveBeenCalledWith(composeFile, 'hermes-a', 'recreate')
+    // docker.restart(composeFile, service, mode, projectName?, buildSource?) —
+    // pinning an image recreates with no build source (nothing to build).
+    expect(docker.restart).toHaveBeenCalledWith(composeFile, 'hermes-a', 'recreate', undefined, undefined)
   })
 })
 
