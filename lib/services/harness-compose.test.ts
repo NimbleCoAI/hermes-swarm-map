@@ -215,6 +215,111 @@ describe('generateStandaloneCompose', () => {
     })
   })
 
+  describe('bundled ollama sidecar', () => {
+    describe('flag OFF (default — host-GPU ollama via host.docker.internal stays the default)', () => {
+      it('non-VPN: no ollama service and no .ollama volume', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir)
+        expect(result).not.toContain(`ollama-${agentName}`)
+        expect(result).not.toContain('ollama/ollama')
+        expect(result).not.toContain('.ollama')
+        expect(result).not.toContain('qwen2.5:0.5b')
+      })
+
+      it('VPN: no ollama service and no .ollama volume', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
+        expect(result).not.toContain(`ollama-${agentName}`)
+        expect(result).not.toContain('ollama/ollama')
+        expect(result).not.toContain('.ollama')
+        expect(result).not.toContain('qwen2.5:0.5b')
+      })
+    })
+
+    describe('flag ON (non-VPN)', () => {
+      const opts = { bundledOllama: true }
+
+      it('adds an ollama-{name} sidecar with the default image', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain(`ollama-${agentName}:`)
+        expect(result).toContain(`container_name: ollama-${agentName}`)
+        expect(result).toContain('image: ollama/ollama')
+        expect(result).toContain('restart: unless-stopped')
+      })
+
+      it('uses a custom ollama image when provided', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, {
+          bundledOllama: true,
+          ollamaImage: 'my-registry/ollama:custom',
+        })
+        expect(result).toContain('image: my-registry/ollama:custom')
+        expect(result).not.toContain('image: ollama/ollama')
+      })
+
+      it('mounts a model-cache volume under the agent data dir', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain(`${dataDir}/.ollama:/root/.ollama`)
+      })
+
+      it('pulls and serves qwen2.5:0.5b on boot', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain('qwen2.5:0.5b')
+        expect(result).toContain('ollama serve')
+        expect(result).toContain('ollama pull qwen2.5:0.5b')
+      })
+
+      it('has a healthcheck hitting the ollama API', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain('healthcheck:')
+        expect(result).toContain('http://localhost:11434/api/tags')
+      })
+
+      it('hermes depends_on the ollama sidecar being healthy', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        const hermesBlock = result.split(`hermes-${agentName}:`).pop()!
+        expect(hermesBlock).toContain(`ollama-${agentName}:`)
+        expect(hermesBlock).toContain('condition: service_healthy')
+      })
+
+      it('stays CPU-only — no GPU device reservations', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).not.toContain('devices:')
+        expect(result).not.toContain('driver: nvidia')
+        expect(result).not.toContain('capabilities: [gpu]')
+      })
+    })
+
+    describe('flag ON (VPN)', () => {
+      const opts = { vpnEnabled: true, bundledOllama: true }
+
+      it('adds an ollama-{name} sidecar on the wireguard service network', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain(`ollama-${agentName}:`)
+        expect(result).toContain('image: ollama/ollama')
+        // sidecars in VPN mode share the wireguard network namespace
+        const matches = result.match(/network_mode: "service:wireguard"/g)
+        // wireguard hosts: camofox, hermes, AND ollama → 3
+        expect(matches).toHaveLength(3)
+      })
+
+      it('pulls and serves qwen2.5:0.5b on boot in VPN mode', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain('qwen2.5:0.5b')
+        expect(result).toContain('ollama serve')
+      })
+
+      it('mounts the model-cache volume in VPN mode', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        expect(result).toContain(`${dataDir}/.ollama:/root/.ollama`)
+      })
+
+      it('hermes depends_on ollama being healthy in VPN mode', () => {
+        const result = generateStandaloneCompose(agentName, port, dataDir, opts)
+        const hermesBlock = result.split(`hermes-${agentName}:`).pop()!
+        expect(hermesBlock).toContain(`ollama-${agentName}:`)
+        expect(hermesBlock).toContain('condition: service_healthy')
+      })
+    })
+  })
+
   describe('regression: non-VPN output matches original format', () => {
     it('contains all expected sections in order', () => {
       const result = generateStandaloneCompose('myagent', 8652, '/data/myagent')

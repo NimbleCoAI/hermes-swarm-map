@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StepIndicator } from '@/components/wizard/step-indicator'
+import { SurfaceConnectDialog } from '@/components/surfaces/surface-connect-dialog'
+import type { SignalCapturedConfig, CapturedConfig } from '@/hooks/useSurfaceRegister'
+import type { Key } from '@/lib/types'
 
 const STEP_LABELS = ['Identity', 'Model', 'Platforms', 'Keys', 'Deploy']
 const TOTAL_STEPS = 5
@@ -18,6 +21,7 @@ type WizardState = {
   provider: string
   primaryModel: string
   fallbackModel: string
+  bundledOllama: boolean
   // Step 3
   mattermostEnabled: boolean
   mattermostUrl: string
@@ -31,6 +35,9 @@ type WizardState = {
   browserEnabled: boolean
   // Step 4
   llmKey: string
+  useExistingKey: boolean
+  existingKeyId: string
+  saveKeyToRegistry: boolean
   githubToken: string
   braveKey: string
 }
@@ -42,6 +49,7 @@ const INITIAL_STATE: WizardState = {
   provider: 'anthropic',
   primaryModel: '',
   fallbackModel: '',
+  bundledOllama: false,
   mattermostEnabled: false,
   mattermostUrl: '',
   mattermostToken: '',
@@ -53,6 +61,9 @@ const INITIAL_STATE: WizardState = {
   githubMcpEnabled: false,
   browserEnabled: false,
   llmKey: '',
+  useExistingKey: false,
+  existingKeyId: '',
+  saveKeyToRegistry: false,
   githubToken: '',
   braveKey: '',
 }
@@ -74,7 +85,7 @@ const PROVIDER_OPTIONS = [
 const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-6'],
   openrouter: ['anthropic/claude-sonnet-4-6', 'anthropic/claude-opus-4-6', 'openai/gpt-4o'],
-  ollama: ['qwen3:8b', 'qwen3:32b', 'llama3.3:70b'],
+  ollama: ['qwen2.5:0.5b', 'qwen3:8b', 'qwen3:32b', 'llama3.3:70b'],
   google: ['gemini-2.5-flash', 'gemini-2.5-pro'],
   bedrock: ['anthropic.claude-sonnet-4-6-v1', 'anthropic.claude-haiku-4-5-v1'],
 }
@@ -110,6 +121,9 @@ export default function WizardPage() {
   const [deployResult, setDeployResult] = useState<{ ok: boolean; error?: string; port?: number; healthy?: boolean } | null>(null)
   const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null)
   const [dockerChecking, setDockerChecking] = useState(true)
+  const [availableKeys, setAvailableKeys] = useState<Key[]>([])
+  const [signalDialogOpen, setSignalDialogOpen] = useState(false)
+  const [signalCaptured, setSignalCaptured] = useState<SignalCapturedConfig | null>(null)
 
   async function checkDocker() {
     setDockerChecking(true)
@@ -126,7 +140,14 @@ export default function WizardPage() {
 
   useEffect(() => {
     checkDocker()
+    fetch('/api/keys')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((keys: Key[]) => setAvailableKeys(Array.isArray(keys) ? keys : []))
+      .catch(() => setAvailableKeys([]))
   }, [])
+
+  // Keys in the registry matching the selected provider — offered for reuse.
+  const matchingKeys = availableKeys.filter((k) => k.provider === state.provider)
 
   function update(partial: Partial<WizardState>) {
     setState((prev) => ({ ...prev, ...partial }))
@@ -156,6 +177,7 @@ export default function WizardPage() {
           provider: state.provider,
           primaryModel: state.primaryModel,
           fallbackModel: state.fallbackModel || undefined,
+          bundledOllama: state.provider === 'ollama' ? state.bundledOllama : false,
           persona: state.persona,
           tier: state.tier,
           mattermostEnabled: state.mattermostEnabled,
@@ -164,10 +186,15 @@ export default function WizardPage() {
           telegramEnabled: state.telegramEnabled,
           telegramToken: state.telegramToken,
           signalEnabled: state.signalEnabled,
-          signalPhone: state.signalPhone,
+          signalPhone: signalCaptured?.phone || state.signalPhone,
           googleEnabled: state.googleEnabled,
           githubMcpEnabled: state.githubMcpEnabled,
-          llmKey: state.llmKey || undefined,
+          // Key: reuse an existing registry key by id, or pass a new key (and
+          // optionally persist it for reuse). The pasted value never includes a
+          // resolved existing key — that resolution happens server-side.
+          existingKeyId: state.useExistingKey ? state.existingKeyId || undefined : undefined,
+          llmKey: state.useExistingKey ? undefined : (state.llmKey || undefined),
+          saveKeyToRegistry: !state.useExistingKey && state.saveKeyToRegistry,
           githubToken: state.githubToken || undefined,
           braveKey: state.braveKey || undefined,
         }),
@@ -176,6 +203,19 @@ export default function WizardPage() {
       if (data.ok) {
         // Mark onboarded
         await fetch('/api/setup/complete', { method: 'POST' })
+        // Deferred surface connect: Signal was registered in the wizard (pending
+        // mode) before the harness existed — bind it now that we have an id.
+        if (signalCaptured && data.harnessId) {
+          try {
+            await fetch(`/api/harnesses/${data.harnessId}/surfaces/connect`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ platform: 'signal', config: signalCaptured }),
+            })
+          } catch {
+            // Agent is up; connect can be retried from the Surfaces tab.
+          }
+        }
       }
       setDeployResult(data)
     } catch (err) {
@@ -312,6 +352,44 @@ export default function WizardPage() {
               </select>
             </div>
 
+            {state.provider === 'ollama' && (
+              <div>
+                <FieldLabel>Ollama runtime</FieldLabel>
+                <div className="space-y-2">
+                  <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${!state.bundledOllama ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-muted/30'}`}>
+                    <input
+                      type="radio"
+                      name="ollamaMode"
+                      checked={!state.bundledOllama}
+                      onChange={() => update({ bundledOllama: false })}
+                      className="accent-[var(--accent)] mt-0.5"
+                    />
+                    <div>
+                      <div className="font-medium text-sm">Host GPU (recommended)</div>
+                      <div className="text-xs text-muted-foreground">
+                        Uses Ollama running on this machine (<code className="text-xs">host.docker.internal:11434</code>) — gets full GPU/Metal acceleration. Make sure Ollama is running and the model is pulled.
+                      </div>
+                    </div>
+                  </label>
+                  <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${state.bundledOllama ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-muted/30'}`}>
+                    <input
+                      type="radio"
+                      name="ollamaMode"
+                      checked={state.bundledOllama}
+                      onChange={() => update({ bundledOllama: true, primaryModel: state.primaryModel || 'qwen2.5:0.5b' })}
+                      className="accent-[var(--accent)] mt-0.5"
+                    />
+                    <div>
+                      <div className="font-medium text-sm">Bundled tiny model (CPU, zero setup)</div>
+                      <div className="text-xs text-muted-foreground">
+                        Ships a small <code className="text-xs">qwen2.5:0.5b</code> model in a sidecar container, CPU-only. Works out of the box with no host setup — great for a first run.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+
             <div>
               <FieldLabel>Primary Model</FieldLabel>
               <Input
@@ -436,17 +514,40 @@ export default function WizardPage() {
 
               {state.signalEnabled && (
                 <div className="pl-7 space-y-2">
-                  <div>
-                    <FieldLabel>Phone Number (E.164)</FieldLabel>
-                    <Input
-                      value={state.signalPhone}
-                      onChange={(e) => update({ signalPhone: e.target.value })}
-                      placeholder="+15551234567"
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    The number must be registered with the signal-cli daemon. Use the Signal setup in the harness Surfaces tab to register a new number.
-                  </p>
+                  {signalCaptured ? (
+                    <div className="rounded-md border border-green-500/30 bg-green-500/10 p-3 text-sm">
+                      <p className="font-medium text-green-700 dark:text-green-400">
+                        Signal registered: <span className="font-mono">{signalCaptured.phone}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Will be connected to this agent automatically after deploy.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => { setSignalCaptured(null); setSignalDialogOpen(true) }}
+                        className="text-xs underline mt-1 hover:text-foreground"
+                      >
+                        Redo registration
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <Button variant="outline" type="button" onClick={() => setSignalDialogOpen(true)}>
+                        Register / connect a Signal number
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        Runs the same registration as the harness Surfaces tab (register → verify → profile). Or paste an already-registered number:
+                      </p>
+                      <div>
+                        <FieldLabel>Phone Number (E.164)</FieldLabel>
+                        <Input
+                          value={state.signalPhone}
+                          onChange={(e) => update({ signalPhone: e.target.value })}
+                          placeholder="+15551234567"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -532,23 +633,76 @@ export default function WizardPage() {
           <Section>
             {/* Required key */}
             {providerKeyVar ? (
-              <div>
-                <FieldLabel>{providerKeyVar} (required for {state.provider})</FieldLabel>
-                <Input
-                  type="password"
-                  value={state.llmKey}
-                  onChange={(e) => update({ llmKey: e.target.value })}
-                  placeholder="Paste your API key"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Stored in <span className="font-mono">~/.hermes-{slug}/.env</span> — never leaves your machine.
-                </p>
+              <div className="space-y-3">
+                {matchingKeys.length > 0 && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => update({ useExistingKey: true, existingKeyId: state.existingKeyId || matchingKeys[0].id })}
+                      className={`flex-1 text-sm px-3 py-2 rounded-md border transition-colors ${state.useExistingKey ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-foreground' : 'border-[var(--border)] text-muted-foreground hover:bg-muted/30'}`}
+                    >
+                      Use existing key
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => update({ useExistingKey: false })}
+                      className={`flex-1 text-sm px-3 py-2 rounded-md border transition-colors ${!state.useExistingKey ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-foreground' : 'border-[var(--border)] text-muted-foreground hover:bg-muted/30'}`}
+                    >
+                      Enter new key
+                    </button>
+                  </div>
+                )}
+
+                {state.useExistingKey && matchingKeys.length > 0 ? (
+                  <div>
+                    <FieldLabel>Existing {state.provider} key</FieldLabel>
+                    <select
+                      value={state.existingKeyId}
+                      onChange={(e) => update({ existingKeyId: e.target.value })}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <option value="">Select a key…</option>
+                      {matchingKeys.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {(k.name || k.provider)} · {k.maskedValue} · {k.health}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Reuses a key already configured on this machine. The value is applied server-side — never shown here or sent to the browser.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <FieldLabel>{providerKeyVar} (required for {state.provider})</FieldLabel>
+                    <Input
+                      type="password"
+                      value={state.llmKey}
+                      onChange={(e) => update({ llmKey: e.target.value })}
+                      placeholder="Paste your API key"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Stored in <span className="font-mono">~/.hermes-{slug}/.env</span> — never leaves your machine.
+                    </p>
+                    <label className="flex items-center gap-2 mt-2 text-xs text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={state.saveKeyToRegistry}
+                        onChange={(e) => update({ saveKeyToRegistry: e.target.checked })}
+                        className="accent-[var(--accent)]"
+                      />
+                      Save this key for reuse in future agents
+                    </label>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded-lg bg-muted/30 border border-[var(--border)] p-4">
                 <p className="text-sm font-medium">Ollama runs locally</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  No API key needed. Make sure Ollama is running and the model is pulled.
+                  {state.bundledOllama
+                    ? 'Bundled mode — a tiny qwen2.5:0.5b model ships in a sidecar container. No API key or host setup needed.'
+                    : 'Host GPU mode — no API key needed. Make sure Ollama is running on this machine and the model is pulled.'}
                 </p>
               </div>
             )}
@@ -728,6 +882,22 @@ export default function WizardPage() {
           )}
         </div>
       )}
+
+      {/* Signal registration (shared with the harness Surfaces tab) — pending mode:
+          captures config now, connect happens after the harness is deployed. */}
+      <SurfaceConnectDialog
+        platform="signal"
+        target={{ kind: 'pending' }}
+        open={signalDialogOpen}
+        onClose={() => setSignalDialogOpen(false)}
+        harnessName={state.name || slug}
+        onCaptured={(config: CapturedConfig) => {
+          const c = config as SignalCapturedConfig
+          setSignalCaptured(c)
+          update({ signalEnabled: true, signalPhone: c.phone })
+          setSignalDialogOpen(false)
+        }}
+      />
     </div>
   )
 }
