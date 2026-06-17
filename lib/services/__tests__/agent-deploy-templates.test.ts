@@ -67,4 +67,15 @@ describe('generateAgentCompose', () => {
     const c = generateAgentCompose(args.slug, args.port, args.agentDataDir, args.imageOrBuild, { googleMcpDir: '/opt/gmcp' })
     expect(c).toContain('/opt/gmcp:/opt/google-multiplayer-mcp:ro')
   })
+
+  it('mounts /run as exec so s6-overlay can boot under the read-only rootfs', () => {
+    const c = generateAgentCompose(args.slug, args.port, args.agentDataDir, args.imageOrBuild)
+    // We harden the container with a read-only rootfs...
+    expect(c).toContain('read_only: true')
+    // ...but s6-overlay execs /run/s6/basedir/bin/init. A bare `tmpfs: - /run`
+    // is mounted noexec, so init fails with EACCES (exit 126) and the agent
+    // restart-loops. /run must therefore be mounted exec.
+    expect(c).toMatch(/-\s*\/run:exec\b/)
+    expect(c).not.toMatch(/^\s*-\s*\/run\s*$/m)
+  })
 })

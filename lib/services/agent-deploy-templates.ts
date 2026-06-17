@@ -210,7 +210,9 @@ ${googleMcpVolumes}    command: gateway
     tmpfs:
       - /tmp
       - /var/tmp
-      - /run
+      # s6-overlay execs its init from /run; a bare tmpfs is mounted noexec,
+      # which makes the agent restart-loop at boot (exit 126). Mount it exec.
+      - /run:exec
     deploy:
       resources:
         limits:
