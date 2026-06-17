@@ -124,6 +124,7 @@ export default function WizardPage() {
   const [availableKeys, setAvailableKeys] = useState<Key[]>([])
   const [signalDialogOpen, setSignalDialogOpen] = useState(false)
   const [signalCaptured, setSignalCaptured] = useState<SignalCapturedConfig | null>(null)
+  const [signalConnectFailed, setSignalConnectFailed] = useState(false)
 
   async function checkDocker() {
     setDockerChecking(true)
@@ -207,13 +208,15 @@ export default function WizardPage() {
         // mode) before the harness existed — bind it now that we have an id.
         if (signalCaptured && data.harnessId) {
           try {
-            await fetch(`/api/harnesses/${data.harnessId}/surfaces/connect`, {
+            const connectRes = await fetch(`/api/harnesses/${data.harnessId}/surfaces/connect`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ platform: 'signal', config: signalCaptured }),
             })
+            if (!connectRes.ok) setSignalConnectFailed(true)
           } catch {
             // Agent is up; connect can be retried from the Surfaces tab.
+            setSignalConnectFailed(true)
           }
         }
       }
@@ -832,6 +835,13 @@ export default function WizardPage() {
                 {deployResult.healthy ? 'Health check passed.' : 'Health check timed out — agent may still be starting.'}
               </p>
             </div>
+            {signalConnectFailed && (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3">
+                <p className="text-sm text-amber-700 dark:text-amber-400">
+                  Signal was registered, but binding it to the agent didn&apos;t complete. Finish connecting it from the agent&apos;s <span className="font-medium">Surfaces</span> tab.
+                </p>
+              </div>
+            )}
             <Button className="w-full" onClick={() => router.push('/')}>
               Go to Dashboard
             </Button>

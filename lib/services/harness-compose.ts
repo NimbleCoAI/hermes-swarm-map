@@ -27,6 +27,10 @@ export interface ComposeOptions {
    * unaffected. When enabled, an `ollama-<name>` service is emitted that pulls
    * and serves `qwen2.5:0.5b` on boot, and the hermes service waits for it to be
    * healthy. CPU-only (no GPU device reservations).
+   *
+   * NOTE: reachability differs by variant. Plain: http://ollama-<name>:11434.
+   * VPN: http://localhost:11434 (shares the wireguard namespace). Whatever writes
+   * OLLAMA_BASE_URL must match the variant.
    */
   bundledOllama?: boolean
   /** Image for the bundled ollama sidecar. Defaults to 'ollama/ollama'. */
@@ -169,6 +173,11 @@ function generateVpnCompose(
 
   // Sidecars share the wireguard network namespace (same as camofox), so the
   // hermes service reaches ollama on localhost:11434 inside that namespace.
+  // CAVEAT for callers: in VPN mode the bundled ollama is reachable at
+  // http://localhost:11434 — NOT http://ollama-<name>:11434. Any env-writer
+  // pairing VPN + bundledOllama must set OLLAMA_BASE_URL accordingly. The plain
+  // variant (and the create-new deploy path) use the service-name URL. There is
+  // currently no VPN+bundled env-writer, so this is a guard against future drift.
   const ollamaNetworkBlock = `    network_mode: "service:wireguard"\n    depends_on:\n      - wireguard\n`
   const ollamaBlock = bundledOllama
     ? '\n' + ollamaSidecar(agentName, agentDataDir, ollamaImage, ollamaNetworkBlock)
