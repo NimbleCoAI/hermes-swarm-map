@@ -46,7 +46,9 @@ describe('HarnessService lifecycle compose fallback', () => {
   it('restart falls back to the conventional compose path', () => {
     service.restart('h_gamma', 'quick')
     const expected = path.join(tmpDir, 'compose', 'gamma', 'docker-compose.yml')
-    expect(docker.restart).toHaveBeenCalledWith(expected, 'hermes-gamma', 'quick')
+    // docker.restart(composeFile, service, mode, projectName?, buildSource?) —
+    // a 'quick' restart resolves neither a project name nor a build source.
+    expect(docker.restart).toHaveBeenCalledWith(expected, 'hermes-gamma', 'quick', undefined, undefined)
   })
 
   it('start falls back to the conventional compose path', () => {
