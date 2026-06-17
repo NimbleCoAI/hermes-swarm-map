@@ -12,11 +12,25 @@ import type { Key } from '@/lib/types'
 const STEP_LABELS = ['Identity', 'Model', 'Platforms', 'Keys', 'Deploy']
 const TOTAL_STEPS = 5
 
+type UseCaseTemplateInfo = {
+  id: string
+  name: string
+  description: string
+  recommends?: {
+    provider?: string
+    primaryModel?: string
+    fallbackModel?: string
+    platforms?: string[]
+    browser?: boolean
+  }
+}
+
 type WizardState = {
   // Step 1
   name: string
   persona: string
   tier: string
+  template: string
   // Step 2
   provider: string
   primaryModel: string
@@ -46,6 +60,7 @@ const INITIAL_STATE: WizardState = {
   name: '',
   persona: '',
   tier: 'individual',
+  template: '',
   provider: 'anthropic',
   primaryModel: '',
   fallbackModel: '',
@@ -122,6 +137,7 @@ export default function WizardPage() {
   const [dockerAvailable, setDockerAvailable] = useState<boolean | null>(null)
   const [dockerChecking, setDockerChecking] = useState(true)
   const [availableKeys, setAvailableKeys] = useState<Key[]>([])
+  const [templates, setTemplates] = useState<UseCaseTemplateInfo[]>([])
   const [signalDialogOpen, setSignalDialogOpen] = useState(false)
   const [signalCaptured, setSignalCaptured] = useState<SignalCapturedConfig | null>(null)
   const [signalConnectFailed, setSignalConnectFailed] = useState(false)
@@ -145,7 +161,30 @@ export default function WizardPage() {
       .then((res) => (res.ok ? res.json() : []))
       .then((keys: Key[]) => setAvailableKeys(Array.isArray(keys) ? keys : []))
       .catch(() => setAvailableKeys([]))
+    fetch('/api/usecase-templates')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((t: UseCaseTemplateInfo[]) => setTemplates(Array.isArray(t) ? t : []))
+      .catch(() => setTemplates([]))
   }, [])
+
+  // Select a use-case package: records the id and prefills the recommended
+  // model/provider/browser so the following steps start from the template's
+  // defaults (the user can still override). Empty id = "Base (blank)".
+  function selectTemplate(id: string) {
+    const t = templates.find((x) => x.id === id)
+    if (!t) {
+      update({ template: '' })
+      return
+    }
+    const r = t.recommends ?? {}
+    update({
+      template: id,
+      ...(r.provider ? { provider: r.provider } : {}),
+      ...(r.primaryModel ? { primaryModel: r.primaryModel } : {}),
+      ...(r.fallbackModel ? { fallbackModel: r.fallbackModel } : {}),
+      ...(r.browser !== undefined ? { browserEnabled: r.browser } : {}),
+    })
+  }
 
   // Keys in the registry matching the selected provider — offered for reuse.
   const matchingKeys = availableKeys.filter((k) => k.provider === state.provider)
@@ -178,6 +217,7 @@ export default function WizardPage() {
           provider: state.provider,
           primaryModel: state.primaryModel,
           fallbackModel: state.fallbackModel || undefined,
+          template: state.template || undefined,
           bundledOllama: state.provider === 'ollama' ? state.bundledOllama : false,
           persona: state.persona,
           tier: state.tier,
@@ -336,6 +376,54 @@ export default function WizardPage() {
                 ))}
               </div>
             </div>
+
+            {templates.length > 0 && (
+              <div>
+                <FieldLabel>Use-case package (optional)</FieldLabel>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Start from an opinionated public package — it pre-fills the recommended model and installs its skills/tools (each scanned before install). You can still change everything in the next steps.
+                </p>
+                <div className="space-y-2">
+                  <label
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      !state.template ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-muted/30'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="template"
+                      checked={!state.template}
+                      onChange={() => selectTemplate('')}
+                      className="accent-[var(--accent)] mt-0.5"
+                    />
+                    <div>
+                      <div className="font-medium text-sm">Base (blank agent)</div>
+                      <div className="text-xs text-muted-foreground">A general-purpose agent with the default baseline plugins.</div>
+                    </div>
+                  </label>
+                  {templates.map((t) => (
+                    <label
+                      key={t.id}
+                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        state.template === t.id ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-muted/30'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="template"
+                        checked={state.template === t.id}
+                        onChange={() => selectTemplate(t.id)}
+                        className="accent-[var(--accent)] mt-0.5"
+                      />
+                      <div>
+                        <div className="font-medium text-sm">{t.name}</div>
+                        <div className="text-xs text-muted-foreground">{t.description}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </Section>
         )}
 
