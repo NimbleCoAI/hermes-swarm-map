@@ -35,6 +35,12 @@ const GIT_NAME_RE = /^[A-Za-z0-9._-]+$/ // <org> and <repo>
 const GIT_REF_RE = /^[A-Za-z0-9._/-]+$/ // <tag> (tags may contain '/')
 const GIT_SUBDIR_RE = /^[A-Za-z0-9._/-]+$/
 
+// Mutable refs that can silently drift to malicious code after review. We only
+// permit immutable refs (version tags / commit SHAs). git-fetch additionally
+// runs an authoritative `ls-remote --heads` branch check (this is just the
+// fast-fail front door — audit FIX 4a).
+const MUTABLE_REFS = new Set(['head', 'main', 'master', 'develop'])
+
 /**
  * Parse a `git:<org>/<repo>#<tag>[:<subdir>]` artifact source.
  *
@@ -43,8 +49,12 @@ const GIT_SUBDIR_RE = /^[A-Za-z0-9._/-]+$/
  * - returns `null` for non-git sources (`local`, `upstream`, …) so the caller
  *   routes them through the existing local path;
  * - throws (loud failure) on any `git:`-prefixed source that is **unpinned**
- *   (pinning to a tag is mandatory — an unpinned ref can silently drift to
- *   malicious code), malformed, or contains unsafe characters / path traversal.
+ *   (pinning to an immutable tag/commit is mandatory — an unpinned or mutable
+ *   ref like a branch/HEAD can silently drift to malicious code), points at a
+ *   mutable branch ref (HEAD/main/master/develop), is malformed, or contains
+ *   unsafe characters / path traversal. The mutable-ref check here is the
+ *   fast-fail front door; git-fetch additionally runs an authoritative
+ *   `ls-remote --heads` branch check that catches arbitrary branch names.
  */
 export function parseGitSource(source: string): GitSource | null {
   if (!source.startsWith('git:')) return null
@@ -77,6 +87,13 @@ export function parseGitSource(source: string): GitSource | null {
   }
   if (!GIT_REF_RE.test(refPart)) {
     throw new Error(`invalid ref in git source "${source}" (unsafe characters)`)
+  }
+  // FIX 4a (audit): reject well-known mutable refs; only immutable tags/commits
+  // are allowed (a branch/HEAD can drift to malicious code after review).
+  if (MUTABLE_REFS.has(refPart.toLowerCase())) {
+    throw new Error(
+      `mutable git ref "${refPart}" in "${source}": pin to an immutable tag or commit SHA, not a branch/HEAD`,
+    )
   }
   if (subdir !== undefined) {
     if (!subdir || !GIT_SUBDIR_RE.test(subdir) || subdir.split('/').includes('..')) {

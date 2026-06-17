@@ -72,16 +72,45 @@ export function fetchGitArtifact(src: GitSource, opts: FetchOpts): string {
   }
 
   try {
-    execFileSync('git', ['clone', '-q', '--depth', '1', '--branch', src.ref, '--', url, dest], {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      env,
-    })
-  } catch (e) {
-    const err = e as { stderr?: Buffer; message?: string }
-    const raw = (err.stderr?.toString() || err.message || 'clone failed').trim()
-    throw new Error(
-      `git clone failed for ${src.org}/${src.repo}#${src.ref}: ${redactSecrets(raw, opts.token)}`,
-    )
+    // FIX 4b (audit): authoritative mutable-ref check BEFORE cloning. parseGitSource
+    // only fast-fails a hardcoded set of branch NAMES; an attacker can name a branch
+    // anything. `ls-remote --heads <url> <ref>` lists ONLY branch refs matching the
+    // ref — non-empty output means the ref is a (mutable) branch, so we refuse. No
+    // shell, argv array, `--` guard, same GIT_ASKPASS token mechanism as the clone.
+    let heads: string
+    try {
+      heads = execFileSync('git', ['ls-remote', '--heads', '--', url, src.ref], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env,
+      })
+        .toString()
+        .trim()
+    } catch (e) {
+      const err = e as { stderr?: Buffer; message?: string }
+      const raw = (err.stderr?.toString() || err.message || 'ls-remote failed').trim()
+      throw new Error(
+        `git ls-remote failed for ${src.org}/${src.repo}#${src.ref}: ${redactSecrets(raw, opts.token)}`,
+      )
+    }
+    if (heads.length > 0) {
+      // Refused before any clone touches disk. Redacted (no secret-shaped data).
+      throw new Error(
+        `git ref '${src.ref}' resolves to a mutable branch; pin to a tag or commit SHA`,
+      )
+    }
+
+    try {
+      execFileSync('git', ['clone', '-q', '--depth', '1', '--branch', src.ref, '--', url, dest], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        env,
+      })
+    } catch (e) {
+      const err = e as { stderr?: Buffer; message?: string }
+      const raw = (err.stderr?.toString() || err.message || 'clone failed').trim()
+      throw new Error(
+        `git clone failed for ${src.org}/${src.repo}#${src.ref}: ${redactSecrets(raw, opts.token)}`,
+      )
+    }
   } finally {
     if (askpass) {
       try {

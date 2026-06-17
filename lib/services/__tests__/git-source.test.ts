@@ -53,4 +53,28 @@ describe('parseGitSource', () => {
   it('rejects path traversal in the subdir', () => {
     expect(() => parseGitSource('git:org/repo#v1:../../etc')).toThrow(/traversal|invalid|unsafe/i)
   })
+
+  // FIX 4a (audit): a branch/HEAD ref is MUTABLE — it can silently drift to
+  // malicious code after review. Only immutable tags/commits are allowed.
+  it('rejects mutable refs (HEAD / main / master / develop, case-insensitive)', () => {
+    expect(() => parseGitSource('git:org/repo#main')).toThrow(/mutable|branch|tag|commit/i)
+    expect(() => parseGitSource('git:org/repo#HEAD')).toThrow(/mutable|branch|tag|commit/i)
+    expect(() => parseGitSource('git:org/repo#master')).toThrow(/mutable|branch|tag|commit/i)
+    expect(() => parseGitSource('git:org/repo#develop')).toThrow(/mutable|branch|tag|commit/i)
+    expect(() => parseGitSource('git:org/repo#Main')).toThrow(/mutable|branch|tag|commit/i)
+  })
+
+  it('still allows version tags and hex commit SHAs', () => {
+    expect(parseGitSource('git:org/repo#v1.2.3')).toEqual({ org: 'org', repo: 'repo', ref: 'v1.2.3' })
+    const sha = 'a'.repeat(40)
+    expect(parseGitSource(`git:org/repo#${sha}`)).toEqual({ org: 'org', repo: 'repo', ref: sha })
+  })
+
+  it('still allows hierarchical tags containing "/"', () => {
+    expect(parseGitSource('git:org/repo#release/v1.2.3')).toEqual({
+      org: 'org',
+      repo: 'repo',
+      ref: 'release/v1.2.3',
+    })
+  })
 })
