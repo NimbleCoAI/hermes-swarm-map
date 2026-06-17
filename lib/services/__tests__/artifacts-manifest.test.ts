@@ -101,8 +101,10 @@ describe('installArtifacts (local source)', () => {
   })
 
   it('throws on an unsupported source scheme (loud failure)', async () => {
+    // 'local' and 'git:<org>/<repo>#<tag>' are supported; anything else is a
+    // loud failure rather than a silently capability-less agent.
     const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-'))
-    const manifest = { plugins: [{ name: 'x', source: 'git:foo/bar#v1' }], skills: [], hooks: [] }
+    const manifest = { plugins: [{ name: 'x', source: 'svn://foo/bar' }], skills: [], hooks: [] }
     await expect(installArtifacts(agentDir, manifest, tmp))
       .rejects.toThrow(/unsupported artifact source/i)
     fs.rmSync(agentDir, { recursive: true, force: true })

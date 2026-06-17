@@ -2,7 +2,9 @@
 
 **Date:** 2026-06-03
 **Author:** Juniper (with Claude)
-**Status:** Design — pending implementation plan
+**Status:** Phase 1 merged (manifest loader). Phase 2 `git:` fetch + install-time
+trust gate implemented 2026-06-09 (branch `dev/juniper/artifact-git-source-trust-gate`);
+see the implementation-status note under Phase 2.
 
 ## Problem & Driver
 
@@ -129,6 +131,33 @@ reflect reality. Update behavior-pinning tests.
   `GITHUB_TOKEN`), a resolved-artifact cache, and loud failure on fetch error.
 - Every step is a revertable PR.
 
+**Implementation status — 2026-06-09 (`dev/juniper/artifact-git-source-trust-gate`):**
+the `git:` fetch is **built**, and Phase 2 gained a **trust gate** that was not in
+the original design — the security boundary that makes third-party sourcing safe:
+
+- **`git:<org>/<repo>#<tag>[:<subdir>]` fetch** — `parseGitSource` (pinning
+  **mandatory**; charset + path-traversal guards because the ref feeds a git
+  command) → `fetchGitArtifact` (shallow clone at the pinned tag, `--` arg guard,
+  subdir-escape check) → wired into `installArtifacts`. The build-time token is
+  read by `installBaselineTemplates` from the **HSM-server** env
+  (`ARTIFACT_GIT_TOKEN`, fallback `GITHUB_TOKEN`) — deliberately distinct from the
+  per-agent runtime `GITHUB_TOKEN`; the agent never sees it.
+- **Install-time trust gate (NEW vs the original design).** A fetched artifact is
+  scanned for prompt-injection / promptware **before** it is copied into the agent
+  (`gateArtifactDir` + `threat-patterns.ts`, a faithful TS port of the image-side
+  `tools/threat_patterns.py`, context scope). On any finding the install is
+  **refused** (throws) — a poisoned artifact never lands on disk. The image-side
+  enforcement (per-plugin `declared_capabilities` dispatch gate + fail-closed
+  plugin-skill scan, shipped in `hermes-agent`) is the **runtime backstop**
+  (defense in depth). This HSM-early / image-authoritative split follows
+  `../architecture/image-vs-hsm-boundary.md` (security boundary → image; HSM does
+  the early pre-install screen).
+- **Still open:** switch a real artifact (e.g. `captcha`) to `git:#tag` and verify
+  on a live agent; provision `ARTIFACT_GIT_TOKEN`; make `declared_capabilities`
+  **mandatory** for git-sourced artifacts (needs a YAML parser in HSM — it only
+  *generates* YAML today — or runtime-layer enforcement); optional strict
+  tag-vs-branch check (`git ls-remote --tags`).
+
 ### Phase 3 — Roadmap (out of build scope)
 HSM installer/marketplace UX surfacing the registry; longer term, agents
 discovering/installing their own capabilities from the registry via chat. North
@@ -160,7 +189,10 @@ cleanliness, timed to the MT launch.
      defaulting both to `3000` via a single shared helper so they can't drift.
 4. MCP is a *different* mechanism (config + mount/npx, not a copy) → manifest models
    it as a reference; `google-multiplayer-mcp` stays multiplayer-specific/private.
-5. No git-fetch/auth exists today → build it carefully with build-time creds.
+5. ~~No git-fetch/auth exists today~~ → **BUILT (2026-06-09):** `git:` fetch + a
+   build-time token + an install-time injection-scan trust gate that refuses
+   poisoned artifacts before they touch disk. Remaining: mandatory
+   `declared_capabilities` for git-sourced artifacts + live-agent verification.
 
 ## Testing
 - TDD the loader against `artifacts.json` fixtures: each `source` type
