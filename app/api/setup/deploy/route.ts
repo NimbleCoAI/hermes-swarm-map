@@ -54,6 +54,10 @@ function generateConfigYaml(provider: string, primaryModel: string, fallbackMode
 }
 
 export async function POST(request: Request) {
+  // Tracks a freshly-created agent dir so a failed deploy can remove it along
+  // with its .env (which holds the resolved API key). Only set after we create
+  // the dir, so we never delete a pre-existing agent on failure.
+  let createdAgentDir: string | undefined
   try {
     const body = await request.json()
     const { name, provider, primaryModel, fallbackModel, persona, tier,
@@ -163,6 +167,7 @@ export async function POST(request: Request) {
 
     // Scaffold agent directory
     fs.mkdirSync(agentDataDir, { recursive: true })
+    createdAgentDir = agentDataDir
 
     // Write .env
     const envContent = generateEnvContent({
@@ -296,6 +301,7 @@ If this is your very first startup ever, introduce yourself briefly in your home
     try {
       execSync(`docker compose -f ${composePath} up -d`, { stdio: 'pipe', timeout: 60000 })
     } catch (err) {
+      if (createdAgentDir) fs.rmSync(createdAgentDir, { recursive: true, force: true })
       return NextResponse.json({
         ok: false,
         error: `Failed to start container: ${err instanceof Error ? err.message : String(err)}`,
@@ -338,6 +344,7 @@ If this is your very first startup ever, introduce yourself briefly in your home
       healthy,
     })
   } catch (err) {
+    if (createdAgentDir) fs.rmSync(createdAgentDir, { recursive: true, force: true })
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
