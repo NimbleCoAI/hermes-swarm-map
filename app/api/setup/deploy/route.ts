@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 import { installBaselineTemplates } from '@/lib/services/templates'
 import { defaultEnabledPlugins } from '@/lib/services/artifacts-manifest'
+import { getUseCaseTemplate, installUseCaseTemplate, templateEnabledPlugins } from '@/lib/services/usecase-templates'
 import { generateDefaultConfig, type McpServerConfig } from '@/lib/templates/config-yaml'
 import { generateEnvContent, generateAgentCompose } from '@/lib/services/agent-deploy-templates'
 import fs from 'fs'
@@ -47,8 +48,9 @@ function nextAvailablePort(): number {
   return port
 }
 
-function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string, browserEnabled?: boolean, mcpServers?: Record<string, McpServerConfig>): string {
-  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins: defaultEnabledPlugins() })
+function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string, browserEnabled?: boolean, mcpServers?: Record<string, McpServerConfig>, extraEnabledPlugins: string[] = []): string {
+  const enabledPlugins = Array.from(new Set([...defaultEnabledPlugins(), ...extraEnabledPlugins]))
+  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins })
 }
 
 export async function POST(request: Request) {
@@ -59,6 +61,14 @@ export async function POST(request: Request) {
       telegramEnabled, telegramToken, signalEnabled, signalPhone,
       githubToken, braveKey, existingKeyId, saveKeyToRegistry } = body
     const bundledOllama = body.bundledOllama === true
+
+    // Optional use-case template (e.g. Matilde) — installs gated git artifacts +
+    // seeds its SOUL. Resolved from the server-side registry; unknown id → 400.
+    const templateId: string | undefined = body.template || undefined
+    const useCaseTemplate = templateId ? getUseCaseTemplate(templateId) : undefined
+    if (templateId && !useCaseTemplate) {
+      return NextResponse.json({ ok: false, error: `Unknown use-case template "${templateId}".` }, { status: 400 })
+    }
 
     if (!name || !provider || !primaryModel) {
       return NextResponse.json({ ok: false, error: 'name, provider, and primaryModel are required' }, { status: 400 })
@@ -201,8 +211,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // Write config.yaml
-    const configContent = generateConfigYaml(provider, primaryModel, fallbackModel, body.browserEnabled === true, Object.keys(mcpServers).length > 0 ? mcpServers : undefined)
+    // Write config.yaml (enable any plugins the chosen use-case template ships)
+    const extraEnabledPlugins = useCaseTemplate ? templateEnabledPlugins(useCaseTemplate) : []
+    const configContent = generateConfigYaml(provider, primaryModel, fallbackModel, body.browserEnabled === true, Object.keys(mcpServers).length > 0 ? mcpServers : undefined, extraEnabledPlugins)
     fs.writeFileSync(path.join(agentDataDir, 'config.yaml'), configContent, 'utf-8')
 
     // Write SOUL.md
@@ -266,6 +277,14 @@ If this is your very first startup ever, introduce yourself briefly in your home
 
     // Install baseline plugins and hooks from templates
     await installBaselineTemplates(agentDataDir)
+
+    // Install the chosen use-case template (gated git artifacts + SOUL overlay).
+    // Runs after the default SOUL.md write so a template SOUL takes precedence.
+    // Throws (failing the create before the container starts) if the trust gate
+    // refuses any fetched content — a poisoned template must never deploy.
+    if (useCaseTemplate) {
+      await installUseCaseTemplate(agentDataDir, useCaseTemplate)
+    }
 
     // Generate standalone compose
     const agentComposeDir = path.join(composeBaseDir, slug)

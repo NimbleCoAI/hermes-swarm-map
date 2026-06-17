@@ -30,6 +30,13 @@ vi.mock('os', async (importOriginal) => {
 
 vi.mock('@/lib/services/templates', () => ({ installBaselineTemplates: vi.fn(async () => []) }))
 
+const tmpl = vi.hoisted(() => ({ get: vi.fn(), install: vi.fn(async () => []) }))
+vi.mock('@/lib/services/usecase-templates', () => ({
+  getUseCaseTemplate: tmpl.get,
+  installUseCaseTemplate: tmpl.install,
+  templateEnabledPlugins: () => ['matilde'],
+}))
+
 vi.mock('@/lib/services', () => ({
   services: {
     docker: { isAvailable: () => true, pullImage: () => ({ ok: true }), healthCheck: () => false },
@@ -58,6 +65,9 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     h.add.mockClear()
     h.createOverlay.mockClear()
     h.createOverlay.mockResolvedValue({ id: 'h_matilde' })
+    tmpl.get.mockReset()
+    tmpl.install.mockReset()
+    tmpl.install.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -115,5 +125,40 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     expect(compose).not.toContain('ollama-host:')
     const env = fs.readFileSync(path.join(h.tmpHome, '.hermes-host', '.env'), 'utf-8')
     expect(env).toContain('OLLAMA_BASE_URL=http://host.docker.internal:11434/v1')
+  })
+
+  // Phase 2: use-case template (e.g. Matilde)
+  it('P2: installs the chosen use-case template after baseline', async () => {
+    const template = { id: 'matilde', name: 'Matilde', description: '', artifacts: [], recommends: {} }
+    tmpl.get.mockReturnValue(template)
+    const res = await deploy({
+      name: 'sci', provider: 'anthropic', primaryModel: 'claude-opus-4-6', template: 'matilde', llmKey: 'sk-ant-api-x',
+    })
+    const json = await res.json()
+    expect(json.ok).toBe(true)
+    expect(tmpl.get).toHaveBeenCalledWith('matilde')
+    expect(tmpl.install).toHaveBeenCalledWith(path.join(h.tmpHome, '.hermes-sci'), template)
+    // template's enabled plugin is written into config.yaml plugins.enabled
+    const cfg = fs.readFileSync(path.join(h.tmpHome, '.hermes-sci', 'config.yaml'), 'utf-8')
+    expect(cfg).toContain('matilde')
+  })
+
+  it('P2: a template install failure removes the half-written agent dir (no leftover .env)', async () => {
+    tmpl.get.mockReturnValue({ id: 'matilde', name: 'Matilde', description: '', artifacts: [], recommends: {} })
+    tmpl.install.mockRejectedValue(new Error('Refused: injection scan'))
+    const res = await deploy({
+      name: 'sci', provider: 'anthropic', primaryModel: 'claude-opus-4-6', template: 'matilde', llmKey: 'sk-ant-api-x',
+    })
+    expect(res.status).toBe(500)
+    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-sci'))).toBe(false)
+  })
+
+  it('P2: rejects an unknown template id with 400 and installs nothing', async () => {
+    tmpl.get.mockReturnValue(undefined)
+    const res = await deploy({
+      name: 'x', provider: 'anthropic', primaryModel: 'claude-opus-4-6', template: 'bogus', llmKey: 'sk-ant-api-x',
+    })
+    expect(res.status).toBe(400)
+    expect(tmpl.install).not.toHaveBeenCalled()
   })
 })

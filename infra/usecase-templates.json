@@ -1,0 +1,22 @@
+{
+  "_comment": "Public use-case templates offered by the create-new wizard. Each artifact 'source' is a PINNED git ref fetched + trust-gate-scanned before install (see lib/services/usecase-templates.ts). Private repos require ARTIFACT_GIT_TOKEN on the HSM host.",
+  "templates": [
+    {
+      "id": "matilde",
+      "name": "Matilde — science assistant",
+      "description": "Academic research agent: verifiable citations (Crossref/OpenAlex/DataCite + retraction checks) and OpenNeuro/BIDS dataset discovery. Seeds the Matilde persona + research methodology.",
+      "recommends": {
+        "provider": "anthropic",
+        "primaryModel": "claude-opus-4-6",
+        "fallbackModel": "claude-haiku-4-5",
+        "platforms": [],
+        "browser": false
+      },
+      "artifacts": [
+        { "type": "skills", "name": "matilde-methodology", "source": "git:NimbleCoAI/Matilde#v0.1.0:hermes-skill" },
+        { "type": "plugins", "name": "matilde", "source": "git:NimbleCoAI/Matilde#v0.1.0:matilde_plugin", "enabled": true }
+      ],
+      "soul": { "source": "git:NimbleCoAI/Matilde#v0.1.0:docker", "file": "SOUL.Matilde.md" }
+    }
+  ]
+}
