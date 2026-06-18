@@ -22,6 +22,7 @@ import {
 } from './artifacts-manifest'
 import { fetchGitArtifact } from './git-fetch'
 import { gateArtifactDir } from './artifact-gate'
+import { ensurePluginsEnabled } from './artifacts-sync'
 
 export interface UseCaseArtifact {
   type: ArtifactType
@@ -117,6 +118,45 @@ export async function installUseCaseTemplate(
     await seedSoulFromGit(agentDataDir, template.soul, gitFetch, cacheRoot)
   }
   return results
+}
+
+/**
+ * Re-apply a use-case template to an ALREADY-DEPLOYED agent: re-run the same
+ * trust-gated install into the agent's data dir (updating plugins/skills/SOUL to
+ * the template's currently-pinned tag), then ensure the template's enabled
+ * plugins are listed in the agent's config.yaml so the runtime loads them.
+ *
+ * Security is inherited from installUseCaseTemplate (injection scan at 'strict'
+ * scope) — a poisoned artifact is refused before anything is written.
+ *
+ * Returns what was installed, which plugins were newly enabled, and whether
+ * anything changed (so the caller can decide whether to restart the container).
+ */
+export async function reapplyUseCaseTemplate(
+  agentDataDir: string,
+  template: UseCaseTemplate,
+  configPath: string,
+  opts: InstallTemplateOpts = {},
+): Promise<{ results: InstallResult[]; pluginsEnabled: string[]; changed: boolean }> {
+  const results = await installUseCaseTemplate(agentDataDir, template, opts)
+  const changed = results.some((r) => r.installed)
+
+  // Enable any template plugins that were actually installed, so config.yaml
+  // tells the runtime to load them (mirrors syncArtifacts' enable step).
+  let pluginsEnabled: string[] = []
+  const toEnable = templateEnabledPlugins(template).filter((n) =>
+    results.some((r) => r.name === n && r.installed),
+  )
+  if (toEnable.length > 0) {
+    const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : ''
+    const { content, added } = ensurePluginsEnabled(current, toEnable)
+    if (added.length > 0) {
+      fs.writeFileSync(configPath, content)
+      pluginsEnabled = added
+    }
+  }
+
+  return { results, pluginsEnabled, changed }
 }
 
 /**
