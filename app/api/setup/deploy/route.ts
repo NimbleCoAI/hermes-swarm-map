@@ -297,9 +297,21 @@ If this is your very first startup ever, introduce yourself briefly in your home
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     fs.writeFileSync(composePath, generateAgentCompose(slug, port, agentDataDir, imageOrBuild, { googleMcpDir, githubMcpEnabled, bundledOllama }), 'utf-8')
 
-    // Start the container
+    // Start the container.
+    //
+    // When building from local source (useLocalBuild), `up -d` triggers a cold
+    // image build that takes minutes — far longer than a container start. Run
+    // the build as a separate step with a build-appropriate timeout first, so
+    // the subsequent `up -d` only has to *start* an already-built image and
+    // stays fast. Otherwise a first-time/local-build deploy hits the short
+    // start timeout (spawnSync /bin/sh ETIMEDOUT) while buildkit keeps building
+    // detached behind the failed wizard. (The restart path is already async;
+    // this gives the create path an equivalent build budget.)
     try {
-      execSync(`docker compose -f ${composePath} up -d`, { stdio: 'pipe', timeout: 60000 })
+      if ('build' in imageOrBuild) {
+        execSync(`docker compose -f ${composePath} build`, { stdio: 'pipe', timeout: 1_800_000 }) // 30 min — cold builds
+      }
+      execSync(`docker compose -f ${composePath} up -d`, { stdio: 'pipe', timeout: 120000 })
     } catch (err) {
       if (createdAgentDir) fs.rmSync(createdAgentDir, { recursive: true, force: true })
       return NextResponse.json({

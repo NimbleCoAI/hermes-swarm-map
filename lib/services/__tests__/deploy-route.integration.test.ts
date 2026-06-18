@@ -13,6 +13,8 @@ import os from 'os'
 const h = vi.hoisted(() => ({
   tmpHome: '',
   tmpData: '',
+  hermesDir: '',
+  settings: { useLocalBuild: false, defaultImage: 'ghcr.io/x:latest' } as Record<string, unknown>,
   getDecryptedValue: vi.fn((id: string) => (id === 'k_known' ? 'sk-ant-api-REALVALUE123' : undefined)),
   list: vi.fn(() => [{ id: 'k_known', provider: 'anthropic', assignedTo: [], maskedValue: 'sk-a…123', health: 'good' }]),
   update: vi.fn(),
@@ -40,7 +42,7 @@ vi.mock('@/lib/services/usecase-templates', () => ({
 vi.mock('@/lib/services', () => ({
   services: {
     docker: { isAvailable: () => true, pullImage: () => ({ ok: true }), healthCheck: () => false },
-    config: { getSettings: () => ({ useLocalBuild: false, defaultImage: 'ghcr.io/x:latest', dataDir: h.tmpData }) },
+    config: { getSettings: () => ({ ...h.settings, dataDir: h.tmpData }) },
     keys: { getDecryptedValue: h.getDecryptedValue, list: h.list, update: h.update, add: h.add },
     harness: { createOverlay: h.createOverlay },
   },
@@ -60,6 +62,8 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
   beforeEach(() => {
     h.tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-home-'))
     h.tmpData = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-data-'))
+    h.hermesDir = ''
+    h.settings = { useLocalBuild: false, defaultImage: 'ghcr.io/x:latest' }
     h.getDecryptedValue.mockClear()
     h.update.mockClear()
     h.add.mockClear()
@@ -73,6 +77,46 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
   afterEach(() => {
     fs.rmSync(h.tmpHome, { recursive: true, force: true })
     fs.rmSync(h.tmpData, { recursive: true, force: true })
+    if (h.hermesDir) fs.rmSync(h.hermesDir, { recursive: true, force: true })
+  })
+
+  it('local-build: builds the image as a separate step (build-appropriate timeout) before up -d', async () => {
+    const { execSync } = await import('child_process')
+    vi.mocked(execSync).mockClear()
+
+    // useLocalBuild on, pointing at a source dir that has a Dockerfile.
+    h.hermesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-src-'))
+    fs.writeFileSync(path.join(h.hermesDir, 'Dockerfile'), 'FROM alpine\n')
+    h.settings = { useLocalBuild: true, hermesDir: h.hermesDir }
+
+    const res = await deploy({
+      name: 'lb', provider: 'anthropic', primaryModel: 'claude-opus-4-6', llmKey: 'sk-ant-api-X',
+    })
+    expect((await res.json()).ok).toBe(true)
+
+    const calls = vi.mocked(execSync).mock.calls
+    const cmds = calls.map(c => String(c[0]))
+    const buildIdx = cmds.findIndex(c => /compose -f .* build$/.test(c))
+    const upIdx = cmds.findIndex(c => /compose -f .* up -d/.test(c))
+
+    // A dedicated build step runs, before the container start.
+    expect(buildIdx).toBeGreaterThanOrEqual(0)
+    expect(upIdx).toBeGreaterThan(buildIdx)
+    // The build gets a build-appropriate timeout, not the short start timeout —
+    // this is the fix for cold first-time builds blowing the 60s start window.
+    const buildOpts = calls[buildIdx][1] as { timeout?: number }
+    expect(buildOpts?.timeout ?? 0).toBeGreaterThanOrEqual(600000)
+  })
+
+  it('image mode (no local build) does not run a separate build step', async () => {
+    const { execSync } = await import('child_process')
+    vi.mocked(execSync).mockClear()
+
+    await deploy({ name: 'img', provider: 'anthropic', primaryModel: 'claude-opus-4-6', llmKey: 'sk-ant-api-X' })
+
+    const cmds = vi.mocked(execSync).mock.calls.map(c => String(c[0]))
+    expect(cmds.some(c => /compose -f .* build$/.test(c))).toBe(false)
+    expect(cmds.some(c => /compose -f .* up -d/.test(c))).toBe(true)
   })
 
   it('1A: resolves an existing key server-side, writes it to .env, records assignment', async () => {
