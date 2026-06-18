@@ -560,6 +560,43 @@ export function guessDataDir(serviceName: string, containerName: string): string
   return path.join(home, '.hermes-' + serviceName)
 }
 
+// Read the last N lines of a log file without slurping the whole thing.
+// Reads a bounded window from the END of the file (capped) so a multi-MB
+// gateway.log never lands entirely in memory. Returns '' if the file is
+// missing or empty, so callers can fall back to docker logs.
+export function tailLogFile(filePath: string, lines: number): string {
+  const MAX_BYTES = 2 * 1024 * 1024 // 2MB cap regardless of line count
+  let fd: number | undefined
+  try {
+    const stat = fs.statSync(filePath)
+    if (!stat.isFile() || stat.size === 0) return ''
+
+    const readBytes = Math.min(stat.size, MAX_BYTES)
+    const start = stat.size - readBytes
+    const buf = Buffer.alloc(readBytes)
+    fd = fs.openSync(filePath, 'r')
+    fs.readSync(fd, buf, 0, readBytes, start)
+
+    let text = buf.toString('utf-8')
+    // If we started mid-file, drop the (likely partial) first line.
+    if (start > 0) {
+      const nl = text.indexOf('\n')
+      if (nl !== -1) text = text.slice(nl + 1)
+    }
+    const all = text.split('\n')
+    // A trailing newline produces an empty final element; drop it.
+    if (all.length && all[all.length - 1] === '') all.pop()
+    const tail = lines > 0 ? all.slice(-lines) : all
+    return tail.join('\n')
+  } catch {
+    return ''
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd) } catch {}
+    }
+  }
+}
+
 export class HarnessService {
   private toolsService?: ToolsService
 
