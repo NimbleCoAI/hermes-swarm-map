@@ -62,6 +62,11 @@ export interface InstallTemplateOpts {
   cacheRoot?: string
   /** Inject a fetcher for tests; defaults to the real trust-gated git fetch. */
   gitFetch?: (src: GitSource) => string
+  /** Replace already-present artifacts (re-apply / update). Default false. */
+  overwrite?: boolean
+  /** Seed the template SOUL over the agent's SOUL.md. Default true (create-time);
+   *  re-apply passes false to preserve a deployed agent's identity. */
+  seedSoul?: boolean
 }
 
 export function loadUseCaseTemplates(repoRoot: string = process.cwd()): UseCaseTemplate[] {
@@ -112,9 +117,9 @@ export async function installUseCaseTemplate(
   }
   // 'strict' scope: template skills/plugins are content the agent obeys, so
   // screen the exfil/persistence/config-mod/secret pattern set too (audit: High).
-  const results = await installArtifacts(agentDataDir, manifest, process.cwd(), { gitToken, cacheRoot, gitFetch, scope: 'strict' })
+  const results = await installArtifacts(agentDataDir, manifest, process.cwd(), { gitToken, cacheRoot, gitFetch, scope: 'strict', overwrite: opts.overwrite })
 
-  if (template.soul) {
+  if (template.soul && opts.seedSoul !== false) {
     await seedSoulFromGit(agentDataDir, template.soul, gitFetch, cacheRoot)
   }
   return results
@@ -138,8 +143,11 @@ export async function reapplyUseCaseTemplate(
   configPath: string,
   opts: InstallTemplateOpts = {},
 ): Promise<{ results: InstallResult[]; pluginsEnabled: string[]; changed: boolean }> {
-  const results = await installUseCaseTemplate(agentDataDir, template, opts)
-  const changed = results.some((r) => r.installed)
+  // Re-apply = update artifacts to the template's current tag (overwrite), but
+  // do NOT re-seed SOUL — a deployed agent's identity may be operator-customized.
+  const results = await installUseCaseTemplate(agentDataDir, template, { ...opts, overwrite: true, seedSoul: false })
+  // "changed" = something was actually (re)written, not merely already present.
+  const changed = results.some((r) => r.installed && !r.skipped)
 
   // Enable any template plugins that were actually installed, so config.yaml
   // tells the runtime to load them (mirrors syncArtifacts' enable step).
