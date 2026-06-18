@@ -351,8 +351,11 @@ export class DockerService {
    */
   inspectState(service: string): { running: boolean; status: string; restartCount: number; startedAt: string } | null {
     try {
+      // NOTE: RestartCount is a TOP-LEVEL field in `docker inspect`, not under .State.
+      // `{{.State.RestartCount}}` errors the whole template → execSync throws → this
+      // returns null → /api/harnesses/:id/health reports every agent unhealthy.
       const out = execSync(
-        `docker inspect ${service} --format '{{.State.Running}}|{{.State.Status}}|{{.State.RestartCount}}|{{.State.StartedAt}}'`,
+        `docker inspect ${service} --format '{{.State.Running}}|{{.State.Status}}|{{.RestartCount}}|{{.State.StartedAt}}'`,
         { stdio: 'pipe', timeout: 5000 },
       ).toString().trim()
       const [running, status, rc, startedAt] = out.split('|')

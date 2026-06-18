@@ -54,6 +54,28 @@ describe('DockerService', () => {
     expect(containers).toEqual([])
   })
 
+  it('inspectState reads RestartCount from the top-level field, not .State', () => {
+    // Regression: in `docker inspect`, RestartCount is a TOP-LEVEL field, not under
+    // .State. A `{{.State.RestartCount}}` template errors out ("map has no entry for
+    // key RestartCount"), so inspectState would catch the throw and return null —
+    // making /api/harnesses/:id/health report EVERY agent "unhealthy/running:false".
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes('.State.RestartCount')) {
+        throw new Error('template: :1:45: map has no entry for key "RestartCount"')
+      }
+      return Buffer.from('true|running|3|2026-06-18T23:10:59Z')
+    })
+
+    const state = docker.inspectState('hermes-nimbleco')
+    expect(state).not.toBeNull()
+    expect(state).toEqual({
+      running: true,
+      status: 'running',
+      restartCount: 3,
+      startedAt: '2026-06-18T23:10:59Z',
+    })
+  })
+
   it('restarts a service in quick mode (fire-and-forget via spawn)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'quick')
     expect(mockExecSync).not.toHaveBeenCalled()
