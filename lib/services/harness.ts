@@ -11,8 +11,9 @@ import type { ConfigService } from './config'
 import { getCostToday, getInvocationsToday } from './usage'
 import { markRestarting, isRestarting, clearRestarting } from './restart-tracker'
 import { installBaselineTemplates } from './templates'
-import { defaultEnabledPlugins, loadManifest } from './artifacts-manifest'
+import { defaultEnabledPlugins, loadManifest, type InstallResult } from './artifacts-manifest'
 import { planArtifactSync, applyArtifactSync, ensurePluginsEnabled, SyncResult } from './artifacts-sync'
+import { getUseCaseTemplate, reapplyUseCaseTemplate as reapplyTemplateToDataDir } from './usecase-templates'
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from './harness-compose'
 import { RegistryService, parseImageRef } from './registry'
@@ -1038,6 +1039,41 @@ export class HarnessService {
       ok: true,
       serviceName: harness.serviceName,
       dryRun: false,
+      results,
+      pluginsEnabled,
+      restarted: changed,
+    }
+  }
+
+  /**
+   * Re-apply a use-case template to an already-created agent: update its
+   * plugins/skills/SOUL from the template's currently-pinned git tag (trust-gated),
+   * enable any new plugins in config.yaml, and recreate the container so the
+   * runtime loads them. This is how a DEPLOYED agent gets package updates — the
+   * template id is not persisted at create time, so the caller supplies it.
+   */
+  async reapplyUseCaseTemplate(
+    id: string,
+    templateId: string,
+  ): Promise<{ ok: boolean; serviceName: string; results: InstallResult[]; pluginsEnabled: string[]; restarted: boolean }> {
+    const harness = this.get(id)
+    if (!harness?.serviceName) {
+      throw new Error(`Harness ${id} not found`)
+    }
+    const template = getUseCaseTemplate(templateId)
+    if (!template) {
+      throw new Error(`Unknown use-case template "${templateId}"`)
+    }
+    const dataDir = guessDataDir(harness.serviceName, harness.serviceName)
+    const configPath = path.join(dataDir, 'config.yaml')
+    const { results, pluginsEnabled, changed } = await reapplyTemplateToDataDir(dataDir, template, configPath)
+
+    // Only bounce the container if something actually changed on disk.
+    if (changed) this.restart(id, 'recreate')
+    this.audit.append({ who: 'admin', what: `usecase:reapply:${templateId}`, target: harness.name })
+    return {
+      ok: true,
+      serviceName: harness.serviceName,
       results,
       pluginsEnabled,
       restarted: changed,

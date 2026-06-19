@@ -22,6 +22,7 @@ import {
 } from './artifacts-manifest'
 import { fetchGitArtifact } from './git-fetch'
 import { gateArtifactDir } from './artifact-gate'
+import { ensurePluginsEnabled } from './artifacts-sync'
 
 export interface UseCaseArtifact {
   type: ArtifactType
@@ -61,6 +62,11 @@ export interface InstallTemplateOpts {
   cacheRoot?: string
   /** Inject a fetcher for tests; defaults to the real trust-gated git fetch. */
   gitFetch?: (src: GitSource) => string
+  /** Replace already-present artifacts (re-apply / update). Default false. */
+  overwrite?: boolean
+  /** Seed the template SOUL over the agent's SOUL.md. Default true (create-time);
+   *  re-apply passes false to preserve a deployed agent's identity. */
+  seedSoul?: boolean
 }
 
 export function loadUseCaseTemplates(repoRoot: string = process.cwd()): UseCaseTemplate[] {
@@ -111,12 +117,54 @@ export async function installUseCaseTemplate(
   }
   // 'strict' scope: template skills/plugins are content the agent obeys, so
   // screen the exfil/persistence/config-mod/secret pattern set too (audit: High).
-  const results = await installArtifacts(agentDataDir, manifest, process.cwd(), { gitToken, cacheRoot, gitFetch, scope: 'strict' })
+  const results = await installArtifacts(agentDataDir, manifest, process.cwd(), { gitToken, cacheRoot, gitFetch, scope: 'strict', overwrite: opts.overwrite })
 
-  if (template.soul) {
+  if (template.soul && opts.seedSoul !== false) {
     await seedSoulFromGit(agentDataDir, template.soul, gitFetch, cacheRoot)
   }
   return results
+}
+
+/**
+ * Re-apply a use-case template to an ALREADY-DEPLOYED agent: re-run the same
+ * trust-gated install into the agent's data dir (updating plugins/skills/SOUL to
+ * the template's currently-pinned tag), then ensure the template's enabled
+ * plugins are listed in the agent's config.yaml so the runtime loads them.
+ *
+ * Security is inherited from installUseCaseTemplate (injection scan at 'strict'
+ * scope) — a poisoned artifact is refused before anything is written.
+ *
+ * Returns what was installed, which plugins were newly enabled, and whether
+ * anything changed (so the caller can decide whether to restart the container).
+ */
+export async function reapplyUseCaseTemplate(
+  agentDataDir: string,
+  template: UseCaseTemplate,
+  configPath: string,
+  opts: InstallTemplateOpts = {},
+): Promise<{ results: InstallResult[]; pluginsEnabled: string[]; changed: boolean }> {
+  // Re-apply = update artifacts to the template's current tag (overwrite), but
+  // do NOT re-seed SOUL — a deployed agent's identity may be operator-customized.
+  const results = await installUseCaseTemplate(agentDataDir, template, { ...opts, overwrite: true, seedSoul: false })
+  // "changed" = something was actually (re)written, not merely already present.
+  const changed = results.some((r) => r.installed && !r.skipped)
+
+  // Enable any template plugins that were actually installed, so config.yaml
+  // tells the runtime to load them (mirrors syncArtifacts' enable step).
+  let pluginsEnabled: string[] = []
+  const toEnable = templateEnabledPlugins(template).filter((n) =>
+    results.some((r) => r.name === n && r.installed),
+  )
+  if (toEnable.length > 0) {
+    const current = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : ''
+    const { content, added } = ensurePluginsEnabled(current, toEnable)
+    if (added.length > 0) {
+      fs.writeFileSync(configPath, content)
+      pluginsEnabled = added
+    }
+  }
+
+  return { results, pluginsEnabled, changed }
 }
 
 /**

@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { cp } from 'fs/promises'
+import { cp, rm } from 'fs/promises'
 import os from 'os'
 import path from 'path'
 import { gateArtifactDir } from './artifact-gate'
@@ -146,6 +146,12 @@ export interface InstallOpts {
   // Threat-pattern scope for the install-time gate. Defaults to 'context';
   // use-case template installs pass 'strict' (SOUL/skills the agent obeys).
   scope?: ThreatScope
+  // Replace an already-present artifact instead of skipping it. Off by default
+  // (create/import is no-clobber). Re-applying a use-case template to a deployed
+  // agent sets this to pull the newer pinned tag. The new content is fetched and
+  // trust-gated BEFORE the existing dir is removed, so a refused update never
+  // destroys the working artifact.
+  overwrite?: boolean
 }
 
 // Sources supported:
@@ -187,7 +193,10 @@ export async function installArtifacts(
       // when importing an already-provisioned agent. Seed baseline only when the
       // artifact is absent; the agent owns its own copy thereafter. Applied
       // before fetching so an already-present git-sourced artifact isn't re-cloned.
-      if (fs.existsSync(destDir)) {
+      // EXCEPT when overwrite is set (re-applying a template to a deployed agent):
+      // fall through, fetch + gate, then replace.
+      const exists = fs.existsSync(destDir)
+      if (exists && !opts.overwrite) {
         results.push({ type, name: entry.name, installed: true, skipped: true })
         continue
       }
@@ -204,6 +213,8 @@ export async function installArtifacts(
           )
         }
         try {
+          // Gate passed — only now is it safe to drop the old copy and replace.
+          if (exists) await rm(destDir, { recursive: true, force: true })
           await cp(fetchedDir, destDir, {
             recursive: true,
             filter: (s) => !s.split(path.sep).includes('.git'),
@@ -220,6 +231,7 @@ export async function installArtifacts(
       }
       const srcDir = path.join(repoRoot, 'infra', 'templates', type, entry.name)
       try {
+        if (exists) await rm(destDir, { recursive: true, force: true })
         await cp(srcDir, destDir, { recursive: true })
         results.push({ type, name: entry.name, installed: true })
       } catch (e) {
