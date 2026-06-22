@@ -241,6 +241,27 @@ class TestProbeSession:
         monkeypatch.setattr(mod, "_snapshot_text", lambda tid: "")
         assert _probe_session(DESC, "task-1") == "login_required"
 
+    def test_passive_probe_does_not_navigate(self, monkeypatch):
+        # navigate=False must observe the current page WITHOUT navigating — it
+        # would otherwise yank a human's tab mid-login (the single shared tab).
+        monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
+        import __init__ as mod
+
+        def _boom(url, tid):
+            raise AssertionError("passive probe must not navigate")
+
+        monkeypatch.setattr(mod, "_navigate", _boom)
+        monkeypatch.setattr(mod, "_snapshot_text", lambda tid: "Dashboard — Sign out")
+        assert _probe_session(DESC, "task-1", navigate=False) == "authenticated"
+
+    def test_passive_probe_login_required_when_signal_absent(self, monkeypatch):
+        monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
+        import __init__ as mod
+        monkeypatch.setattr(mod, "_navigate", lambda u, t: (_ for _ in ()).throw(
+            AssertionError("must not navigate")))
+        monkeypatch.setattr(mod, "_snapshot_text", lambda tid: "Password login form")
+        assert _probe_session(DESC, "task-1", navigate=False) == "login_required"
+
 
 # ---------------------------------------------------------------------------
 # browser_login handler
@@ -335,14 +356,38 @@ class TestHandleCheckLoginStatus:
         monkeypatch.setenv("BROWSER_LOGIN_DESCRIPTORS", json.dumps({"acme": DESC}))
         import __init__ as mod
 
+        # Pass navigate kwarg through so we also assert it's invoked passively.
         states = iter(["login_required", "authenticated"])
-        monkeypatch.setattr(mod, "_probe_session", lambda d, tid: next(states))
+        seen_navigate = []
+
+        def fake_probe(d, tid, navigate=True):
+            seen_navigate.append(navigate)
+            return next(states)
+
+        monkeypatch.setattr(mod, "_probe_session", fake_probe)
 
         first = json.loads(_handle_check_login_status("acme", "task-1"))
         assert first["status"] == "login_required"
         second = json.loads(_handle_check_login_status("acme", "task-1"))
         assert second["status"] == "authenticated"
         assert second["platform"] == "acme"
+        # check_login_status must always probe passively (navigate=False)
+        assert seen_navigate == [False, False]
+
+    def test_check_status_does_not_navigate_end_to_end(self, monkeypatch):
+        # Without stubbing _probe_session: prove check_login_status never calls
+        # _navigate (the HIGH-severity race fix). Only _snapshot_text is read.
+        monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
+        monkeypatch.setenv("BROWSER_LOGIN_DESCRIPTORS", json.dumps({"acme": DESC}))
+        import __init__ as mod
+
+        def _boom(url, tid):
+            raise AssertionError("check_login_status must not navigate")
+
+        monkeypatch.setattr(mod, "_navigate", _boom)
+        monkeypatch.setattr(mod, "_snapshot_text", lambda tid: "Welcome — Sign out")
+        result = json.loads(_handle_check_login_status("acme", "task-1"))
+        assert result["status"] == "authenticated"
 
 
 # ---------------------------------------------------------------------------

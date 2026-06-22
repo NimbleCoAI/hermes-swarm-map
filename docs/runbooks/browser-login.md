@@ -45,6 +45,15 @@ The password travels human-keyboard → Camofox. It never passes through the mod
    setting + saving is the "hot edit" path — there is no in-place env reload.
    With no descriptor for a platform, `browser_login` returns a clear error.
 
+   - `authed_signal` must be text visible on the page the human lands on **after
+     a successful login** (e.g. an account menu, "Sign out", an avatar label) —
+     `check_login_status` is a *passive* probe (it observes the current page
+     without navigating, so it never disrupts a human mid-login), so it confirms
+     auth by seeing this signal on the post-login page.
+   - `login_form_signal` is **advisory/reserved** (documents what the logged-out
+     form looks like; Phase 1 does not key behavior off it — Phase 2 autofill
+     will). Safe to omit.
+
 ## Security notes
 
 - **`.camofox` volume holds session cookies.** After login, the session lives in

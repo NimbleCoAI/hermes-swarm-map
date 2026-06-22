@@ -144,6 +144,14 @@ def _first_tab() -> Optional[dict]:
     return None
 
 
+def _current_url() -> str:
+    """Return the active tab's current URL, or '' if unknown."""
+    tab = _first_tab()
+    if not tab:
+        return ""
+    return tab.get("url", "") or ""
+
+
 def _navigate(target_url: str, task_id: str = "default") -> bool:
     """Navigate the active Camofox tab to target_url. Returns success bool."""
     url = _camofox_url()
@@ -232,19 +240,30 @@ def _get_descriptor(platform: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _probe_session(descriptor: dict, task_id: str = "default") -> str:
+def _probe_session(descriptor: dict, task_id: str = "default", navigate: bool = True) -> str:
     """Determine whether the agent has a valid session for this platform.
 
-    Navigates to the descriptor's authed_probe_url and checks the snapshot text
-    for the authed_signal. Returns "authenticated" or "login_required".
-    Fails safe to "login_required" if navigation/probe fails (we cannot confirm
-    auth, so treat it as not-authenticated).
+    Checks the snapshot text for the descriptor's authed_signal. Returns
+    "authenticated" or "login_required". Fails safe to "login_required" if we
+    cannot confirm auth.
+
+    navigate=True (default, used by the initial browser_login probe): actively
+    navigates to authed_probe_url first. Safe because the human is not yet
+    interacting with the browser.
+
+    navigate=False (used by check_login_status polling): observes the CURRENT
+    tab WITHOUT navigating. Critical — there is a single shared Camofox tab, so
+    re-navigating on every poll would yank the page out from under a human who is
+    mid-login (typing a password, on an MFA/SSO step). Passive observation lets
+    the human finish; once their post-login page shows the authed_signal, the
+    next poll returns "authenticated".
     """
-    probe_url = descriptor.get("authed_probe_url") or descriptor.get("login_url")
-    if not probe_url:
-        return "login_required"
-    if not _navigate(probe_url, task_id):
-        return "login_required"
+    if navigate:
+        probe_url = descriptor.get("authed_probe_url") or descriptor.get("login_url")
+        if not probe_url:
+            return "login_required"
+        if not _navigate(probe_url, task_id):
+            return "login_required"
     text = _snapshot_text(task_id)
     authed_signal = descriptor.get("authed_signal") or ""
     if authed_signal and authed_signal in text:
@@ -323,7 +342,9 @@ def _handle_check_login_status(platform: str = "", task_id: str = "default", **k
             "status": "error",
             "error": f"Unknown platform {platform!r} — no login descriptor.",
         })
-    status = _probe_session(descriptor, task_id)
+    # Passive probe — must NOT navigate while the human may be mid-login on the
+    # single shared tab (see _probe_session). Observes the current page only.
+    status = _probe_session(descriptor, task_id, navigate=False)
     return json.dumps({"status": status, "platform": platform})
 
 
@@ -354,7 +375,9 @@ def register(ctx):
                     "if a valid session already exists (proceed to drive the tab), or "
                     "{status:'login_required', login_escalation:{vnc_url,...}} if a human "
                     "must log in. On login_required, share the vnc_url with the human, "
-                    "then poll check_login_status until it returns 'authenticated'. "
+                    "then poll check_login_status (NOT browser_login) until authenticated. "
+                    "This tool actively navigates the browser, so do not call it again "
+                    "while a human is mid-login — it would disrupt their page. "
                     "Never ask the user to paste their password to you."
                 ),
                 "parameters": {
@@ -385,10 +408,13 @@ def register(ctx):
                 "name": "check_login_status",
                 "description": (
                     "Re-check whether the platform's browser session is authenticated "
-                    "yet (single, non-blocking probe). Call this in a loop after "
-                    "browser_login returns 'login_required', while the human logs in via "
-                    "VNC. Use your own attempt/time budget — e.g. poll every ~10s for a "
-                    "few minutes, then give up and report the human is unavailable. "
+                    "yet (single, non-blocking, PASSIVE probe — observes the current page "
+                    "without navigating, so it will not disrupt a human who is mid-login). "
+                    "Call this in a loop after browser_login returns 'login_required', while "
+                    "the human logs in via VNC. It returns 'authenticated' once the human's "
+                    "post-login page shows the platform's logged-in signal. Use your own "
+                    "attempt/time budget — e.g. poll every ~10s for a few minutes, then give "
+                    "up and report the human is unavailable. "
                     "Returns {status:'authenticated'|'login_required', platform}."
                 ),
                 "parameters": {

@@ -14,6 +14,9 @@
 
 export const BROWSER_LOGIN_DESCRIPTORS_VAR = 'BROWSER_LOGIN_DESCRIPTORS'
 
+const LINE_SEPARATOR = String.fromCharCode(0x2028)
+const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029)
+
 /**
  * Serialize descriptors to a single-line JSON string suitable for a `.env`
  * value. Returns '' for anything that isn't a non-empty plain object (the
@@ -25,9 +28,14 @@ export function serializeDescriptors(descriptors: unknown): string {
   }
   const keys = Object.keys(descriptors as Record<string, unknown>)
   if (keys.length === 0) return ''
-  // JSON.stringify (no indent) is always single-line — newlines inside string
-  // values are escaped to \n — so it is safe as a one-line .env value.
+  // JSON.stringify (no indent) is single-line and escapes \n and \r inside
+  // string values, so it is safe as a one-line .env value. JSON.stringify does
+  // NOT escape U+2028/U+2029 — those are not line terminators for dotenv or
+  // docker-compose env_file, so escaping them is defense-in-depth (descriptors
+  // are operator-set, not adversarial), guaranteeing a strictly single line.
   return JSON.stringify(descriptors)
+    .split(LINE_SEPARATOR).join('\\u2028')
+    .split(PARAGRAPH_SEPARATOR).join('\\u2029')
 }
 
 /**

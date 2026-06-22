@@ -33,6 +33,18 @@ describe('serializeDescriptors', () => {
   it('returns empty string for an array (not a descriptor map)', () => {
     expect(serializeDescriptors(['a', 'b'])).toBe('')
   })
+
+  it('escapes U+2028 / U+2029 and never emits a raw newline-class char', () => {
+    const LS = String.fromCharCode(0x2028)
+    const PS = String.fromCharCode(0x2029)
+    const out = serializeDescriptors({ svc: { authed_signal: `a${LS}b${PS}c` } })
+    expect(out).not.toContain(LS)
+    expect(out).not.toContain(PS)
+    expect(out).toContain('\\u2028')
+    expect(out).toContain('\\u2029')
+    // strictly single physical line
+    expect(out.split('\n').length).toBe(1)
+  })
 })
 
 describe('upsertBrowserLoginDescriptors', () => {
