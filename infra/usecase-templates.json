@@ -13,10 +13,10 @@
         "browser": false
       },
       "artifacts": [
-        { "type": "skills", "name": "matilde-methodology", "source": "git:NimbleCoAI/Matilde#v0.4.0:hermes-skill" },
-        { "type": "plugins", "name": "matilde", "source": "git:NimbleCoAI/Matilde#v0.4.0:matilde_plugin", "enabled": true }
+        { "type": "skills", "name": "matilde-methodology", "source": "git:NimbleCoAI/Matilde#v0.4.1:hermes-skill" },
+        { "type": "plugins", "name": "matilde", "source": "git:NimbleCoAI/Matilde#v0.4.1:matilde_plugin", "enabled": true }
       ],
-      "soul": { "source": "git:NimbleCoAI/Matilde#v0.4.0:docker", "file": "SOUL.Matilde.md" }
+      "soul": { "source": "git:NimbleCoAI/Matilde#v0.4.1:docker", "file": "SOUL.Matilde.md" }
     }
   ]
 }
