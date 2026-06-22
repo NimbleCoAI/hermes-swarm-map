@@ -6,6 +6,7 @@ import { buildSettingsEnvValue } from '@/lib/env-helpers'
 import { resolveIdentifier, expandSignalAllowlist } from '@/lib/resolvers'
 import { services } from '@/lib/services'
 import { generateStandaloneCompose } from '@/lib/services/harness-compose'
+import { upsertBrowserLoginDescriptors } from '@/lib/services/browser-login-env'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -336,6 +337,11 @@ export async function PUT(
       content = content.trimEnd() + `\n${VNC_EXTERNAL_URL_VAR}=${vncExternalUrl}\n`
     }
   }
+
+  // Browser-login platform descriptors — deliver the operator-editable global
+  // setting to the agent as BROWSER_LOGIN_DESCRIPTORS (the browser_login plugin
+  // reads it, merged over its bundled defaults). Empty/unset clears the line.
+  content = upsertBrowserLoginDescriptors(content, services.config.getSettings().platformLoginDescriptors)
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
 

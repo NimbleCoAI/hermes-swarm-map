@@ -1,0 +1,17 @@
+name: browser-login
+version: 1.0.0
+description: "Credentialless authenticated browser sessions — persistent Camofox profile + one-time human VNC login. The model never sees the plaintext password."
+author: NimbleCo
+requires_env:
+  - name: CAMOFOX_URL
+    description: "URL of the Camofox browser server"
+    prompt: "Camofox URL (e.g., http://localhost:9377)"
+    password: false
+  - name: VNC_EXTERNAL_URL
+    description: "Externally-reachable noVNC URL for human login (HSM sets this when VPN mode is on)"
+    prompt: "External VNC URL (optional — set automatically by HSM VPN mode)"
+    password: false
+  - name: BROWSER_LOGIN_DESCRIPTORS
+    description: "JSON map of per-platform login descriptors (login_url/authed_probe_url/text signals). HSM writes this from the platformLoginDescriptors setting."
+    prompt: "Platform login descriptors JSON (optional — managed via HSM settings)"
+    password: false

@@ -118,4 +118,5 @@ export type Settings = {
   localApiEnabled?: boolean  // Expose harnesses at a local API endpoint
   localApiPort?: number  // Port for the local API (default 8600)
   vncBindHost?: string  // Host interface for the VPN-mode VNC port (default '127.0.0.1'); set to a Tailscale address for remote human CAPTCHA escalation
+  platformLoginDescriptors?: Record<string, unknown>  // Per-platform browser-login descriptors (login_url/authed_probe_url/text signals) for the browser_login plugin; written to each agent's BROWSER_LOGIN_DESCRIPTORS env on settings save
 }
