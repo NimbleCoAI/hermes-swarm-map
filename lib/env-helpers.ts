@@ -33,6 +33,10 @@ export function buildConnectEnvVars(
         MATTERMOST_URL: config.url,
         MATTERMOST_TOKEN: config.token,
       }
+    case 'discord':
+      return {
+        DISCORD_BOT_TOKEN: config.token,
+      }
     default:
       return {}
   }
@@ -43,6 +47,7 @@ export const POLICY_VARS: Record<string, string[]> = {
   signal: ['SIGNAL_ALLOWED_USERS', 'SIGNAL_GROUP_ALLOWED_USERS', 'SIGNAL_REQUIRE_MENTION'],
   telegram: ['TELEGRAM_ALLOWED_USERS', 'TELEGRAM_GROUP_ALLOWED_CHATS', 'TELEGRAM_REQUIRE_MENTION'],
   mattermost: ['MATTERMOST_ALLOWED_USERS', 'MATTERMOST_ALLOWED_CHANNELS', 'MATTERMOST_REQUIRE_MENTION'],
+  discord: ['DISCORD_ALLOWED_USERS', 'DISCORD_ALLOWED_CHANNELS', 'DISCORD_REQUIRE_MENTION'],
 }
 
 /**

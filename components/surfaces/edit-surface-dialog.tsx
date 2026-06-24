@@ -25,6 +25,9 @@ const PLATFORM_FIELDS: Record<string, { key: string; label: string; configKey: s
     { key: 'url', label: 'Mattermost URL', configKey: 'url', placeholder: 'https://mattermost.example.com' },
     { key: 'token', label: 'Bot Token (MATTERMOST_TOKEN)', configKey: 'token', placeholder: 'your-bot-token' },
   ],
+  discord: [
+    { key: 'token', label: 'Bot Token (DISCORD_BOT_TOKEN)', configKey: 'token', placeholder: 'MTAx...xxxx.xxxxxx.xxxx' },
+  ],
 }
 
 export function EditSurfaceDialog({ platform, harnessId, currentConfig, open, onClose, onSaved }: Props) {

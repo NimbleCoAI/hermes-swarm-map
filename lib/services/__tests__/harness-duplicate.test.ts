@@ -101,7 +101,7 @@ describe('HarnessService.duplicate — identity reset', () => {
     fs.mkdirSync(srcDir, { recursive: true })
     fs.writeFileSync(
       path.join(srcDir, '.env'),
-      'HERMES_AGENT_NAME=srcagent\nAPI_SERVER_PORT=8642\nSIGNAL_ACCOUNT=+15550001111\n',
+      'HERMES_AGENT_NAME=srcagent\nAPI_SERVER_PORT=8642\nSIGNAL_ACCOUNT=+15550001111\nDISCORD_BOT_TOKEN=src-bot-token\n',
       { mode: 0o600 },
     )
     fs.writeFileSync(path.join(srcDir, 'SOUL.md'), '# srcagent\n\nYou are **srcagent**.\n')
@@ -130,5 +130,7 @@ describe('HarnessService.duplicate — identity reset', () => {
     await service.duplicateOverlay('h_srcagent', 'dupagent')
     const env = fs.readFileSync(path.join(homeDir, '.hermes-dupagent', '.env'), 'utf-8')
     expect(env).not.toMatch(/^SIGNAL_ACCOUNT=/m)
+    // Discord bot token must not be cloned — two harnesses can't share one bot.
+    expect(env).not.toMatch(/^DISCORD_BOT_TOKEN=/m)
   })
 })

@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { generateClientPin } from '@/components/surfaces/signal-pin-field'
 
-export type SurfacePlatform = 'signal' | 'telegram' | 'mattermost'
+export type SurfacePlatform = 'signal' | 'telegram' | 'mattermost' | 'discord'
 
 /**
  * Where the captured connection should go.
@@ -33,10 +33,15 @@ export type MattermostCapturedConfig = {
   token: string
   adminUser?: string
 }
+export type DiscordCapturedConfig = {
+  token: string
+  adminUser?: string
+}
 export type CapturedConfig =
   | SignalCapturedConfig
   | TelegramCapturedConfig
   | MattermostCapturedConfig
+  | DiscordCapturedConfig
 
 export type SurfaceStep =
   // signal
@@ -157,6 +162,11 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
       case 'mattermost':
         return {
           url: url.trim(),
+          token: token.trim(),
+          ...(adminUser.trim() ? { adminUser: adminUser.trim() } : {}),
+        }
+      case 'discord':
+        return {
           token: token.trim(),
           ...(adminUser.trim() ? { adminUser: adminUser.trim() } : {}),
         }
@@ -329,6 +339,32 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     }
   }, [url, token])
 
+  const verifyDiscord = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    setStep('verifying')
+    try {
+      const res = await fetch('/api/surfaces/discord/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim() }),
+      })
+      const data = await res.json()
+      if (data.valid) {
+        setBotUsername(data.username || 'Bot')
+        setStep('verified')
+      } else {
+        setError(data.error || 'Invalid bot token')
+        setStep('input')
+      }
+    } catch {
+      setError('Failed to verify — check your network')
+      setStep('input')
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
   // ── Telegram / Mattermost: connect ────────────────────────────────────────
 
   const connectMessaging = useCallback(async () => {
@@ -351,8 +387,9 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
   const verify = useCallback(async () => {
     if (platform === 'telegram') return verifyTelegram()
     if (platform === 'mattermost') return verifyMattermost()
+    if (platform === 'discord') return verifyDiscord()
     return verifySignal()
-  }, [platform, verifyTelegram, verifyMattermost, verifySignal])
+  }, [platform, verifyTelegram, verifyMattermost, verifyDiscord, verifySignal])
 
   /** Telegram/Mattermost connect (signal connects via verify/existing-number). */
   const connect = useCallback(async () => {
@@ -447,5 +484,7 @@ function platformLabel(platform: SurfacePlatform): string {
       return 'Telegram'
     case 'mattermost':
       return 'Mattermost'
+    case 'discord':
+      return 'Discord'
   }
 }

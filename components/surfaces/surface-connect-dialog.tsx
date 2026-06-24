@@ -73,6 +73,7 @@ export function SurfaceConnectDialog({
       {platform === 'signal' && <SignalBody s={s} onClose={onClose} />}
       {platform === 'telegram' && <TelegramBody s={s} onClose={onClose} />}
       {platform === 'mattermost' && <MattermostBody s={s} onClose={onClose} />}
+      {platform === 'discord' && <DiscordBody s={s} onClose={onClose} />}
     </dialog>
   )
 }
@@ -567,6 +568,110 @@ function MattermostBody({ s, onClose }: { s: Hook; onClose: () => void }) {
         <div className="space-y-4 text-center py-4">
           <CheckCircle2 className="h-10 w-10 text-[var(--success)] mx-auto" />
           <p className="font-medium">{step === 'captured' ? 'Mattermost ready' : 'Mattermost connected!'}</p>
+          {s.botUsername && <p className="text-sm text-muted-foreground">Bot: {s.botUsername}</p>}
+          <p className="text-sm text-muted-foreground">
+            {step === 'captured' ? 'Will activate when the agent is created.' : 'Restart the agent to activate.'}
+          </p>
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90">
+            Done
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Discord ──────────────────────────────────────────────────────────────────
+
+function DiscordBody({ s, onClose }: { s: Hook; onClose: () => void }) {
+  const { step, error, loading } = s
+  // Discord bot tokens have no fixed shape (base64-ish, dot-separated) — just
+  // require something non-trivial; the server-side /verify is the real check.
+  const tokenValid = s.token.trim().length >= 20
+  const isTerminal = step === 'done' || step === 'captured'
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Hash className="h-5 w-5 text-[var(--accent)]" />
+        <h2 className="text-lg font-semibold">Connect Discord</h2>
+      </div>
+
+      {!isTerminal ? (
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg bg-muted/50 text-sm space-y-2">
+            <p className="font-medium">Setup instructions:</p>
+            <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
+              <li>Open the <strong>Discord Developer Portal</strong> &rarr; <strong>Applications</strong></li>
+              <li>Create an application, then add a <strong>Bot</strong></li>
+              <li>Enable the <strong>Message Content</strong> privileged intent</li>
+              <li>Copy the bot token and invite the bot to your server</li>
+            </ol>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Bot Token</label>
+            <input
+              type="text"
+              value={s.token}
+              onChange={(e) => { s.setToken(e.target.value); if (step === 'verified') s.setStep('input') }}
+              placeholder="MTAxxxxxxxxxxxxxxxxxxxxxx.xxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-mono"
+              disabled={step === 'verifying' || step === 'connecting'}
+            />
+          </div>
+
+          {step === 'verified' && (
+            <div className="flex items-center gap-2 p-2 rounded-md bg-[var(--success)]/10 border border-[var(--success)]/20">
+              <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
+              <span className="text-sm">Verified: <strong>{s.botUsername}</strong></span>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">Admin (optional)</label>
+            <input
+              type="text"
+              value={s.adminUser}
+              onChange={(e) => s.setAdminUser(e.target.value)}
+              placeholder="Your Discord user ID"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
+              disabled={step === 'verifying' || step === 'connecting'}
+            />
+            <p className="text-xs text-muted-foreground">
+              Who can manage this bot. Numeric Discord user ID.
+            </p>
+          </div>
+
+          {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
+
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] hover:bg-muted">
+              Cancel
+            </button>
+            {step === 'input' || step === 'verifying' ? (
+              <button
+                onClick={s.verify}
+                disabled={!tokenValid || loading}
+                className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify'}
+              </button>
+            ) : (
+              <button
+                onClick={s.connect}
+                disabled={loading}
+                className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Connect'}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4 text-center py-4">
+          <CheckCircle2 className="h-10 w-10 text-[var(--success)] mx-auto" />
+          <p className="font-medium">{step === 'captured' ? 'Discord ready' : 'Discord connected!'}</p>
           {s.botUsername && <p className="text-sm text-muted-foreground">Bot: {s.botUsername}</p>}
           <p className="text-sm text-muted-foreground">
             {step === 'captured' ? 'Will activate when the agent is created.' : 'Restart the agent to activate.'}

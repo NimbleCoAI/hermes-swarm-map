@@ -109,6 +109,24 @@ describe('surface connect env merging', () => {
     expect(result).toContain('MATTERMOST_ALLOWED_CHANNELS=general,random')
   })
 
+  it('preserves existing DISCORD policy vars when reconnecting', () => {
+    fs.writeFileSync(envPath, [
+      'DISCORD_BOT_TOKEN=old-token',
+      'DISCORD_ALLOWED_USERS=111,222',
+      'DISCORD_ALLOWED_CHANNELS=chan1,chan2',
+    ].join('\n'))
+
+    const connectVars = buildConnectEnvVars('discord', { token: 'new-token' })
+
+    const content = fs.readFileSync(envPath, 'utf-8')
+    const result = mergeEnvVars(content, connectVars)
+
+    // Token updates; the user/channel allowlists are preserved.
+    expect(result).toContain('DISCORD_BOT_TOKEN=new-token')
+    expect(result).toContain('DISCORD_ALLOWED_USERS=111,222')
+    expect(result).toContain('DISCORD_ALLOWED_CHANNELS=chan1,chan2')
+  })
+
   describe('buildConnectEnvVars', () => {
     it('only returns connection vars, not policy vars, for signal', () => {
       const vars = buildConnectEnvVars('signal', {
@@ -137,6 +155,14 @@ describe('surface connect env merging', () => {
       expect(vars).toHaveProperty('MATTERMOST_TOKEN')
       expect(vars).not.toHaveProperty('MATTERMOST_ALLOWED_USERS')
       expect(vars).not.toHaveProperty('MATTERMOST_ALLOWED_CHANNELS')
+    })
+
+    it('only returns the bot token for discord, not policy vars', () => {
+      const vars = buildConnectEnvVars('discord', { token: 'bot.token.xyz' })
+
+      expect(vars).toHaveProperty('DISCORD_BOT_TOKEN')
+      expect(vars).not.toHaveProperty('DISCORD_ALLOWED_USERS')
+      expect(vars).not.toHaveProperty('DISCORD_ALLOWED_CHANNELS')
     })
   })
 
