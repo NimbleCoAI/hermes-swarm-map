@@ -20,6 +20,7 @@ describe('Harness E2E', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-e2e-'))
     hermesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-e2e-'))
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
     storage = new Storage(tmpDir)
     const docker = new DockerService()
     const audit = new AuditService(storage)
@@ -37,13 +38,7 @@ describe('Harness E2E', () => {
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
     fs.rmSync(hermesDir, { recursive: true, force: true })
-    // Clean up any agent data dirs created in home
-    for (const name of ['e2e-test-agent', 'e2e-dup-agent']) {
-      const dir = path.join(os.homedir(), `.hermes-${name}`)
-      if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true })
-      }
-    }
+    vi.restoreAllMocks()
   })
 
   describe('createOverlay', () => {
@@ -68,7 +63,7 @@ describe('Harness E2E', () => {
     it('scaffolds agent data directory', async () => {
       storage.write('harnesses.json', [])
       await service.createOverlay({ name: 'e2e-test-agent' })
-      const agentDir = path.join(os.homedir(), '.hermes-e2e-test-agent')
+      const agentDir = path.join(tmpDir, '.hermes-e2e-test-agent')
       expect(fs.existsSync(agentDir)).toBe(true)
       expect(fs.existsSync(path.join(agentDir, '.env'))).toBe(true)
       expect(fs.existsSync(path.join(agentDir, 'config.yaml'))).toBe(true)
@@ -109,11 +104,6 @@ describe('Harness E2E', () => {
 
     afterEach(() => {
       fs.rmSync(agentDir, { recursive: true, force: true })
-      // Clean up imported overlay agent dir
-      const dir = path.join(os.homedir(), '.hermes-imported-agent')
-      if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true })
-      }
     })
 
     it('returns harness with correct name', async () => {
@@ -121,7 +111,7 @@ describe('Harness E2E', () => {
       const result = await service.importFromDir(agentDir, 'imported-agent')
       expect(result.name).toBe('imported-agent')
       expect(result.changes.copied).toBe(true)
-      expect(result.destDir).toBe(path.join(os.homedir(), '.hermes-imported-agent'))
+      expect(result.destDir).toBe(path.join(tmpDir, '.hermes-imported-agent'))
     })
 
     it('detects persona from SOUL.md', async () => {
@@ -212,15 +202,6 @@ describe('Harness E2E', () => {
   })
 
   describe('duplicateOverlay', () => {
-    afterEach(() => {
-      for (const name of ['e2e-dup-agent']) {
-        const dir = path.join(os.homedir(), `.hermes-${name}`)
-        if (fs.existsSync(dir)) {
-          fs.rmSync(dir, { recursive: true, force: true })
-        }
-      }
-    })
-
     it('creates duplicate overlay with new name', async () => {
       storage.write('harnesses.json', [
         {

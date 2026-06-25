@@ -24,6 +24,7 @@ describe('Local build compose generation', () => {
     // Create a Dockerfile so resolveImageOrBuild detects it
     fs.writeFileSync(path.join(fakeHermesDir, 'Dockerfile'), 'FROM debian:13\n')
 
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
     storage = new Storage(tmpDir)
     const docker = new DockerService()
     const audit = new AuditService(storage)
@@ -36,6 +37,7 @@ describe('Local build compose generation', () => {
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
     fs.rmSync(fakeHermesDir, { recursive: true, force: true })
+    vi.restoreAllMocks()
   })
 
   it('defaults useLocalBuild to true in settings', () => {

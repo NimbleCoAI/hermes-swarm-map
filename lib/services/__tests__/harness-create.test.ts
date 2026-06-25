@@ -18,6 +18,7 @@ describe('HarnessService.createOverlay', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-create-'))
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
     storage = new Storage(tmpDir)
     const docker = new DockerService()
     const audit = new AuditService(storage)
@@ -27,6 +28,7 @@ describe('HarnessService.createOverlay', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
+    vi.restoreAllMocks()
   })
 
   it('creates a new harness overlay', async () => {
@@ -64,6 +66,7 @@ describe('HarnessService.importFromDir', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-import-'))
     hermesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-agent-'))
+    vi.spyOn(os, 'homedir').mockReturnValue(tmpDir)
     storage = new Storage(tmpDir)
     const docker = new DockerService()
     const audit = new AuditService(storage)
@@ -79,13 +82,7 @@ describe('HarnessService.importFromDir', () => {
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
     fs.rmSync(hermesDir, { recursive: true, force: true })
-    // Clean up copied agent dirs
-    for (const name of ['imported-agent', 'soul-test', 'gitcred-test']) {
-      const dir = path.join(os.homedir(), `.hermes-${name}`)
-      if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true })
-      }
-    }
+    vi.restoreAllMocks()
   })
 
   it('imports a harness from a data directory', async () => {
@@ -93,7 +90,7 @@ describe('HarnessService.importFromDir', () => {
     const result = await service.importFromDir(hermesDir, 'imported-agent')
     expect(result.name).toBe('imported-agent')
     expect(result.changes.copied).toBe(true)
-    expect(result.destDir).toBe(path.join(os.homedir(), '.hermes-imported-agent'))
+    expect(result.destDir).toBe(path.join(tmpDir, '.hermes-imported-agent'))
     // Verify the overlay was registered with persona
     const overlays = storage.read<any[]>('harnesses.json', [])
     const overlay = overlays.find((h: any) => h.name === 'imported-agent')
