@@ -90,7 +90,7 @@ describe('HarnessService.importFromDir', () => {
     const result = await service.importFromDir(hermesDir, 'imported-agent')
     expect(result.name).toBe('imported-agent')
     expect(result.changes.copied).toBe(true)
-    expect(result.destDir).toBe(path.join(os.homedir(), '.hermes-imported-agent'))
+    expect(result.destDir).toBe(path.join(tmpDir, '.hermes-imported-agent'))
     // Verify the overlay was registered with persona
     const overlays = storage.read<any[]>('harnesses.json', [])
     const overlay = overlays.find((h: any) => h.name === 'imported-agent')

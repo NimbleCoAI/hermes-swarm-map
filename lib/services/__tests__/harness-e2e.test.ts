@@ -63,7 +63,7 @@ describe('Harness E2E', () => {
     it('scaffolds agent data directory', async () => {
       storage.write('harnesses.json', [])
       await service.createOverlay({ name: 'e2e-test-agent' })
-      const agentDir = path.join(os.homedir(), '.hermes-e2e-test-agent')
+      const agentDir = path.join(tmpDir, '.hermes-e2e-test-agent')
       expect(fs.existsSync(agentDir)).toBe(true)
       expect(fs.existsSync(path.join(agentDir, '.env'))).toBe(true)
       expect(fs.existsSync(path.join(agentDir, 'config.yaml'))).toBe(true)
@@ -111,7 +111,7 @@ describe('Harness E2E', () => {
       const result = await service.importFromDir(agentDir, 'imported-agent')
       expect(result.name).toBe('imported-agent')
       expect(result.changes.copied).toBe(true)
-      expect(result.destDir).toBe(path.join(os.homedir(), '.hermes-imported-agent'))
+      expect(result.destDir).toBe(path.join(tmpDir, '.hermes-imported-agent'))
     })
 
     it('detects persona from SOUL.md', async () => {
