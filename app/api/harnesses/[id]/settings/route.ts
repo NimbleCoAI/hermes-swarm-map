@@ -19,6 +19,7 @@ const PLATFORM_VARS: Record<string, { users: string; groups: string }> = {
   telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS' },
   mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS' },
   discord: { users: 'DISCORD_ALLOWED_USERS', groups: 'DISCORD_ALLOWED_CHANNELS' },
+  slack: { users: 'SLACK_ALLOWED_USERS', groups: 'SLACK_ALLOWED_CHANNELS' },
 }
 
 function parseEnvFile(envPath: string): Record<string, string> {
@@ -62,6 +63,7 @@ const MENTION_GATING_VARS: Record<string, string> = {
   telegram: 'TELEGRAM_REQUIRE_MENTION',
   mattermost: 'MATTERMOST_REQUIRE_MENTION',
   discord: 'DISCORD_REQUIRE_MENTION',
+  slack: 'SLACK_REQUIRE_MENTION',
 }
 
 // Env var names for observing unmentioned messages per platform

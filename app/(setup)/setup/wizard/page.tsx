@@ -44,6 +44,9 @@ type WizardState = {
   telegramToken: string
   discordEnabled: boolean
   discordToken: string
+  slackEnabled: boolean
+  slackBotToken: string
+  slackAppToken: string
   signalEnabled: boolean
   signalPhone: string
   googleEnabled: boolean
@@ -74,6 +77,9 @@ const INITIAL_STATE: WizardState = {
   telegramToken: '',
   discordEnabled: false,
   discordToken: '',
+  slackEnabled: false,
+  slackBotToken: '',
+  slackAppToken: '',
   signalEnabled: false,
   signalPhone: '',
   googleEnabled: false,
@@ -232,6 +238,9 @@ export default function WizardPage() {
           telegramToken: state.telegramToken,
           discordEnabled: state.discordEnabled,
           discordToken: state.discordToken,
+          slackEnabled: state.slackEnabled,
+          slackBotToken: state.slackBotToken,
+          slackAppToken: state.slackAppToken,
           signalEnabled: state.signalEnabled,
           signalPhone: signalCaptured?.phone || state.signalPhone,
           googleEnabled: state.googleEnabled,
@@ -622,6 +631,45 @@ export default function WizardPage() {
               )}
             </div>
 
+            {/* Slack */}
+            <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.slackEnabled}
+                  onChange={(e) => update({ slackEnabled: e.target.checked })}
+                  className="accent-[var(--accent)]"
+                />
+                <div>
+                  <div className="font-medium text-sm">Slack</div>
+                  <div className="text-xs text-muted-foreground">Connect via Socket Mode (bot + app token)</div>
+                </div>
+              </label>
+
+              {state.slackEnabled && (
+                <div className="pl-7 space-y-2">
+                  <div>
+                    <FieldLabel>Bot Token</FieldLabel>
+                    <Input
+                      type="password"
+                      value={state.slackBotToken}
+                      onChange={(e) => update({ slackBotToken: e.target.value })}
+                      placeholder="xoxb-..."
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>App Token</FieldLabel>
+                    <Input
+                      type="password"
+                      value={state.slackAppToken}
+                      onChange={(e) => update({ slackAppToken: e.target.value })}
+                      placeholder="xapp-..."
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Signal */}
             <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
               <label className="flex items-center gap-3 cursor-pointer">
@@ -905,6 +953,12 @@ export default function WizardPage() {
               {state.telegramEnabled && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Telegram</span>
+                  <span>configured</span>
+                </div>
+              )}
+              {state.slackEnabled && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Slack</span>
                   <span>configured</span>
                 </div>
               )}

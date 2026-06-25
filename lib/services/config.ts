@@ -151,6 +151,19 @@ export class ConfigService {
           harnessIds: [harnessId],
         })
       }
+
+      // Slack needs BOTH tokens (bot for API, app for the Socket Mode websocket).
+      if (env['SLACK_BOT_TOKEN'] && env['SLACK_APP_TOKEN']) {
+        seenPlatforms.add('slack')
+        surfaces.push({
+          id: `int_sl_${name}`,
+          platform: 'slack',
+          name: 'Slack',
+          status: 'connected',
+          config: {},
+          harnessIds: [harnessId],
+        })
+      }
     }
 
     // Add available (not yet connected) platform stubs for platforms
@@ -178,6 +191,12 @@ export class ConfigService {
       surfaces.push({ id: 'int_dc_available', platform: 'discord', name: 'Discord', status: 'available', config: {}, harnessIds: [] })
     } else {
       surfaces.push({ id: 'int_dc', platform: 'discord', name: 'Discord', status: 'planned', config: {}, harnessIds: [] })
+    }
+
+    if (seenPlatforms.has('slack')) {
+      surfaces.push({ id: 'int_sl_available', platform: 'slack', name: 'Slack', status: 'available', config: {}, harnessIds: [] })
+    } else {
+      surfaces.push({ id: 'int_sl', platform: 'slack', name: 'Slack', status: 'planned', config: {}, harnessIds: [] })
     }
 
     return surfaces

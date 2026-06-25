@@ -101,7 +101,7 @@ describe('HarnessService.duplicate — identity reset', () => {
     fs.mkdirSync(srcDir, { recursive: true })
     fs.writeFileSync(
       path.join(srcDir, '.env'),
-      'HERMES_AGENT_NAME=srcagent\nAPI_SERVER_PORT=8642\nSIGNAL_ACCOUNT=+15550001111\nDISCORD_BOT_TOKEN=src-bot-token\n',
+      'HERMES_AGENT_NAME=srcagent\nAPI_SERVER_PORT=8642\nSIGNAL_ACCOUNT=+15550001111\nDISCORD_BOT_TOKEN=src-bot-token\nSLACK_BOT_TOKEN=xoxb-src\nSLACK_APP_TOKEN=xapp-src\n',
       { mode: 0o600 },
     )
     fs.writeFileSync(path.join(srcDir, 'SOUL.md'), '# srcagent\n\nYou are **srcagent**.\n')
@@ -132,5 +132,8 @@ describe('HarnessService.duplicate — identity reset', () => {
     expect(env).not.toMatch(/^SIGNAL_ACCOUNT=/m)
     // Discord bot token must not be cloned — two harnesses can't share one bot.
     expect(env).not.toMatch(/^DISCORD_BOT_TOKEN=/m)
+    // Slack tokens (both) must not be cloned either.
+    expect(env).not.toMatch(/^SLACK_BOT_TOKEN=/m)
+    expect(env).not.toMatch(/^SLACK_APP_TOKEN=/m)
   })
 })

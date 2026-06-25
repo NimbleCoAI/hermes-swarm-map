@@ -19,12 +19,14 @@ export function generateEnvContent(params: {
   mattermostToken?: string
   telegramToken?: string
   discordToken?: string
+  slackBotToken?: string
+  slackAppToken?: string
   signalPhone?: string
   githubToken?: string
   braveKey?: string
   browserEnabled?: boolean
 }): string {
-  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, signalPhone, githubToken, braveKey, browserEnabled } = params
+  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, browserEnabled } = params
 
   const providerKeyMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -91,6 +93,18 @@ export function generateEnvContent(params: {
     lines.push(`# DISCORD_BOT_TOKEN=`)
     lines.push(`# DISCORD_ALLOWED_USERS=`)
     lines.push(`# DISCORD_ALLOWED_CHANNELS=`)
+  }
+  if (slackBotToken && slackAppToken) {
+    lines.push(`SLACK_BOT_TOKEN=${slackBotToken}`)
+    lines.push(`SLACK_APP_TOKEN=${slackAppToken}`)
+    lines.push(`SLACK_ALLOWED_USERS=`)
+    lines.push(`SLACK_ALLOWED_CHANNELS=`)
+    lines.push(`SLACK_REQUIRE_MENTION=true`)
+  } else {
+    lines.push(`# SLACK_BOT_TOKEN=`)
+    lines.push(`# SLACK_APP_TOKEN=`)
+    lines.push(`# SLACK_ALLOWED_USERS=`)
+    lines.push(`# SLACK_ALLOWED_CHANNELS=`)
   }
   if (signalPhone) {
     lines.push(`SIGNAL_HTTP_URL=http://host.docker.internal:8080`)

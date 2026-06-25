@@ -21,7 +21,7 @@ type PairingUser = {
   platform: string
 }
 
-const PLATFORMS = ['signal', 'telegram', 'mattermost', 'discord']
+const PLATFORMS = ['signal', 'telegram', 'mattermost', 'discord', 'slack']
 
 export async function GET(
   _request: Request,

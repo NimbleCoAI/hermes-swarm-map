@@ -62,7 +62,8 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { name, provider, primaryModel, fallbackModel, persona, tier,
       mattermostEnabled, mattermostUrl, mattermostToken,
-      telegramEnabled, telegramToken, discordEnabled, discordToken, signalEnabled, signalPhone,
+      telegramEnabled, telegramToken, discordEnabled, discordToken,
+      slackEnabled, slackBotToken, slackAppToken, signalEnabled, signalPhone,
       githubToken, braveKey, existingKeyId, saveKeyToRegistry } = body
     const bundledOllama = body.bundledOllama === true
 
@@ -182,6 +183,8 @@ export async function POST(request: Request) {
       mattermostToken: mattermostEnabled ? mattermostToken : undefined,
       telegramToken: telegramEnabled ? telegramToken : undefined,
       discordToken: discordEnabled ? discordToken : undefined,
+      slackBotToken: slackEnabled ? slackBotToken : undefined,
+      slackAppToken: slackEnabled ? slackAppToken : undefined,
       signalPhone: signalEnabled ? signalPhone : undefined,
       githubToken,
       braveKey,
@@ -328,7 +331,7 @@ If this is your very first startup ever, introduce yourself briefly in your home
     const overlay = await services.harness.createOverlay({
       name: slug,
       tier: tier ?? 'individual',
-      platform: telegramEnabled ? 'telegram' : discordEnabled ? 'discord' : mattermostEnabled ? 'mattermost' : 'hermes',
+      platform: telegramEnabled ? 'telegram' : discordEnabled ? 'discord' : slackEnabled ? 'slack' : mattermostEnabled ? 'mattermost' : 'hermes',
       channel: `:${port}`,
       models: fallbackModel ? [primaryModel, fallbackModel] : [primaryModel],
     })

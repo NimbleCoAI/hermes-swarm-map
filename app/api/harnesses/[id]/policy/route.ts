@@ -17,6 +17,7 @@ const GROUP_VARS: Record<string, string> = {
   telegram: 'TELEGRAM_GROUP_ALLOWED_CHATS',
   mattermost: 'MATTERMOST_ALLOWED_CHANNELS',
   discord: 'DISCORD_ALLOWED_CHANNELS',
+  slack: 'SLACK_ALLOWED_CHANNELS',
 }
 
 function parseEnvFile(envPath: string): Record<string, string> {

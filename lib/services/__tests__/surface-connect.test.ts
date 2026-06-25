@@ -127,6 +127,26 @@ describe('surface connect env merging', () => {
     expect(result).toContain('DISCORD_ALLOWED_CHANNELS=chan1,chan2')
   })
 
+  it('preserves existing SLACK policy vars when reconnecting (both tokens)', () => {
+    fs.writeFileSync(envPath, [
+      'SLACK_BOT_TOKEN=xoxb-old',
+      'SLACK_APP_TOKEN=xapp-old',
+      'SLACK_ALLOWED_USERS=U111,U222',
+      'SLACK_ALLOWED_CHANNELS=C111,C222',
+    ].join('\n'))
+
+    const connectVars = buildConnectEnvVars('slack', { botToken: 'xoxb-new', appToken: 'xapp-new' })
+
+    const content = fs.readFileSync(envPath, 'utf-8')
+    const result = mergeEnvVars(content, connectVars)
+
+    // Both tokens update; the user/channel allowlists are preserved.
+    expect(result).toContain('SLACK_BOT_TOKEN=xoxb-new')
+    expect(result).toContain('SLACK_APP_TOKEN=xapp-new')
+    expect(result).toContain('SLACK_ALLOWED_USERS=U111,U222')
+    expect(result).toContain('SLACK_ALLOWED_CHANNELS=C111,C222')
+  })
+
   describe('buildConnectEnvVars', () => {
     it('only returns connection vars, not policy vars, for signal', () => {
       const vars = buildConnectEnvVars('signal', {
@@ -163,6 +183,15 @@ describe('surface connect env merging', () => {
       expect(vars).toHaveProperty('DISCORD_BOT_TOKEN')
       expect(vars).not.toHaveProperty('DISCORD_ALLOWED_USERS')
       expect(vars).not.toHaveProperty('DISCORD_ALLOWED_CHANNELS')
+    })
+
+    it('returns both tokens for slack, no policy vars', () => {
+      const vars = buildConnectEnvVars('slack', { botToken: 'xoxb-x', appToken: 'xapp-y' })
+
+      expect(vars).toHaveProperty('SLACK_BOT_TOKEN', 'xoxb-x')
+      expect(vars).toHaveProperty('SLACK_APP_TOKEN', 'xapp-y')
+      expect(vars).not.toHaveProperty('SLACK_ALLOWED_USERS')
+      expect(vars).not.toHaveProperty('SLACK_ALLOWED_CHANNELS')
     })
   })
 
