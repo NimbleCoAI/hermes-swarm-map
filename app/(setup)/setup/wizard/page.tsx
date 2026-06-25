@@ -42,6 +42,8 @@ type WizardState = {
   mattermostToken: string
   telegramEnabled: boolean
   telegramToken: string
+  discordEnabled: boolean
+  discordToken: string
   signalEnabled: boolean
   signalPhone: string
   googleEnabled: boolean
@@ -70,6 +72,8 @@ const INITIAL_STATE: WizardState = {
   mattermostToken: '',
   telegramEnabled: false,
   telegramToken: '',
+  discordEnabled: false,
+  discordToken: '',
   signalEnabled: false,
   signalPhone: '',
   googleEnabled: false,
@@ -226,6 +230,8 @@ export default function WizardPage() {
           mattermostToken: state.mattermostToken,
           telegramEnabled: state.telegramEnabled,
           telegramToken: state.telegramToken,
+          discordEnabled: state.discordEnabled,
+          discordToken: state.discordToken,
           signalEnabled: state.signalEnabled,
           signalPhone: signalCaptured?.phone || state.signalPhone,
           googleEnabled: state.googleEnabled,
@@ -588,6 +594,34 @@ export default function WizardPage() {
               )}
             </div>
 
+            {/* Discord */}
+            <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.discordEnabled}
+                  onChange={(e) => update({ discordEnabled: e.target.checked })}
+                  className="accent-[var(--accent)]"
+                />
+                <div>
+                  <div className="font-medium text-sm">Discord</div>
+                  <div className="text-xs text-muted-foreground">Connect via a Discord bot token</div>
+                </div>
+              </label>
+
+              {state.discordEnabled && (
+                <div className="pl-7">
+                  <FieldLabel>Bot Token</FieldLabel>
+                  <Input
+                    type="password"
+                    value={state.discordToken}
+                    onChange={(e) => update({ discordToken: e.target.value })}
+                    placeholder="MTAx...xxxx.xxxxxx.xxxx"
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Signal */}
             <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
               <label className="flex items-center gap-3 cursor-pointer">
@@ -871,6 +905,12 @@ export default function WizardPage() {
               {state.telegramEnabled && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Telegram</span>
+                  <span>configured</span>
+                </div>
+              )}
+              {state.discordEnabled && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Discord</span>
                   <span>configured</span>
                 </div>
               )}

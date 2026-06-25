@@ -18,12 +18,13 @@ export function generateEnvContent(params: {
   mattermostUrl?: string
   mattermostToken?: string
   telegramToken?: string
+  discordToken?: string
   signalPhone?: string
   githubToken?: string
   braveKey?: string
   browserEnabled?: boolean
 }): string {
-  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, signalPhone, githubToken, braveKey, browserEnabled } = params
+  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, signalPhone, githubToken, braveKey, browserEnabled } = params
 
   const providerKeyMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -80,6 +81,16 @@ export function generateEnvContent(params: {
     lines.push(`TELEGRAM_BOT_TOKEN=${telegramToken}`)
   } else {
     lines.push(`# TELEGRAM_BOT_TOKEN=`)
+  }
+  if (discordToken) {
+    lines.push(`DISCORD_BOT_TOKEN=${discordToken}`)
+    lines.push(`DISCORD_ALLOWED_USERS=`)
+    lines.push(`DISCORD_ALLOWED_CHANNELS=`)
+    lines.push(`DISCORD_REQUIRE_MENTION=true`)
+  } else {
+    lines.push(`# DISCORD_BOT_TOKEN=`)
+    lines.push(`# DISCORD_ALLOWED_USERS=`)
+    lines.push(`# DISCORD_ALLOWED_CHANNELS=`)
   }
   if (signalPhone) {
     lines.push(`SIGNAL_HTTP_URL=http://host.docker.internal:8080`)
