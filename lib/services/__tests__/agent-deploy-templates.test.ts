@@ -52,6 +52,22 @@ describe('generateEnvContent', () => {
     expect(env).toContain('# DISCORD_BOT_TOKEN=')
     expect(env).not.toMatch(/^DISCORD_BOT_TOKEN=/m)
   })
+
+  it('writes slack env (both tokens) + secure policy defaults when both tokens provided', () => {
+    const env = generateEnvContent({ ...base, slackBotToken: 'xoxb-x', slackAppToken: 'xapp-y' })
+    expect(env).toContain('SLACK_BOT_TOKEN=xoxb-x')
+    expect(env).toContain('SLACK_APP_TOKEN=xapp-y')
+    expect(env).toContain('SLACK_ALLOWED_USERS=')
+    expect(env).toContain('SLACK_ALLOWED_CHANNELS=')
+    expect(env).toContain('SLACK_REQUIRE_MENTION=true')
+  })
+
+  it('leaves slack vars commented out when tokens are missing/partial', () => {
+    // Only one token → not a usable Slack connection → stays commented.
+    const env = generateEnvContent({ ...base, slackBotToken: 'xoxb-x' })
+    expect(env).toContain('# SLACK_BOT_TOKEN=')
+    expect(env).not.toMatch(/^SLACK_BOT_TOKEN=/m)
+  })
 })
 
 describe('generateAgentCompose', () => {

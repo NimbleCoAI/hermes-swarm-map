@@ -37,6 +37,11 @@ export function buildConnectEnvVars(
       return {
         DISCORD_BOT_TOKEN: config.token,
       }
+    case 'slack':
+      return {
+        SLACK_BOT_TOKEN: config.botToken,
+        SLACK_APP_TOKEN: config.appToken,
+      }
     default:
       return {}
   }
@@ -48,6 +53,7 @@ export const POLICY_VARS: Record<string, string[]> = {
   telegram: ['TELEGRAM_ALLOWED_USERS', 'TELEGRAM_GROUP_ALLOWED_CHATS', 'TELEGRAM_REQUIRE_MENTION'],
   mattermost: ['MATTERMOST_ALLOWED_USERS', 'MATTERMOST_ALLOWED_CHANNELS', 'MATTERMOST_REQUIRE_MENTION'],
   discord: ['DISCORD_ALLOWED_USERS', 'DISCORD_ALLOWED_CHANNELS', 'DISCORD_REQUIRE_MENTION'],
+  slack: ['SLACK_ALLOWED_USERS', 'SLACK_ALLOWED_CHANNELS', 'SLACK_REQUIRE_MENTION'],
 }
 
 /**

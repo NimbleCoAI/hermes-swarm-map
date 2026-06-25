@@ -5,7 +5,7 @@ import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { generateClientPin } from '@/components/surfaces/signal-pin-field'
 
-export type SurfacePlatform = 'signal' | 'telegram' | 'mattermost' | 'discord'
+export type SurfacePlatform = 'signal' | 'telegram' | 'mattermost' | 'discord' | 'slack'
 
 /**
  * Where the captured connection should go.
@@ -37,11 +37,17 @@ export type DiscordCapturedConfig = {
   token: string
   adminUser?: string
 }
+export type SlackCapturedConfig = {
+  botToken: string
+  appToken: string
+  adminUser?: string
+}
 export type CapturedConfig =
   | SignalCapturedConfig
   | TelegramCapturedConfig
   | MattermostCapturedConfig
   | DiscordCapturedConfig
+  | SlackCapturedConfig
 
 export type SurfaceStep =
   // signal
@@ -101,9 +107,11 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
   const [deploying, setDeploying] = useState(false)
   const [pin, setPin] = useState('')
 
-  // Telegram / Mattermost-specific
+  // Telegram / Mattermost / Discord-specific (token = bot token for all of these)
   const [token, setToken] = useState('')
   const [url, setUrl] = useState('')
+  // Slack-specific: a second token (app-level xapp- token for Socket Mode)
+  const [appToken, setAppToken] = useState('')
   const [botUsername, setBotUsername] = useState('')
 
   // ── Signal: daemon health + deploy ────────────────────────────────────────
@@ -170,8 +178,14 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
           token: token.trim(),
           ...(adminUser.trim() ? { adminUser: adminUser.trim() } : {}),
         }
+      case 'slack':
+        return {
+          botToken: token.trim(),
+          appToken: appToken.trim(),
+          ...(adminUser.trim() ? { adminUser: adminUser.trim() } : {}),
+        }
     }
-  }, [platform, phone, displayName, adminUser, token, url])
+  }, [platform, phone, displayName, adminUser, token, url, appToken])
 
   /**
    * Persist the connection. In harness mode, POST to the connect route. In
@@ -365,6 +379,35 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     }
   }, [token])
 
+  const verifySlack = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    setStep('verifying')
+    try {
+      // Validate the bot token via Slack auth.test (server-side). The app token
+      // authenticates the websocket, not a REST call, so it's format-checked in
+      // the dialog and only truly exercised at gateway connect time.
+      const res = await fetch('/api/surfaces/slack/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token.trim() }),
+      })
+      const data = await res.json()
+      if (data.valid) {
+        setBotUsername(data.username || 'Bot')
+        setStep('verified')
+      } else {
+        setError(data.error || 'Invalid bot token')
+        setStep('input')
+      }
+    } catch {
+      setError('Failed to verify — check your network')
+      setStep('input')
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
   // ── Telegram / Mattermost: connect ────────────────────────────────────────
 
   const connectMessaging = useCallback(async () => {
@@ -388,8 +431,9 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     if (platform === 'telegram') return verifyTelegram()
     if (platform === 'mattermost') return verifyMattermost()
     if (platform === 'discord') return verifyDiscord()
+    if (platform === 'slack') return verifySlack()
     return verifySignal()
-  }, [platform, verifyTelegram, verifyMattermost, verifyDiscord, verifySignal])
+  }, [platform, verifyTelegram, verifyMattermost, verifyDiscord, verifySlack, verifySignal])
 
   /** Telegram/Mattermost connect (signal connects via verify/existing-number). */
   const connect = useCallback(async () => {
@@ -415,6 +459,7 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     // messaging
     setToken('')
     setUrl('')
+    setAppToken('')
     setBotUsername('')
   }, [platform, defaultDisplayName])
 
@@ -459,6 +504,8 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     setToken,
     url,
     setUrl,
+    appToken,
+    setAppToken,
     botUsername,
     // signal actions
     checkHealth,
@@ -486,5 +533,7 @@ function platformLabel(platform: SurfacePlatform): string {
       return 'Mattermost'
     case 'discord':
       return 'Discord'
+    case 'slack':
+      return 'Slack'
   }
 }

@@ -17,6 +17,7 @@ import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
 import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
 import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
 import { DiscordSetupDialog } from '@/components/surfaces/discord-setup-dialog'
+import { SlackSetupDialog } from '@/components/surfaces/slack-setup-dialog'
 import { EditSurfaceDialog } from '@/components/surfaces/edit-surface-dialog'
 import { SignalPinManager } from '@/components/surfaces/signal-pin-manager'
 import { SettingsTab } from '@/components/harness/settings-tab'
@@ -50,6 +51,7 @@ const PLATFORM_LABELS: Record<string, { users: string; groups: string }> = {
   telegram: { users: 'User IDs', groups: 'Chat IDs' },
   mattermost: { users: 'User IDs', groups: 'Channel IDs' },
   discord: { users: 'User IDs', groups: 'Channel IDs' },
+  slack: { users: 'User IDs', groups: 'Channel IDs' },
 }
 
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
@@ -1438,6 +1440,12 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       />
       <DiscordSetupDialog
         open={connectDialog === 'discord'}
+        onClose={() => setConnectDialog(null)}
+        harnessId={harness.id}
+        onConnected={() => refetchSurfaces()}
+      />
+      <SlackSetupDialog
+        open={connectDialog === 'slack'}
         onClose={() => setConnectDialog(null)}
         harnessId={harness.id}
         onConnected={() => refetchSurfaces()}

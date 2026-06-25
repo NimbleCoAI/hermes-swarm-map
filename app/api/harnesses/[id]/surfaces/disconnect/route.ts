@@ -34,6 +34,12 @@ const PLATFORM_ENV_KEYS: Record<string, string[]> = {
     'DISCORD_ALLOWED_USERS',
     'DISCORD_ALLOWED_CHANNELS',
   ],
+  slack: [
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'SLACK_ALLOWED_USERS',
+    'SLACK_ALLOWED_CHANNELS',
+  ],
 }
 
 export async function POST(

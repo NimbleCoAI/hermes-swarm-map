@@ -140,7 +140,7 @@ describe('Policy API — group-check (GET)', () => {
 
   it('returns 400 for unsupported platform', async () => {
     const req = new Request(
-      'http://localhost/api/harnesses/h_seraph/policy?action=group-check&platform=slack&chatId=123'
+      'http://localhost/api/harnesses/h_seraph/policy?action=group-check&platform=whatsapp&chatId=123'
     )
     const res = await GET(req, makeParams('h_seraph'))
 
@@ -178,6 +178,19 @@ describe('Policy API — group-check (GET)', () => {
 
     const req = new Request(
       'http://localhost/api/harnesses/h_seraph/policy?action=group-check&platform=discord&chatId=chan1'
+    )
+    const res = await GET(req, makeParams('h_seraph'))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.allowed).toBe(true)
+  })
+
+  it('works with slack platform (SLACK_ALLOWED_CHANNELS)', async () => {
+    readSpy.mockReturnValue('SLACK_ALLOWED_CHANNELS=C111,C222\n')
+
+    const req = new Request(
+      'http://localhost/api/harnesses/h_seraph/policy?action=group-check&platform=slack&chatId=C111'
     )
     const res = await GET(req, makeParams('h_seraph'))
     const body = await res.json()

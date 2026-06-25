@@ -28,6 +28,10 @@ const PLATFORM_FIELDS: Record<string, { key: string; label: string; configKey: s
   discord: [
     { key: 'token', label: 'Bot Token (DISCORD_BOT_TOKEN)', configKey: 'token', placeholder: 'MTAx...xxxx.xxxxxx.xxxx' },
   ],
+  slack: [
+    { key: 'botToken', label: 'Bot Token (SLACK_BOT_TOKEN)', configKey: 'botToken', placeholder: 'xoxb-...' },
+    { key: 'appToken', label: 'App Token (SLACK_APP_TOKEN)', configKey: 'appToken', placeholder: 'xapp-...' },
+  ],
 }
 
 export function EditSurfaceDialog({ platform, harnessId, currentConfig, open, onClose, onSaved }: Props) {

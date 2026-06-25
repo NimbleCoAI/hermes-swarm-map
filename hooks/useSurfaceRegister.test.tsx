@@ -355,3 +355,67 @@ describe('useSurfaceRegister — discord', () => {
     )
   })
 })
+
+describe('useSurfaceRegister — slack (two tokens)', () => {
+  it('harness mode: verify (bot token) then connect captures { botToken, appToken }', async () => {
+    mockFetch((url) => {
+      if (url === '/api/surfaces/slack/verify') return { valid: true, username: 'slackbot' }
+      if (url.includes('/surfaces/connect')) return { success: true }
+      return {}
+    })
+    const onConnected = vi.fn()
+    const { result } = renderHook(() =>
+      useSurfaceRegister({
+        platform: 'slack',
+        target: { kind: 'harness', harnessId: 'h_sl' },
+        onConnected,
+      })
+    )
+    act(() => {
+      result.current.setToken('xoxb-bot')
+      result.current.setAppToken('xapp-app')
+    })
+    await act(async () => { await result.current.verify() })
+    expect(result.current.step).toBe('verified')
+    await act(async () => { await result.current.connect() })
+    await waitFor(() => expect(result.current.step).toBe('done'))
+
+    const fetchFn = global.fetch as ReturnType<typeof vi.fn>
+    // verify hits auth.test with the bot token only
+    const verifyCall = fetchFn.mock.calls.find((c) => String(c[0]).includes('/surfaces/slack/verify'))
+    expect(JSON.parse((verifyCall![1] as RequestInit).body as string)).toMatchObject({ token: 'xoxb-bot' })
+    // connect carries BOTH tokens
+    const connectCall = fetchFn.mock.calls.find((c) => String(c[0]).includes('/surfaces/connect'))
+    const body = bodyOf(connectCall!)
+    expect(body.platform).toBe('slack')
+    expect(body.config).toMatchObject({ botToken: 'xoxb-bot', appToken: 'xapp-app' })
+    expect(body.config).not.toHaveProperty('token')
+    expect(onConnected).toHaveBeenCalled()
+  })
+
+  it('pending mode: captures { botToken, appToken } without connect', async () => {
+    mockFetch((url) => {
+      if (url === '/api/surfaces/slack/verify') return { valid: true, username: 'slackbot' }
+      if (url.includes('/surfaces/connect')) throw new Error('no connect in pending')
+      return {}
+    })
+    const onCaptured = vi.fn()
+    const { result } = renderHook(() =>
+      useSurfaceRegister({
+        platform: 'slack',
+        target: { kind: 'pending' },
+        onCaptured,
+      })
+    )
+    act(() => {
+      result.current.setToken('xoxb-bot')
+      result.current.setAppToken('xapp-app')
+    })
+    await act(async () => { await result.current.verify() })
+    await act(async () => { await result.current.connect() })
+    await waitFor(() => expect(result.current.step).toBe('captured'))
+    expect(onCaptured).toHaveBeenCalledWith(
+      expect.objectContaining({ botToken: 'xoxb-bot', appToken: 'xapp-app' })
+    )
+  })
+})

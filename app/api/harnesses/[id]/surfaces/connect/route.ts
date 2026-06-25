@@ -54,6 +54,7 @@ export async function POST(
       telegram: 'TELEGRAM_ALLOWED_USERS',
       mattermost: 'MATTERMOST_ALLOWED_USERS',
       discord: 'DISCORD_ALLOWED_USERS',
+      slack: 'SLACK_ALLOWED_USERS',
     }
     const key = allowedUsersKey[platform]
     if (key) {
