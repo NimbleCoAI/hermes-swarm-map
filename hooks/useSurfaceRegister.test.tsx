@@ -296,3 +296,62 @@ describe('useSurfaceRegister — mattermost', () => {
     )
   })
 })
+
+describe('useSurfaceRegister — discord', () => {
+  it('harness mode: verify then connect with a bot token only', async () => {
+    mockFetch((url) => {
+      if (url === '/api/surfaces/discord/verify') return { valid: true, username: 'discordbot' }
+      if (url.includes('/surfaces/connect')) return { success: true }
+      return {}
+    })
+    const onConnected = vi.fn()
+    const { result } = renderHook(() =>
+      useSurfaceRegister({
+        platform: 'discord',
+        target: { kind: 'harness', harnessId: 'h_dc' },
+        onConnected,
+      })
+    )
+    act(() => {
+      result.current.setToken('discord.bot.token')
+    })
+    await act(async () => { await result.current.verify() })
+    expect(result.current.step).toBe('verified')
+    await act(async () => { await result.current.connect() })
+    await waitFor(() => expect(result.current.step).toBe('done'))
+
+    const fetchFn = global.fetch as ReturnType<typeof vi.fn>
+    const connectCall = fetchFn.mock.calls.find((c) => String(c[0]).includes('/surfaces/connect'))
+    const body = bodyOf(connectCall!)
+    expect(body.platform).toBe('discord')
+    expect(body.config).toMatchObject({ token: 'discord.bot.token' })
+    // Discord is token-only — no URL in the captured config.
+    expect(body.config).not.toHaveProperty('url')
+    expect(onConnected).toHaveBeenCalled()
+  })
+
+  it('pending mode: captures { token } without connect', async () => {
+    mockFetch((url) => {
+      if (url === '/api/surfaces/discord/verify') return { valid: true, username: 'discordbot' }
+      if (url.includes('/surfaces/connect')) throw new Error('no connect in pending')
+      return {}
+    })
+    const onCaptured = vi.fn()
+    const { result } = renderHook(() =>
+      useSurfaceRegister({
+        platform: 'discord',
+        target: { kind: 'pending' },
+        onCaptured,
+      })
+    )
+    act(() => {
+      result.current.setToken('discord.bot.token')
+    })
+    await act(async () => { await result.current.verify() })
+    await act(async () => { await result.current.connect() })
+    await waitFor(() => expect(result.current.step).toBe('captured'))
+    expect(onCaptured).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 'discord.bot.token' })
+    )
+  })
+})

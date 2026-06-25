@@ -53,6 +53,7 @@ export async function POST(
       signal: 'SIGNAL_ALLOWED_USERS',
       telegram: 'TELEGRAM_ALLOWED_USERS',
       mattermost: 'MATTERMOST_ALLOWED_USERS',
+      discord: 'DISCORD_ALLOWED_USERS',
     }
     const key = allowedUsersKey[platform]
     if (key) {

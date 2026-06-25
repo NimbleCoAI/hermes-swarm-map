@@ -48,4 +48,18 @@ describe('surface disconnect — applies removal by recreating the container', (
     expect(body.ok).toBe(true)
     expect(restartMock).toHaveBeenCalledWith('h_seraph', 'recreate')
   })
+
+  it('recreates the container after stripping the discord env', async () => {
+    const req = new Request('http://localhost/api/harnesses/h_seraph/surfaces/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({ platform: 'discord' }),
+    })
+
+    const res = await POST(req, makeParams('h_seraph'))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(restartMock).toHaveBeenCalledWith('h_seraph', 'recreate')
+  })
 })

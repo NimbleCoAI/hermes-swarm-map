@@ -29,6 +29,11 @@ const PLATFORM_ENV_KEYS: Record<string, string[]> = {
     'MATTERMOST_ALLOWED_USERS',
     'MATTERMOST_ADMIN_USERS',
   ],
+  discord: [
+    'DISCORD_BOT_TOKEN',
+    'DISCORD_ALLOWED_USERS',
+    'DISCORD_ALLOWED_CHANNELS',
+  ],
 }
 
 export async function POST(

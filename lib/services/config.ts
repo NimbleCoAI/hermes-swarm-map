@@ -139,6 +139,18 @@ export class ConfigService {
           harnessIds: [harnessId],
         })
       }
+
+      if (env['DISCORD_BOT_TOKEN']) {
+        seenPlatforms.add('discord')
+        surfaces.push({
+          id: `int_dc_${name}`,
+          platform: 'discord',
+          name: 'Discord',
+          status: 'connected',
+          config: {},
+          harnessIds: [harnessId],
+        })
+      }
     }
 
     // Add available (not yet connected) platform stubs for platforms
@@ -162,8 +174,11 @@ export class ConfigService {
       surfaces.push({ id: 'int_sg', platform: 'signal', name: 'Signal', status: 'planned', config: {}, harnessIds: [] })
     }
 
-    // Discord stub — not yet implemented
-    surfaces.push({ id: 'int_dc', platform: 'discord', name: 'Discord', status: 'planned', config: {}, harnessIds: [] })
+    if (seenPlatforms.has('discord')) {
+      surfaces.push({ id: 'int_dc_available', platform: 'discord', name: 'Discord', status: 'available', config: {}, harnessIds: [] })
+    } else {
+      surfaces.push({ id: 'int_dc', platform: 'discord', name: 'Discord', status: 'planned', config: {}, harnessIds: [] })
+    }
 
     return surfaces
   }

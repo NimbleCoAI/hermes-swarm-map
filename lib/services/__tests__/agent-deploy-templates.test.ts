@@ -37,6 +37,21 @@ describe('generateEnvContent', () => {
     expect(generateEnvContent({ ...base, browserEnabled: true })).toContain('CAMOFOX_URL=')
     expect(generateEnvContent({ ...base })).not.toContain('CAMOFOX_URL=')
   })
+
+  it('writes discord env + secure policy defaults when a bot token is provided', () => {
+    const env = generateEnvContent({ ...base, discordToken: 'discord.bot.token' })
+    expect(env).toContain('DISCORD_BOT_TOKEN=discord.bot.token')
+    expect(env).toContain('DISCORD_ALLOWED_USERS=')
+    expect(env).toContain('DISCORD_ALLOWED_CHANNELS=')
+    // Mention-gating defaults on (mirrors the adapter's own default).
+    expect(env).toContain('DISCORD_REQUIRE_MENTION=true')
+  })
+
+  it('leaves discord vars commented out when no token is provided', () => {
+    const env = generateEnvContent({ ...base })
+    expect(env).toContain('# DISCORD_BOT_TOKEN=')
+    expect(env).not.toMatch(/^DISCORD_BOT_TOKEN=/m)
+  })
 })
 
 describe('generateAgentCompose', () => {
