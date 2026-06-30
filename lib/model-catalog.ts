@@ -22,6 +22,19 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
   ollama: [
     { id: 'qwen3:30b', name: 'Qwen3 30B', tier: 'local' },
     { id: 'llama3.1:8b', name: 'Llama 3.1 8B', tier: 'local' },
+    // GLM open-model family, genuinely local (5.5 GB Q4, 128K ctx) — the
+    // runnable-today fallback. GLM-5.2 itself (744B) needs ~256 GB and lives
+    // under the `zai` provider (Z.ai cloud / future GPU box), not here.
+    { id: 'glm4:9b', name: 'GLM-4 9B (local)', tier: 'local' },
+  ],
+  // Z.ai (GLM) — Zhipu's open models served over the Z.ai cloud API. Matches the
+  // hermes-agent `zai` provider plugin (aliases glm/zhipu; key via GLM_API_KEY).
+  // The runtime resolves the Z.ai endpoint itself, so HSM emits no base_url; set
+  // GLM_BASE_URL on the agent to repoint the same selection at a self-hosted box.
+  zai: [
+    { id: 'glm-5.2', name: 'GLM-5.2', tier: 'primary' },
+    { id: 'glm-4.6', name: 'GLM-4.6', tier: 'primary' },
+    { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash', tier: 'fallback' },
   ],
   openrouter: [
     { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (OR)', tier: 'primary' },
@@ -48,6 +61,9 @@ export const ENV_TO_PROVIDER: Record<string, string> = {
   OPENROUTER_API_KEY: 'openrouter',
   AWS_BEARER_TOKEN_BEDROCK: 'bedrock',
   AWS_ACCESS_KEY_ID: 'bedrock',
+  GLM_API_KEY: 'zai',
+  ZAI_API_KEY: 'zai',
+  Z_AI_API_KEY: 'zai',
 }
 
 // --- Provider serviceability (credential presence) --------------------------
@@ -81,6 +97,9 @@ const REQUIRED_KEY_BY_PROVIDER: Record<string, string[]> = {
   anthropic: ['ANTHROPIC_API_KEY', 'ANTHROPIC_TOKEN'],
   openai: ['OPENAI_API_KEY'],
   openrouter: ['OPENROUTER_API_KEY'],
+  // Z.ai (GLM cloud) authenticates only via a GLM/ZAI key. A genuinely-local
+  // GLM uses the `ollama` provider instead (no key, base_url) — kept distinct.
+  zai: ['GLM_API_KEY', 'ZAI_API_KEY', 'Z_AI_API_KEY'],
 }
 
 /**

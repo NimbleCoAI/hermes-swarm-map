@@ -33,6 +33,7 @@ export function generateEnvContent(params: {
     openrouter: 'OPENROUTER_API_KEY',
     google: 'GOOGLE_API_KEY',
     bedrock: 'AWS_BEARER_TOKEN_BEDROCK',
+    zai: 'GLM_API_KEY',
   }
 
   // Anthropic credentials route to ANTHROPIC_API_KEY or ANTHROPIC_TOKEN by value

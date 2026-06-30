@@ -27,6 +27,13 @@ describe('generateEnvContent', () => {
     expect(env).not.toContain('host.docker.internal:11434')
   })
 
+  it('writes the GLM key to GLM_API_KEY for the zai provider', () => {
+    const env = generateEnvContent({ name: 'matilde', port: 8642, provider: 'zai', primaryModel: 'glm-5.2', llmKey: 'glm-secret-123' })
+    expect(env).toContain('GLM_API_KEY=glm-secret-123')
+    // zai is Z.ai cloud (base_url baked into the runtime plugin) — no local ollama URL.
+    expect(env).not.toContain('OLLAMA_BASE_URL=')
+  })
+
   it('writes signal env when a phone is provided', () => {
     const env = generateEnvContent({ ...base, signalPhone: '+15551234567' })
     expect(env).toContain('SIGNAL_ACCOUNT=+15551234567')
