@@ -21,6 +21,16 @@ export interface ComposeOptions {
    */
   vncBindHost?: string
   /**
+   * Host interface to bind the Camofox control port (container 9377,
+   * `port + 1000`) to. This port is UNAUTHENTICATED remote browser control — a
+   * bigger exposure than VNC — and the agent reaches Camofox in-namespace
+   * (localhost) rather than via this host publish, so binding it to loopback by
+   * default keeps it off the LAN/tailnet/internet while host-local tooling still
+   * works. Set to a Tailscale IP/hostname only if remote control is needed.
+   * Defaults to '127.0.0.1'.
+   */
+  controlBindHost?: string
+  /**
    * Bundle an optional ollama sidecar that runs a tiny model on CPU, so a
    * brand-new agent can use a local model with zero host setup. OFF by default —
    * host-GPU ollama via host.docker.internal:11434 stays the default and is
@@ -46,14 +56,14 @@ export function generateStandaloneCompose(
   agentDataDir: string,
   options?: ComposeOptions,
 ): string {
-  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, bundledOllama, ollamaImage } = options ?? {}
+  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage } = options ?? {}
   const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoai/hermes-agent-mt:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
 
   if (vpnEnabled) {
-    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, bundledOllama, ollamaImage)
+    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage)
   }
 
   return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage)
@@ -165,6 +175,7 @@ function generateVpnCompose(
   sourceBlock: string,
   camofoxImage?: string,
   vncBindHost: string = '127.0.0.1',
+  controlBindHost: string = '127.0.0.1',
   bundledOllama?: boolean,
   ollamaImage?: string,
 ): string {
@@ -204,7 +215,12 @@ services:
     ports:
       - published: ${port}
         target: 8642
-      - published: ${camofoxPort}
+      # Camofox control port (9377) is UNAUTHENTICATED remote browser control. The
+      # agent reaches Camofox in-namespace (localhost), so this host publish is for
+      # host-local tooling only — bind to loopback by default to keep it off the
+      # LAN/tailnet. Set controlBindHost to a Tailscale address for remote control.
+      - host_ip: ${controlBindHost}
+        published: ${camofoxPort}
         target: 9377
       # VNC is human-only (CAPTCHA escalation); bind to loopback by default so it
       # is not exposed on the LAN/tailnet. Set vncBindHost to a Tailscale address

@@ -370,6 +370,7 @@ export async function PUT(
         imageOrBuild,
         defaultImage: settings.defaultImage,
         vncBindHost: settings.vncBindHost,
+        controlBindHost: settings.controlBindHost,
       })
       fs.writeFileSync(harness.composeFile, compose, 'utf-8')
     }

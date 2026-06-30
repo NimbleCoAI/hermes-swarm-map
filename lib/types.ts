@@ -118,4 +118,5 @@ export type Settings = {
   localApiEnabled?: boolean  // Expose harnesses at a local API endpoint
   localApiPort?: number  // Port for the local API (default 8600)
   vncBindHost?: string  // Host interface for the VPN-mode VNC port (default '127.0.0.1'); set to a Tailscale address for remote human CAPTCHA escalation
+  controlBindHost?: string  // Host interface for the VPN-mode Camofox control port 9377 (default '127.0.0.1', unauthenticated browser control); set to a Tailscale address only for remote control
 }
