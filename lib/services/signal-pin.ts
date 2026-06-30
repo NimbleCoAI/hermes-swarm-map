@@ -15,6 +15,21 @@ type BulkSetResult = {
   failed: Array<{ phone: string; error: string }>
 }
 
+/**
+ * Normalize a phone string to canonical E.164 (single leading `+`, digits only).
+ *
+ * The write side (`setPin`) and the various read sides (`getPinStatus`,
+ * `checkPinHealth`, `getPin` via `s.config.phone`, and `registeredAccounts`
+ * from signal-cli) can pass differently-formatted phone strings — a missing
+ * leading `+`, surrounding whitespace, or human formatting like
+ * `1 (555) 123-4567`. PIN keys are resolved by exact name match, so without
+ * normalization the lookup misses and a set PIN is reported as not-set.
+ */
+export function normalizeE164(phone: string): string {
+  const stripped = phone.trim().replace(/[\s()-]/g, '').replace(/^\++/, '')
+  return `+${stripped}`
+}
+
 export class SignalPinService {
   constructor(
     private keys: KeysService,
@@ -38,10 +53,15 @@ export class SignalPinService {
     return data.result
   }
 
+  private pinKeyName(phone: string): string {
+    return `Signal PIN (${normalizeE164(phone)})`
+  }
+
   private findPinKey(phone: string) {
+    const name = this.pinKeyName(phone)
     const allKeys = this.keys.list([])
     return allKeys.find(
-      k => k.provider === 'signal-pin' && k.name === `Signal PIN (${phone})`
+      k => k.provider === 'signal-pin' && k.name === name
     )
   }
 
@@ -58,7 +78,7 @@ export class SignalPinService {
     }
     this.keys.add({
       provider: 'signal-pin',
-      name: `Signal PIN (${phone})`,
+      name: this.pinKeyName(phone),
       value: pin,
       assignedTo: [harnessId],
     })
