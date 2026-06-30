@@ -6,6 +6,7 @@ import { TierMix } from '@/components/shared/tier-mix'
 import { StatusDot } from '@/components/shared/status-dot'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
+import { filterKeys } from '@/lib/keys-filter'
 import type { Key, Harness } from '@/lib/types'
 import type { HabitatTier, HarnessStatus } from '@/lib/types'
 
@@ -22,6 +23,9 @@ function keyHealthToStatus(health: Key['health']): HarnessStatus {
 export default function KeysPage() {
   const { data: keys, loading, refetch } = useApi<Key[]>('/api/keys')
   const { data: harnesses } = useApi<Harness[]>('/api/harnesses')
+
+  // Search/filter state
+  const [query, setQuery] = useState('')
 
   // Add key form state
   const [showAddForm, setShowAddForm] = useState(false)
@@ -46,6 +50,8 @@ export default function KeysPage() {
     if (!harnesses) return ids.join(', ')
     return ids.map((id) => harnesses.find((h) => h.id === id)?.name ?? id).join(', ')
   }
+
+  const filteredKeys = filterKeys(keys, query, harnessNames)
 
   function tierMixForKey(key: Key): HabitatTier[] {
     if (!harnesses) return []
@@ -189,7 +195,15 @@ export default function KeysPage() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold">Keys</h2>
         <div className="flex items-center gap-3">
-          {keys && <span className="text-sm text-muted-foreground">{keys.length} keys</span>}
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search keys..."
+            aria-label="Search keys"
+            className="w-56 rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
+          />
+          {keys && <span className="text-sm text-muted-foreground">{filteredKeys.length} keys</span>}
           <Button size="sm" onClick={() => setShowAddForm(!showAddForm)}>
             {showAddForm ? 'Cancel' : '+ Add Key'}
           </Button>
@@ -288,7 +302,7 @@ export default function KeysPage() {
               </tr>
             </thead>
             <tbody>
-              {keys.map((k) => (
+              {filteredKeys.map((k) => (
                 editingId === k.id ? (
                   // Editing row
                   <tr key={k.id} className="border-b border-[var(--border)] last:border-0 bg-muted/20">
@@ -405,6 +419,11 @@ export default function KeysPage() {
               ))}
             </tbody>
           </table>
+          {filteredKeys.length === 0 && (
+            <p className="px-4 py-6 text-sm text-muted-foreground">
+              {keys.length === 0 ? 'No keys yet.' : `No keys match "${query}".`}
+            </p>
+          )}
         </div>
       )}
     </div>
