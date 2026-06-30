@@ -320,6 +320,50 @@ describe('generateStandaloneCompose', () => {
     })
   })
 
+  describe('resource limits (memory/cpu) — configurable per harness', () => {
+    it('non-VPN: defaults to 2G / 2.0 when no resources provided', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir)
+      expect(result).toContain('memory: 2G')
+      expect(result).toContain("cpus: '2.0'")
+    })
+
+    it('VPN: defaults to 2G / 2.0 when no resources provided', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
+      expect(result).toContain('memory: 2G')
+      expect(result).toContain("cpus: '2.0'")
+    })
+
+    it('non-VPN: renders provided memory and cpus limits', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, { memory: '6G', cpus: '4.0' })
+      expect(result).toContain('memory: 6G')
+      expect(result).toContain("cpus: '4.0'")
+      expect(result).not.toContain('memory: 2G')
+      expect(result).not.toContain("cpus: '2.0'")
+    })
+
+    it('VPN: renders provided memory and cpus limits', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, {
+        vpnEnabled: true,
+        memory: '6G',
+        cpus: '4.0',
+      })
+      expect(result).toContain('memory: 6G')
+      expect(result).toContain("cpus: '4.0'")
+      expect(result).not.toContain('memory: 2G')
+      expect(result).not.toContain("cpus: '2.0'")
+    })
+
+    it('renders only the provided field, defaulting the other', () => {
+      const memOnly = generateStandaloneCompose(agentName, port, dataDir, { memory: '8G' })
+      expect(memOnly).toContain('memory: 8G')
+      expect(memOnly).toContain("cpus: '2.0'")
+
+      const cpuOnly = generateStandaloneCompose(agentName, port, dataDir, { cpus: '3.0' })
+      expect(cpuOnly).toContain('memory: 2G')
+      expect(cpuOnly).toContain("cpus: '3.0'")
+    })
+  })
+
   describe('regression: non-VPN output matches original format', () => {
     it('contains all expected sections in order', () => {
       const result = generateStandaloneCompose('myagent', 8652, '/data/myagent')

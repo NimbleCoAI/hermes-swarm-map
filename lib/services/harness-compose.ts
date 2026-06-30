@@ -35,6 +35,19 @@ export interface ComposeOptions {
   bundledOllama?: boolean
   /** Image for the bundled ollama sidecar. Defaults to 'ollama/ollama'. */
   ollamaImage?: string
+  /**
+   * Per-harness memory limit rendered into the hermes service's
+   * `deploy.resources.limits.memory`. Docker-compose memory string (e.g. '2G',
+   * '6G', '512M'). Defaults to '2G' when omitted. Memory-heavy harnesses (e.g.
+   * Matilde MEG runs) OOM-kill under the default — raise this to fit the job.
+   */
+  memory?: string
+  /**
+   * Per-harness CPU limit rendered into the hermes service's
+   * `deploy.resources.limits.cpus`. Docker-compose cpu string (e.g. '2.0',
+   * '4.0'). Defaults to '2.0' when omitted.
+   */
+  cpus?: string
 }
 
 /** Model the bundled ollama sidecar pulls and serves on boot (tiny, CPU-friendly). */
@@ -46,17 +59,26 @@ export function generateStandaloneCompose(
   agentDataDir: string,
   options?: ComposeOptions,
 ): string {
-  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, bundledOllama, ollamaImage } = options ?? {}
+  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
   const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoai/hermes-agent-mt:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
 
   if (vpnEnabled) {
-    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, bundledOllama, ollamaImage)
+    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, bundledOllama, ollamaImage, memory, cpus)
   }
 
-  return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage)
+  return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage, memory, cpus)
+}
+
+/** Render the hermes service's `deploy.resources.limits` block (8-space indented). */
+function resourcesBlock(memory?: string, cpus?: string): string {
+  return `    deploy:
+      resources:
+        limits:
+          memory: ${memory ?? '2G'}
+          cpus: '${cpus ?? '2.0'}'`
 }
 
 /**
@@ -105,6 +127,8 @@ function generatePlainCompose(
   sourceBlock: string,
   bundledOllama?: boolean,
   ollamaImage?: string,
+  memory?: string,
+  cpus?: string,
 ): string {
   // Sidecars share the default (named) network, so the hermes service reaches
   // ollama at http://ollama-<name>:11434 — no network_mode needed.
@@ -146,11 +170,7 @@ ${ollamaDepends}    extra_hosts:
       - NET_BIND_SERVICE
       - SETGID
       - SETUID
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
+${resourcesBlock(memory, cpus)}
 
 networks:
   default:
@@ -167,6 +187,8 @@ function generateVpnCompose(
   vncBindHost: string = '127.0.0.1',
   bundledOllama?: boolean,
   ollamaImage?: string,
+  memory?: string,
+  cpus?: string,
 ): string {
   const camofoxPort = port + 1000
   const vncPort = port + 2000
@@ -253,11 +275,7 @@ ${hermesDepends}    extra_hosts:
       - NET_BIND_SERVICE
       - SETGID
       - SETUID
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
+${resourcesBlock(memory, cpus)}
 
 networks:
   default:
