@@ -85,7 +85,9 @@ session_reset:
   idle_minutes: 1440
   at_hour: 4
 
-group_sessions_per_user: true
+# Shared group session by default (one session per group, sender-name prefixed).
+# DMs stay isolated regardless. Set to true for per-person sessions inside a group.
+group_sessions_per_user: false
 
 # --- Agent behavior ---
 agent:

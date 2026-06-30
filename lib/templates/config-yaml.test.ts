@@ -47,7 +47,15 @@ describe('generateDefaultConfig', () => {
     expect(result).toContain('mode: both')
     expect(result).toContain('idle_minutes: 1440')
     expect(result).toContain('at_hour: 4')
-    expect(result).toContain('group_sessions_per_user: true')
+  })
+
+  it('defaults group_sessions_per_user to false (shared group session)', () => {
+    // Override layer: Swarm Map ships a shared group session by default
+    // (one session per group, sender-name prefixed). DMs stay isolated.
+    // Upstream's runtime default is true; we flip it here, not in the runtime.
+    const result = generateDefaultConfig(baseParams)
+    expect(result).toContain('group_sessions_per_user: false')
+    expect(result).not.toContain('group_sessions_per_user: true')
   })
 
   it('contains agent section', () => {
