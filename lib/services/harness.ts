@@ -74,9 +74,15 @@ function parseEnvFilePairs(envPath: string): Record<string, string> {
   return result
 }
 
-// Scan compose dirs AND live Docker port bindings to find next available port
-function nextAvailablePort(composeBaseDir: string): number {
-  const usedPorts = new Set<number>()
+// Scan compose dirs AND live Docker port bindings to find next available port.
+//
+// `reservedPorts` are ports that are allocated-but-not-yet-observable — e.g.
+// persisted in harnesses.json but whose compose file hasn't been written and
+// whose container hasn't been created. Without seeding these, two near-
+// concurrent creates (or a create racing a duplicate/import) both derive the
+// same BASE_PORT and the second container is stuck "Created" with no network.
+function nextAvailablePort(composeBaseDir: string, reservedPorts: number[] = []): number {
+  const usedPorts = new Set<number>(reservedPorts.filter((p): p is number => typeof p === 'number'))
   // Scan standalone compose files
   try {
     const entries = fs.readdirSync(composeBaseDir, { withFileTypes: true })
@@ -107,6 +113,21 @@ function nextAvailablePort(composeBaseDir: string): number {
     port += PORT_STEP
   }
   return port
+}
+
+// Fail loud before writing a compose file if `port` is already claimed by another
+// persisted overlay. This is the last line of defense against double-assignment:
+// nextAvailablePort now seeds reserved ports, but the import path honors a port
+// declared in an agent's own .env (API_SERVER_PORT) which can collide — refuse
+// rather than write a compose that binds an already-taken host port (the agent
+// would otherwise hang in "Created" with no network).
+function assertPortAvailable(overlays: Partial<Harness>[], port: number, selfId: string): void {
+  const clash = overlays.find((h) => h.id !== selfId && h.apiPort === port)
+  if (clash) {
+    throw new Error(
+      `Port ${port} already assigned to harness "${clash.name ?? clash.id}" — refusing to create colliding harness`,
+    )
+  }
 }
 
 // Directories to skip when duplicating an agent (caches, build artifacts, ephemeral state)
@@ -1220,8 +1241,12 @@ export class HarnessService {
       : path.join(os.homedir(), '.hermes-swarm-map')
     const composeBaseDir = path.join(swarmMapDataDir, 'compose')
 
-    // Pick next available port
-    const port = nextAvailablePort(composeBaseDir)
+    // Pick next available port — seed reserved ports from persisted overlays so
+    // the duplicate never reuses a port already handed to another agent.
+    const port = nextAvailablePort(
+      composeBaseDir,
+      overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
+    )
 
     // Copy source data directory if it exists, else scaffold fresh
     if (fs.existsSync(sourceDataDir) && !fs.existsSync(newDataDir)) {
@@ -1266,6 +1291,7 @@ export class HarnessService {
     fs.mkdirSync(agentComposeDir, { recursive: true })
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
+      assertPortAvailable(overlays, port, newId)
       fs.writeFileSync(composePath, generateStandaloneCompose(newName, port, newDataDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
     }
 
@@ -1274,6 +1300,7 @@ export class HarnessService {
       id: newId,
       name: newName,
       channel: `:${port}`,
+      apiPort: port,
       composeFile: composePath,
       serviceName: `hermes-${newName}`,
       parentId: sourceId,
@@ -1358,8 +1385,12 @@ export class HarnessService {
       : path.join(os.homedir(), '.hermes-swarm-map')
     const composeBaseDir = path.join(swarmMapDataDir, 'compose')
 
-    // Pick next available port
-    const port = nextAvailablePort(composeBaseDir)
+    // Pick next available port — seed reserved ports from persisted overlays so
+    // an allocated-but-not-yet-started agent is never re-handed out.
+    const port = nextAvailablePort(
+      composeBaseDir,
+      overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
+    )
 
     // Agent data directory (where .env, config.yaml, SOUL.md live)
     const agentDir = path.join(os.homedir(), `.hermes-${input.name}`)
@@ -1378,6 +1409,7 @@ export class HarnessService {
     fs.mkdirSync(agentComposeDir, { recursive: true })
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
+      assertPortAvailable(overlays, port, id)
       fs.writeFileSync(composePath, generateStandaloneCompose(input.name, port, agentDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
     }
 
@@ -1387,6 +1419,7 @@ export class HarnessService {
       tier: input.tier ?? 'individual',
       platform: input.platform ?? 'hermes',
       channel: input.channel ?? `:${port}`,
+      apiPort: port,
       models: input.models ?? ['claude-sonnet-4-5'],
       tools: input.tools ?? [],
       composeFile: composePath,
@@ -1531,12 +1564,23 @@ If this is your very first startup ever, introduce yourself briefly in your home
     const agentComposeDir = path.join(composeBaseDir, slug)
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
 
+    // Resolve the port up front: honor a port the imported .env already declares,
+    // else allocate, seeding reserved ports from persisted overlays so the import
+    // can't be handed a port another agent already owns. The slug-derived id
+    // matches createOverlay's id so the fail-loud guard checks against everyone else.
+    const importId = 'h_' + slug.replace(/-/g, '_').replace(/\s+/g, '_')
+    const importOverlays = this.storage.read<Partial<Harness>[]>('harnesses.json', [])
+    const reservedPorts = importOverlays
+      .map((h) => h.apiPort)
+      .filter((p): p is number => typeof p === 'number')
+    const existingPort = existingVars.has('API_SERVER_PORT')
+      ? parseInt(envContent.match(/API_SERVER_PORT=(\d+)/)?.[1] || '0', 10)
+      : 0
+    const port = existingPort || nextAvailablePort(composeBaseDir, reservedPorts)
+
     if (!fs.existsSync(composePath)) {
+      assertPortAvailable(importOverlays, port, importId)
       fs.mkdirSync(agentComposeDir, { recursive: true })
-      const existingPort = existingVars.has('API_SERVER_PORT')
-        ? parseInt(envContent.match(/API_SERVER_PORT=(\d+)/)?.[1] || '0', 10)
-        : 0
-      const port = existingPort || nextAvailablePort(composeBaseDir)
       fs.writeFileSync(
         composePath,
         generateStandaloneCompose(slug, port, workDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }),
@@ -1587,6 +1631,11 @@ If this is your very first startup ever, introduce yourself briefly in your home
     if (tools.length > 0) patches.tools = tools
     patches.composeFile = composePath
     patches.serviceName = `hermes-${slug}`
+    // Persist the port the compose actually publishes — createOverlay above
+    // allocated its own throwaway port, so pin the authoritative one here (and
+    // align the display channel) for the next allocation to reserve.
+    patches.apiPort = port
+    patches.channel = `:${port}`
 
     if (Object.keys(patches).length > 0) {
       Object.assign(overlay, patches)
