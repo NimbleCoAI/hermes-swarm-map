@@ -28,6 +28,10 @@ export type Harness = {
   cpu: number
   mem: number
   tools: string[]
+  // The host port this agent's compose publishes (API_SERVER_PORT). Persisted so
+  // port allocation has an authoritative source — `channel` is only a display
+  // string (":8642") and live Docker state is absent for not-yet-started agents.
+  apiPort?: number
   cacheState?: CacheState
   cacheAge?: number
   composeFile?: string
