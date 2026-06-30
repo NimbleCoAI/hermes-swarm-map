@@ -141,6 +141,43 @@ describe('SignalPinService', () => {
     })
   })
 
+  describe('phone normalization', () => {
+    beforeEach(() => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', result: null, id: 1 }),
+      })
+    })
+
+    it('resolves status when the phone is stored with + but queried without +', async () => {
+      await pinService.setPin('+15551234567', '12345678', 'h_personal')
+      // signal-cli registeredAccounts / config.phone may omit the leading +
+      expect(pinService.getPinStatus('15551234567')).toBe('locked')
+    })
+
+    it('resolves getPin when the query has spaces and stray formatting', async () => {
+      await pinService.setPin('+15551234567', '12345678', 'h_personal')
+      const result = pinService.getPin(' +1 555 123 4567 ')
+      expect(result).not.toBeNull()
+      expect(result!.pin).toBe('12345678')
+    })
+
+    it('stores the PIN key under a normalized name regardless of input format', async () => {
+      await pinService.setPin(' 1 (555) 123-4567 ', '12345678', 'h_personal')
+      const allKeys = keys.list([])
+      const pinKey = allKeys.find(k => k.provider === 'signal-pin')
+      expect(pinKey).toBeDefined()
+      expect(pinKey!.name).toBe('Signal PIN (+15551234567)')
+    })
+
+    it('does not create duplicate keys when the same number is set in different formats', async () => {
+      await pinService.setPin('+15551234567', '11111111', 'h_personal')
+      await pinService.setPin('15551234567', '22222222', 'h_personal')
+      const pinKeys = keys.list([]).filter(k => k.provider === 'signal-pin')
+      expect(pinKeys).toHaveLength(1)
+    })
+  })
+
   describe('generatePin', () => {
     it('generates an 8-digit numeric PIN', () => {
       const pin = SignalPinService.generatePin()
