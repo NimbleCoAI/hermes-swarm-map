@@ -177,21 +177,58 @@ describe('generateStandaloneCompose', () => {
         vpnEnabled: true,
         vncBindHost: '100.64.0.5',
       })
-      expect(result).toContain('host_ip: 100.64.0.5')
-      expect(result).not.toContain('host_ip: 127.0.0.1')
+      // The VNC publish (target 6080) carries the override host. The control
+      // port stays on its own default (loopback) — so assert against the VNC
+      // block specifically rather than a blanket absence of 127.0.0.1.
+      expect(result).toMatch(/- host_ip: 100\.64\.0\.5\n {8}published: 10642\n {8}target: 6080/)
     })
 
-    it('only the VNC port is bind-restricted — agent + camofox ports stay reachable', () => {
+    it('the VNC and control ports are bind-restricted — only the agent gateway stays broadly reachable', () => {
       const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
-      // Exactly one host_ip restriction (the VNC port). The agent gateway (8642)
-      // and camofox control port (9377) must remain on the default bind.
+      // Two host_ip restrictions: the human-only VNC port (6080) AND the
+      // unauthenticated camofox control port (9377). The agent gateway (8642)
+      // remains on the default bind so HSM can reach it.
       const matches = result.match(/host_ip:/g) || []
-      expect(matches).toHaveLength(1)
+      expect(matches).toHaveLength(2)
     })
 
     it('does not introduce host_ip in non-VPN compose', () => {
       const result = generateStandaloneCompose(agentName, port, dataDir)
       expect(result).not.toContain('host_ip')
+    })
+  })
+
+  describe('VPN camofox control-port bind security', () => {
+    it('binds the camofox control port (9377) to loopback (127.0.0.1) by default', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, { vpnEnabled: true })
+      // The camofox control port is unauthenticated remote browser control — it
+      // must not be exposed on all interfaces. The agent reaches it in-namespace,
+      // so a loopback host-publish is sufficient for host-local tooling.
+      const controlBlock = result.match(/- host_ip: [^\n]+\n {8}published: 9642\n {8}target: 9377/)
+      expect(controlBlock).not.toBeNull()
+      expect(result).toContain(`published: ${port + 1000}`)
+      expect(result).toContain('target: 9377')
+    })
+
+    it('binds the control port to a configured controlBindHost (e.g. tailnet IP)', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, {
+        vpnEnabled: true,
+        controlBindHost: '100.64.0.7',
+      })
+      // The control publish should carry the override host on its 9377 target.
+      const controlBlock = result.match(/- host_ip: 100\.64\.0\.7\n {8}published: 9642\n {8}target: 9377/)
+      expect(controlBlock).not.toBeNull()
+    })
+
+    it('control and VNC bind hosts are independent', () => {
+      const result = generateStandaloneCompose(agentName, port, dataDir, {
+        vpnEnabled: true,
+        controlBindHost: '100.64.0.7',
+        vncBindHost: '100.64.0.5',
+      })
+      // control port 9377 → controlBindHost; VNC port 6080 → vncBindHost
+      expect(result).toMatch(/- host_ip: 100\.64\.0\.7\n {8}published: 9642\n {8}target: 9377/)
+      expect(result).toMatch(/- host_ip: 100\.64\.0\.5\n {8}published: 10642\n {8}target: 6080/)
     })
   })
 

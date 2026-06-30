@@ -402,6 +402,7 @@ export async function PUT(
         imageOrBuild,
         defaultImage: settings.defaultImage,
         vncBindHost: settings.vncBindHost,
+        controlBindHost: settings.controlBindHost,
         memory: effectiveResources?.memory,
         cpus: effectiveResources?.cpus,
       })
