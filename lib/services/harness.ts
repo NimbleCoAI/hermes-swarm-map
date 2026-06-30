@@ -792,6 +792,7 @@ export class HarnessService {
         ...(overlay.cacheState ? { cacheState: overlay.cacheState } : {}),
         ...(overlay.cacheAge !== undefined ? { cacheAge: overlay.cacheAge } : {}),
         ...(overlay.parentId ? { parentId: overlay.parentId } : {}),
+        ...(overlay.resources ? { resources: overlay.resources } : {}),
       }
 
       // Override status based on restart tracker
@@ -848,6 +849,7 @@ export class HarnessService {
         invocations: 0,
         composeFile: overlay.composeFile,
         serviceName: overlay.serviceName,
+        ...(overlay.resources ? { resources: overlay.resources } : {}),
       } as Harness)
     }
 

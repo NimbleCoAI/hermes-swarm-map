@@ -88,6 +88,10 @@ type SettingsResponse = {
   memoryScope: 'channel' | 'global'
   vpnEnabled: boolean
   capsolverConfigured: boolean
+  // Per-harness compose resource limits. These are NOT env vars — they live in
+  // the compose deploy.resources.limits, so they persist on the harness record
+  // (harnesses.json) and regenerate the compose, not the .env.
+  resources?: { memory?: string; cpus?: string }
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -185,6 +189,9 @@ export async function GET(
   const vpnEnabled = env[VPN_ENABLED_VAR] === 'true'
   const capsolverConfigured = !!env[CAPSOLVER_KEY_VAR]
 
+  // Per-harness resource limits — persisted on the harness overlay (not env).
+  const resources = services.harness.get(id)?.resources
+
   const response: SettingsResponse = {
     dmPolicy,
     groupInvitePolicy,
@@ -193,6 +200,7 @@ export async function GET(
     memoryScope,
     vpnEnabled,
     capsolverConfigured,
+    resources,
     surfaces,
   }
 
@@ -343,14 +351,38 @@ export async function PUT(
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
 
-  // Regenerate compose file when VPN toggle changes
-  if ((body as any).vpnEnabled !== undefined) {
+  // Per-harness resource limits (compose deploy.resources.limits — NOT env vars).
+  // Persist on the harness overlay and detect a change so the compose is only
+  // regenerated when needed.
+  let resourcesChanged = false
+  if (body.resources !== undefined) {
+    const norm = (r?: { memory?: string; cpus?: string }) => `${r?.memory ?? ''}|${r?.cpus ?? ''}`
+    const prev = services.harness.get(id)?.resources
+    resourcesChanged = norm(prev) !== norm(body.resources)
+    if (resourcesChanged) {
+      try { services.harness.updateConfig(id, { resources: body.resources }) } catch {}
+    }
+  }
+
+  // Regenerate the compose file when the VPN toggle OR the resource limits change.
+  // Both are compose-level (not env), so the .env rewrite above doesn't cover them.
+  if ((body as any).vpnEnabled !== undefined || resourcesChanged) {
     const harness = services.harness.get(id)
     if (harness?.composeFile && fs.existsSync(harness.composeFile)) {
       // Read current port from existing compose file
       const existingCompose = fs.readFileSync(harness.composeFile, 'utf-8')
       const portMatch = existingCompose.match(/published:\s*(\d+)/)
       const port = portMatch ? parseInt(portMatch[1], 10) : 8642
+
+      // VPN state for the regenerated compose: use the toggle if it's in this
+      // request, otherwise preserve the current state (from the .env we just wrote).
+      const vpnForCompose = (body as any).vpnEnabled !== undefined
+        ? !!(body as any).vpnEnabled
+        : /^VPN_ENABLED=true$/m.test(content)
+
+      // Resource limits for the regenerated compose: the request value if present,
+      // otherwise the persisted overlay value (so a VPN-only change keeps limits).
+      const effectiveResources = body.resources ?? harness.resources
 
       const settings = services.config.getSettings()
       const imageOrBuild = settings.useLocalBuild && settings.hermesDir
@@ -366,10 +398,12 @@ export async function PUT(
         : undefined
 
       const compose = generateStandaloneCompose(harness.name, port, dataDir, {
-        vpnEnabled: (body as any).vpnEnabled,
+        vpnEnabled: vpnForCompose,
         imageOrBuild,
         defaultImage: settings.defaultImage,
         vncBindHost: settings.vncBindHost,
+        memory: effectiveResources?.memory,
+        cpus: effectiveResources?.cpus,
       })
       fs.writeFileSync(harness.composeFile, compose, 'utf-8')
     }

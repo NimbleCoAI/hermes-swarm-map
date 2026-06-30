@@ -174,9 +174,11 @@ export function generateAgentCompose(
     githubMcpEnabled?: boolean
     bundledOllama?: boolean
     ollamaImage?: string
+    memory?: string
+    cpus?: string
   },
 ): string {
-  const { googleMcpDir, githubMcpEnabled, bundledOllama, ollamaImage } = options ?? {}
+  const { googleMcpDir, githubMcpEnabled, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
   const sourceBlock = 'image' in imageOrBuild
     ? `    image: ${imageOrBuild.image}`
     : `    build:\n      context: ${imageOrBuild.build}\n      dockerfile: Dockerfile`
@@ -241,8 +243,8 @@ ${googleMcpVolumes}    command: gateway
     deploy:
       resources:
         limits:
-          memory: 2G
-          cpus: '2.0'
+          memory: ${memory ?? '2G'}
+          cpus: '${cpus ?? '2.0'}'
 
 networks:
   default:

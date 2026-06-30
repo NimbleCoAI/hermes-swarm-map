@@ -21,6 +21,7 @@ type Settings = {
   memoryScope: 'channel' | 'global'
   vpnEnabled: boolean
   capsolverConfigured: boolean
+  resources?: { memory?: string; cpus?: string }
   surfaces: Record<string, SurfaceSettings>
 }
 
@@ -85,6 +86,15 @@ function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
   function updateVpnEnabled(enabled: boolean) {
     if (!settings) return
     setSettings({ ...settings, vpnEnabled: enabled })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateResources(field: 'memory' | 'cpus', value: string) {
+    if (!settings) return
+    const trimmed = value.trim()
+    const next = { ...(settings.resources ?? {}), [field]: trimmed || undefined }
+    setSettings({ ...settings, resources: next })
     setDirty(true)
     setSaved(false)
   }
@@ -377,6 +387,41 @@ if (loading) {
         {settings.capsolverConfigured && (
           <p className="text-xs text-green-500">CapSolver API key configured — automatic CAPTCHA solving enabled.</p>
         )}
+      </div>
+
+      {/* Resource Limits (memory / cpu) */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Resource Limits</h3>
+        </div>
+        <div className="flex gap-4">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-xs text-muted-foreground">Memory</span>
+            <input
+              type="text"
+              value={settings.resources?.memory ?? ''}
+              placeholder="2G"
+              onChange={(e) => updateResources('memory', e.target.value)}
+              className="w-28 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-xs text-muted-foreground">CPUs</span>
+            <input
+              type="text"
+              value={settings.resources?.cpus ?? ''}
+              placeholder="2.0"
+              onChange={(e) => updateResources('cpus', e.target.value)}
+              className="w-28 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm"
+            />
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Docker compose limits for this agent&apos;s container (e.g. memory <code>6G</code>, CPUs <code>4.0</code>).
+          Defaults to 2G / 2.0 when blank. Memory-heavy agents OOM-kill under the default — raise memory to fit the job.
+          Saving regenerates the compose and recreates the container (in-progress context persists via the data-dir mount).
+        </p>
       </div>
 
       {/* Admin note */}
