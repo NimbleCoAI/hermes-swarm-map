@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   getDecryptedValue: vi.fn((id: string) => (id === 'k_known' ? 'sk-ant-api-REALVALUE123' : undefined)),
   list: vi.fn(() => [{ id: 'k_known', provider: 'anthropic', assignedTo: [], maskedValue: 'sk-a…123', health: 'good' }]),
   update: vi.fn(),
+  setAssignment: vi.fn(),
   add: vi.fn(),
   createOverlay: vi.fn(async () => ({ id: 'h_matilde' })),
 }))
@@ -43,7 +44,7 @@ vi.mock('@/lib/services', () => ({
   services: {
     docker: { isAvailable: () => true, pullImage: () => ({ ok: true }), healthCheck: () => false },
     config: { getSettings: () => ({ ...h.settings, dataDir: h.tmpData }) },
-    keys: { getDecryptedValue: h.getDecryptedValue, list: h.list, update: h.update, add: h.add },
+    keys: { getDecryptedValue: h.getDecryptedValue, list: h.list, update: h.update, setAssignment: h.setAssignment, add: h.add },
     harness: { createOverlay: h.createOverlay },
   },
 }))
@@ -66,6 +67,7 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     h.settings = { useLocalBuild: false, defaultImage: 'ghcr.io/x:latest' }
     h.getDecryptedValue.mockClear()
     h.update.mockClear()
+    h.setAssignment.mockClear()
     h.add.mockClear()
     h.createOverlay.mockClear()
     h.createOverlay.mockResolvedValue({ id: 'h_matilde' })
@@ -132,7 +134,9 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     const env = fs.readFileSync(path.join(h.tmpHome, '.hermes-matilde', '.env'), 'utf-8')
     expect(env).toContain('ANTHROPIC_API_KEY=sk-ant-api-REALVALUE123')
 
-    expect(h.update).toHaveBeenCalledWith('k_known', { assignedTo: ['h_matilde'] })
+    // setAssignment (not the registry-only update) so the reused key's value is
+    // written into the new agent's .env, keeping keys.json and .env in lockstep.
+    expect(h.setAssignment).toHaveBeenCalledWith('k_known', ['h_matilde'])
   })
 
   it('1A: rejects an unknown existing key id', async () => {

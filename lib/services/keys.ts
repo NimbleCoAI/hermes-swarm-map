@@ -451,6 +451,36 @@ export class KeysService {
     return this.list().find((k) => k.id === id)
   }
 
+  // Assign a key to exactly `assignedTo`, keeping every affected agent's .env in
+  // lockstep with keys.json: write the value into newly-assigned agents and strip
+  // it from dropped ones. This is the single consistent assignment primitive —
+  // callers must NOT set `assignedTo` via update() alone, which records the
+  // assignment without touching .env and drifts the registry from the fleet (a
+  // key shows assigned but its var never reaches the agent).
+  //
+  // Returns the harness ids whose .env changed (added ∪ removed) so the caller
+  // can recreate those containers (env_file is read at container creation, not on
+  // a plain restart).
+  setAssignment(id: string, assignedTo: string[]): string[] {
+    const before = this.list().find((k) => k.id === id)
+    if (!before) return []
+    const prev = before.assignedTo ?? []
+    const next = assignedTo ?? []
+    const added = next.filter((h) => !prev.includes(h))
+    const removed = prev.filter((h) => !next.includes(h))
+
+    // Persist the new assignment (materializes a discovered key if needed).
+    this.update(id, { assignedTo: next })
+
+    const value = this.getDecryptedValue(id)
+    if (value) {
+      for (const h of added) this.writeKeyToEnv(h, before.provider, value)
+    }
+    for (const h of removed) this.removeKeyFromEnv(h, before.provider)
+
+    return [...added, ...removed]
+  }
+
   rotateValue(id: string, newValue: string, updates?: Partial<Key>): Key | undefined {
     // Read stored keys and deduplicate by ID (cleanup from prior bugs)
     const raw = this.storage.read<StoredKey[]>(KEYS_FILE, [])
@@ -520,6 +550,14 @@ export class KeysService {
     const stored = this.storage.read<StoredKey[]>(KEYS_FILE, [])
     const key = stored.find((k) => k.id === id)
     if (!key) return false
+    // Strip the credential from every agent it was assigned to, so deleting a key
+    // in HSM actually removes it from the running fleet's .env — not just the
+    // registry. Otherwise a "deleted" key keeps authenticating from stale .env
+    // files. Callers should read the key's `assignedTo` before removing and
+    // recreate those harnesses afterward.
+    for (const harnessId of key.assignedTo ?? []) {
+      this.removeKeyFromEnv(harnessId, key.provider)
+    }
     const filtered = stored.filter((k) => k.id !== id)
     this.storage.write(KEYS_FILE, filtered)
     this.audit.append({ who: 'admin', what: 'key:remove', target: key.provider })
