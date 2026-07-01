@@ -28,28 +28,23 @@ export async function PUT(
     return NextResponse.json(rotated)
   }
 
-  // No value change — update metadata only
-  const key = services.keys.update(id, body)
-  if (!key) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!currentKey) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // If assignedTo changed, sync .env files and restart affected harnesses
-  if (body.assignedTo && currentKey) {
-    const decrypted = services.keys.getDecryptedValue(id)
-    if (decrypted) {
-      const added = body.assignedTo.filter((h: string) => !currentKey.assignedTo.includes(h))
-      const removed = currentKey.assignedTo.filter((h: string) => !body.assignedTo.includes(h))
-      for (const h of added) {
-        services.keys.writeKeyToEnv(h, key.provider, decrypted)
-        try { services.harness.restart(h, 'recreate') } catch {}
-      }
-      for (const h of removed) {
-        services.keys.removeKeyFromEnv(h, key.provider)
-        try { services.harness.restart(h, 'recreate') } catch {}
-      }
+  // Assignment change: setAssignment keeps keys.json and every affected agent's
+  // .env in lockstep (write to newly-assigned, strip from dropped), then recreate
+  // only the containers whose .env actually changed (env_file is read at creation).
+  if (body.assignedTo) {
+    const affected = services.keys.setAssignment(id, body.assignedTo)
+    for (const h of affected) {
+      try { services.harness.restart(h, 'recreate') } catch {}
     }
   }
 
-  return NextResponse.json(key)
+  // Any remaining metadata (budget/health/name).
+  const { assignedTo: _assignedTo, value: _value, ...metadata } = body
+  if (Object.keys(metadata).length) services.keys.update(id, metadata)
+
+  return NextResponse.json(services.keys.list().find((k) => k.id === id))
 }
 
 export async function DELETE(
@@ -57,7 +52,14 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
+  // Capture the assignments before removal so we can recreate those agents once
+  // the credential has been stripped from their .env (remove() does the strip).
+  const key = services.keys.list().find((k) => k.id === id)
+  const affected = key?.assignedTo ?? []
   const removed = services.keys.remove(id)
   if (!removed) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  for (const harnessId of affected) {
+    try { services.harness.restart(harnessId, 'recreate') } catch {}
+  }
   return NextResponse.json({ ok: true })
 }

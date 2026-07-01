@@ -344,7 +344,9 @@ If this is your very first startup ever, introduce yourself briefly in your home
       if (harnessId && existingKeyId) {
         const key = services.keys.list().find((k) => k.id === existingKeyId)
         const assignedTo = Array.from(new Set<string>([...(key?.assignedTo ?? []), harnessId]))
-        services.keys.update(existingKeyId, { assignedTo })
+        // setAssignment (not update) so the reused key's value is written into the
+        // new agent's .env, not just recorded in the registry.
+        services.keys.setAssignment(existingKeyId, assignedTo)
       } else if (harnessId && saveKeyToRegistry && llmKey) {
         const value: string = llmKey
         services.keys.add({ provider, value, assignedTo: [harnessId] })
