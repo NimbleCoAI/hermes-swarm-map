@@ -841,40 +841,65 @@ export class HarnessService {
 
   list(): Harness[] {
     const { harnesses } = this.discover()
-    // Fall back to stored overlays if Docker discovery returned nothing
+    // Fall back to stored overlays if Docker discovery returned nothing (fresh
+    // install, Docker down, nothing started yet). Stored entries are
+    // Partial<Harness> and may omit required fields like `health`, so normalize
+    // each to a full Harness shape — otherwise the dashboard, which reads
+    // h.health.errors, crashes on first run.
     if (harnesses.length === 0) {
-      return this.storage.read<Harness[]>(HARNESSES_FILE, [])
+      // Discovery returned nothing, so no container is confirmed running —
+      // force 'stopped' rather than trust a possibly-stale persisted status
+      // (else a Docker-down dashboard shows a phantom "running").
+      return this.storage
+        .read<Partial<Harness>[]>(HARNESSES_FILE, [])
+        .filter((o) => o.id)
+        .map((o) => this.normalizeStored(o, 'stopped'))
     }
 
-    // Include overlay-only entries that have no running container (e.g. duplicated but not started)
+    // Include overlay-only entries that have no running container (e.g. duplicated but not started).
+    // Discovery proved these aren't running, so force status 'stopped'.
     const discoveredIds = new Set(harnesses.map((h) => h.id))
     const overlays = this.storage.read<Partial<Harness>[]>(HARNESSES_FILE, [])
     for (const overlay of overlays) {
       if (!overlay.id || discoveredIds.has(overlay.id)) continue
-      harnesses.push({
-        id: overlay.id,
-        name: overlay.name ?? overlay.id.replace(/^h_/, '').replace(/_/g, '-'),
-        runtime: 'hermes',
-        status: 'stopped',
-        health: { errors: 0 },
-        persona: overlay.persona ?? '',
-        lastSeen: 0,
-        cpu: 0,
-        mem: 0,
-        tier: overlay.tier ?? 'individual',
-        platform: overlay.platform ?? 'hermes',
-        channel: overlay.channel ?? '',
-        models: overlay.models ?? [],
-        tools: overlay.tools ?? [],
-        costToday: 0,
-        invocations: 0,
-        composeFile: overlay.composeFile,
-        serviceName: overlay.serviceName,
-        ...(overlay.resources ? { resources: overlay.resources } : {}),
-      } as Harness)
+      harnesses.push(this.normalizeStored(overlay, 'stopped'))
     }
 
     return harnesses
+  }
+
+  // Coerce a stored Partial<Harness> overlay into a full Harness, filling every
+  // required field with a sensible default. This is the single normalization
+  // point for stored entries — keeping it in one place is what prevents the
+  // "one construction path forgot `health`" class of dashboard crash.
+  private normalizeStored(o: Partial<Harness>, statusOverride?: HarnessStatus): Harness {
+    return {
+      id: o.id!,
+      name: o.name ?? (o.id ?? '').replace(/^h_/, '').replace(/_/g, '-'),
+      runtime: o.runtime ?? 'hermes',
+      status: statusOverride ?? o.status ?? 'stopped',
+      health: o.health ?? { errors: 0 },
+      persona: o.persona ?? '',
+      lastSeen: o.lastSeen ?? 0,
+      cpu: o.cpu ?? 0,
+      mem: o.mem ?? 0,
+      tier: o.tier ?? 'individual',
+      platform: o.platform ?? 'hermes',
+      channel: o.channel ?? '',
+      models: o.models ?? [],
+      tools: o.tools ?? [],
+      costToday: o.costToday ?? 0,
+      invocations: o.invocations ?? 0,
+      composeFile: o.composeFile,
+      serviceName: o.serviceName,
+      ...(o.parentId ? { parentId: o.parentId } : {}),
+      ...(o.apiPort !== undefined ? { apiPort: o.apiPort } : {}),
+      ...(o.cacheState ? { cacheState: o.cacheState } : {}),
+      ...(o.cacheAge !== undefined ? { cacheAge: o.cacheAge } : {}),
+      ...(o.pinnedImageRef ? { pinnedImageRef: o.pinnedImageRef } : {}),
+      ...(o.lastKnownDigest ? { lastKnownDigest: o.lastKnownDigest } : {}),
+      ...(o.resources ? { resources: o.resources } : {}),
+    }
   }
 
   get(id: string): Harness | undefined {

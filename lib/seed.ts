@@ -8,28 +8,25 @@ const DATA_DIR = process.env.DATA_DIR
 
 const storage = new Storage(DATA_DIR)
 
-// Write settings pointing at the real hermes-swarm compose directory
+// Default to pulling the published hermes-agent-mt image. hermesDir is only a
+// hint for the opt-in local-build toggle; point it at hermes-agent-mt (not the
+// retired hermes-swarm path) so it's correct if a dev enables local build.
 storage.write('settings.json', {
-  hermesDir: path.join(os.homedir(), 'Documents/GitHub/hermes-swarm'),
+  hermesDir: path.join(os.homedir(), 'Documents/GitHub/hermes-agent-mt'),
   dataDir: DATA_DIR,
   theme: 'light',
   composeFiles: [],
   onboarded: true,
-  useLocalBuild: true,
+  defaultImage: 'ghcr.io/nimblecoai/hermes-agent-mt:latest',
+  useLocalBuild: false,
 })
 
-// Harnesses are discovered live from Docker.
-// harnesses.json stores user-configured overlays (tier, platform, channel, etc.)
-storage.write('harnesses.json', [
-  { id: 'h_personal', tier: 'individual', platform: 'mattermost', channel: 'general' },
-  { id: 'h_research', tier: 'team', platform: 'mattermost', channel: 'research' },
-  { id: 'h_ops', tier: 'team', platform: 'mattermost', channel: 'team-ops' },
-  { id: 'h_notifications', tier: 'org', platform: 'telegram', channel: '@example_notify_bot' },
-  { id: 'h_public', tier: 'orgpublic', platform: 'telegram', channel: '@example_public_bot' },
-  { id: 'h_thinker', tier: 'org', platform: 'hermes', channel: ':8692' },
-  { id: 'h_doer', tier: 'org', platform: 'hermes', channel: ':8702' },
-  { id: 'h_generalist', tier: 'org', platform: 'hermes', channel: ':8712' },
-])
+// Harnesses are discovered live from Docker; harnesses.json only stores
+// user-configured overlays (tier, platform, channel, etc.) that attach to a
+// discovered container by id. Seed it empty so a fresh install shows a clean
+// empty dashboard instead of 8 placeholder "bots" the user never created
+// (which also read as orphan overlays with no live container behind them).
+storage.write('harnesses.json', [])
 
 // Models — static config (not discovered).
 // Native Anthropic + local Ollama only. The Bedrock (LiteLLM :4100) and

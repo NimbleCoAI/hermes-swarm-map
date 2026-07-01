@@ -40,9 +40,13 @@ describe('Local build compose generation', () => {
     vi.restoreAllMocks()
   })
 
-  it('defaults useLocalBuild to true in settings', () => {
+  it('defaults useLocalBuild to false so a fresh install pulls the published image', () => {
+    // Local build requires a hermes source checkout on the host, which a fresh
+    // install (e.g. a new machine) does not have — deploy then fails with
+    // "no Dockerfile found". The correct default is to pull the published
+    // hermes-agent-mt image; local build is an opt-in dev toggle.
     const settings = config.getSettings()
-    expect(settings.useLocalBuild).toBe(true)
+    expect(settings.useLocalBuild).toBe(false)
   })
 
   it('generates compose with build directive when useLocalBuild is true', async () => {

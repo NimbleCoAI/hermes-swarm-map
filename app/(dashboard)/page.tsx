@@ -52,7 +52,7 @@ export default function DashboardPage() {
 
   const running = harnesses?.filter((h) => h.status === 'running').length ?? 0
   const invocations = harnesses?.reduce((s, h) => s + h.invocations, 0) ?? 0
-  const errors = harnesses?.reduce((s, h) => s + h.health.errors, 0) ?? 0
+  const errors = harnesses?.reduce((s, h) => s + (h.health?.errors ?? 0), 0) ?? 0
   const costToday = harnesses?.reduce((s, h) => s + h.costToday, 0) ?? 0
   const recentAudit = audit?.slice(-10).reverse() ?? []
 

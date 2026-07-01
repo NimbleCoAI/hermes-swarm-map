@@ -41,6 +41,19 @@ describe('HarnessService', () => {
     expect(result[0].name).toBe('test-harness')
   })
 
+  it('normalizes stored partial overlays (missing health) into a full Harness shape', () => {
+    // Real on-disk overlays are Partial<Harness> and can omit required fields.
+    // When Docker discovery finds nothing (fresh install, nothing running), list()
+    // falls back to these — and the dashboard read h.health.errors, white-screening.
+    storage.write('harnesses.json', [{ id: 'h_partial', name: 'partial-bot' }])
+    const result = service.list()
+    expect(result).toHaveLength(1)
+    expect(result[0].health).toEqual({ errors: 0 })
+    expect(result[0].invocations).toBe(0)
+    expect(result[0].costToday).toBe(0)
+    expect(result[0].status).toBe('stopped')
+  })
+
   it('gets a single harness by id', () => {
     storage.write('harnesses.json', [
       { id: 'h_test', name: 'test', runtime: 'hermes', status: 'running', health: { errors: 0 }, persona: 'Test', tier: 'team', platform: 'telegram', channel: '@test', lastSeen: Date.now(), models: ['claude-sonnet-4.5'], costToday: 1.5, invocations: 42, cpu: 10, mem: 256, tools: ['memory'] },
