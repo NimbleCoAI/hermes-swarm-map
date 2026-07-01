@@ -30,6 +30,7 @@ import json
 import os
 import re
 import secrets as _secrets
+import subprocess
 import sys
 
 # ── File selection ────────────────────────────────────────────────────────────
@@ -50,6 +51,20 @@ def select_sensitive_files(paths):
         elif p.endswith(".md") and "/" not in p:
             out.append(p)
     return out
+
+
+def git_changed_files(base_ref="origin/main", root="."):
+    """Files changed across the FULL PR range — the three-dot diff
+    ``git diff --name-only {base_ref}...HEAD`` (everything on the PR branch since
+    it forked from ``base_ref``, not just the tip commit). Feeds the diff-only PR
+    gate, which then passes these through ``select_sensitive_files``. The
+    full-tree ``--all`` path (push:main + scheduled) is the backstop that still
+    catches leaks in files a given PR did not touch."""
+    out = subprocess.run(
+        ["git", "-C", root, "diff", "--name-only", f"{base_ref}...HEAD"],
+        capture_output=True, text=True, check=True,
+    )
+    return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
 
 
 def gather_base_files(root="."):
@@ -388,8 +403,15 @@ if __name__ == "__main__":  # pragma: no cover
     det_only = "--deterministic-only" in argv
     argv = [a for a in argv if a != "--deterministic-only"]
     base_root = os.environ.get("SANITIZE_ROOT", ".")
+    # --all:  full-tree audit (push:main + scheduled gardener lane) — the backstop.
+    # --diff: diff-only PR gate — scans just the files changed across the full PR
+    #         range (git diff --name-only BASE...HEAD, three-dot). Both feed the
+    #         same two-layer, fail-closed detection; only file SELECTION differs.
     if argv and argv[0] == "--all":
         argv = gather_base_files(base_root)
+    elif argv and argv[0] == "--diff":
+        base_ref = os.environ.get("SANITIZE_BASE_REF", "origin/main")
+        argv = git_changed_files(base_ref, base_root)
     if det_only:
         sys.exit(main(argv, root=base_root, client_factory=lambda: None, require_llm=False))
     sys.exit(main(argv, root=base_root))

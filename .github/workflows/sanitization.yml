@@ -2,8 +2,16 @@ name: sanitization
 
 # Gate the base package (infra/templates/**, docs, base skills/soul) so it never
 # ships secrets, PII, or use-case-specific particulars to every agent — even from
-# an automated contribution. Runs a deterministic secret/PII layer (no key needed)
-# plus an LLM particulars layer, full-tree, fail-closed.
+# an automated contribution. Two layers, both required, fail-closed: a
+# deterministic secret/PII layer (no key needed) plus an LLM particulars layer.
+#
+# Scope differs by trigger:
+#   * pull_request → DIFF-ONLY. Scans only files changed across the full PR range
+#     (git diff --name-only origin/main...HEAD). Keeps the gate from flaky-blocking
+#     contributors on pre-existing, untouched content.
+#   * push: main   → FULL-TREE (--all). Publish-time backstop — unchanged.
+# The scheduled full-tree audit (the detection backstop for anything a diff-only PR
+# never touched) lives in sanitization-scheduled.yml.
 on:
   pull_request:
     paths:
@@ -15,6 +23,7 @@ on:
       - 'scripts/check_sanitization.py'
       - 'scripts/test_check_sanitization.py'
       - '.github/workflows/sanitization.yml'
+      - '.github/workflows/sanitization-scheduled.yml'
   push:
     branches: [main]
 
@@ -23,6 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the three-dot PR-range diff has a merge-base to work from.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -30,8 +42,18 @@ jobs:
         run: pip install -r scripts/requirements.txt
       - name: Scanner self-tests
         run: python -m pytest scripts/test_check_sanitization.py -q
+      - name: Determine scan scope
+        id: scope
+        # PRs scan only their own diff; push:main scans the whole base package.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin main --quiet
+            echo "mode=--diff" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=--all" >> "$GITHUB_OUTPUT"
+          fi
       - name: Secrets & PII gate (deterministic — always enforced, no key needed)
-        run: python scripts/check_sanitization.py --all --deterministic-only
+        run: python scripts/check_sanitization.py ${{ steps.scope.outputs.mode }} --deterministic-only
       - name: Particulars gate (semantic — needs ANTHROPIC_API_KEY, fails closed)
         # Catches use-case-specific names / orgs / case IDs. Until the repo secret
         # ANTHROPIC_API_KEY is set, this step fails closed (the message says so) —
@@ -39,4 +61,4 @@ jobs:
         # key", a red above means "a secret/PII leak was found".
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python scripts/check_sanitization.py --all
+        run: python scripts/check_sanitization.py ${{ steps.scope.outputs.mode }}
