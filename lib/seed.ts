@@ -8,14 +8,17 @@ const DATA_DIR = process.env.DATA_DIR
 
 const storage = new Storage(DATA_DIR)
 
-// Write settings pointing at the real hermes-swarm compose directory
+// Default to pulling the published hermes-agent-mt image. hermesDir is only a
+// hint for the opt-in local-build toggle; point it at hermes-agent-mt (not the
+// retired hermes-swarm path) so it's correct if a dev enables local build.
 storage.write('settings.json', {
-  hermesDir: path.join(os.homedir(), 'Documents/GitHub/hermes-swarm'),
+  hermesDir: path.join(os.homedir(), 'Documents/GitHub/hermes-agent-mt'),
   dataDir: DATA_DIR,
   theme: 'light',
   composeFiles: [],
   onboarded: true,
-  useLocalBuild: true,
+  defaultImage: 'ghcr.io/nimblecoai/hermes-agent-mt:latest',
+  useLocalBuild: false,
 })
 
 // Harnesses are discovered live from Docker; harnesses.json only stores

@@ -14,7 +14,9 @@ const DEFAULT_SETTINGS: Settings = {
   theme: 'light',
   composeFiles: [],
   defaultImage: 'ghcr.io/nimblecoai/hermes-agent-mt:latest',
-  useLocalBuild: true,
+  // Pull the published image by default — a fresh install has no local hermes
+  // source checkout to build from. Local build is an opt-in dev toggle (Settings).
+  useLocalBuild: false,
   vncBindHost: '127.0.0.1',
   controlBindHost: '127.0.0.1',
 }
