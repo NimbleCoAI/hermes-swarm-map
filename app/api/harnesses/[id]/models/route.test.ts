@@ -130,4 +130,55 @@ describe('Models API — PUT validation', () => {
     expect(json.error).toMatch(/missing model/i)
     expect(fs.writeFileSync).not.toHaveBeenCalled()
   })
+
+  // --- Section replacement must not leave orphaned block-sequence items -----
+  //
+  // Regression: an existing config whose `fallback_providers:` entries were
+  // written with the dash at COLUMN 0 (valid YAML) was only partially replaced —
+  // the old col-0 `- provider:` items don't match the "skip indented line" rule,
+  // so they survived AFTER the freshly-written block, producing a bare sequence
+  // item as a sibling of top-level keys → invalid YAML → agent can't load config.
+  it('fully replaces a column-0 fallback_providers block (no orphaned entries)', async () => {
+    const existing = [
+      'model:',
+      '  provider: anthropic',
+      '  default: claude-sonnet-4-6',
+      'fallback_providers:',
+      '- provider: anthropic',           // <-- dash at column 0 (the failing shape)
+      '  model: claude-sonnet-4-6',
+      '- provider: ollama',
+      '  model: qwen3:30b',
+      '  base_url: http://host.docker.internal:11434/v1',
+      'credential_pool_strategies: {}',
+      '',
+    ].join('\n')
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(existing as never)
+    let written = ''
+    vi.spyOn(fs, 'writeFileSync').mockImplementation((_p, data) => { written = String(data) })
+
+    const body = {
+      fallback_providers: [
+        { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+        { provider: 'ollama', model: 'qwen3:30b', base_url: 'http://host.docker.internal:11434/v1' },
+        { provider: 'ollama', model: 'glm4:9b', base_url: 'http://host.docker.internal:11434/v1' },
+      ],
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+
+    // No orphaned column-0 sequence items may remain anywhere in the output.
+    expect(written).not.toMatch(/^- provider:/m)
+    // The trailing top-level key must survive exactly once (not duplicated/eaten).
+    expect((written.match(/^credential_pool_strategies:/gm) ?? []).length).toBe(1)
+    // The new final fallback landed, and the old block was not carried over twice.
+    expect(written).toContain('glm4:9b')
+    expect((written.match(/model: qwen3:30b/g) ?? []).length).toBe(1)
+    // Every non-blank line between the header and the next top-level key is indented.
+    const lines = written.split('\n')
+    const start = lines.findIndex((l) => /^fallback_providers:/.test(l))
+    const end = lines.findIndex((l, i) => i > start && /^[A-Za-z_][\w-]*:/.test(l))
+    for (const l of lines.slice(start + 1, end)) {
+      if (l.trim() !== '') expect(l).toMatch(/^\s+/)
+    }
+  })
 })
