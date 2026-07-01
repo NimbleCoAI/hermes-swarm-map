@@ -179,12 +179,14 @@ export async function PUT(
       continue
     }
 
-    if (inModelSection) {
-      if (/^\s+\S/.test(line)) continue
+    // A section (model / fallback_providers) spans everything up to the next
+    // TOP-LEVEL mapping key. Skip all of the old body — indented continuation
+    // lines, blank lines, AND column-0 block-sequence items (`- provider:`).
+    // Only matching indented lines (the old rule) left col-0 list items behind
+    // as orphans → a bare sequence item beside top-level keys → invalid YAML.
+    if (inModelSection || inFpSection) {
+      if (!/^[A-Za-z_][\w-]*:/.test(line)) continue
       inModelSection = false
-    }
-    if (inFpSection) {
-      if (/^\s+\S/.test(line)) continue
       inFpSection = false
     }
     updated.push(line)
