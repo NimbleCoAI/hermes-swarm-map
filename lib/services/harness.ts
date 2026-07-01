@@ -847,10 +847,13 @@ export class HarnessService {
     // each to a full Harness shape — otherwise the dashboard, which reads
     // h.health.errors, crashes on first run.
     if (harnesses.length === 0) {
+      // Discovery returned nothing, so no container is confirmed running —
+      // force 'stopped' rather than trust a possibly-stale persisted status
+      // (else a Docker-down dashboard shows a phantom "running").
       return this.storage
         .read<Partial<Harness>[]>(HARNESSES_FILE, [])
         .filter((o) => o.id)
-        .map((o) => this.normalizeStored(o))
+        .map((o) => this.normalizeStored(o, 'stopped'))
     }
 
     // Include overlay-only entries that have no running container (e.g. duplicated but not started).
