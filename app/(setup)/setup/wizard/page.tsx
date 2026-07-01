@@ -103,6 +103,7 @@ const PROVIDER_OPTIONS = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'ollama', label: 'Ollama (local)' },
+  { value: 'zai', label: 'Z.ai (GLM)' },
   { value: 'google', label: 'Google' },
   { value: 'bedrock', label: 'AWS Bedrock' },
 ]
@@ -110,7 +111,8 @@ const PROVIDER_OPTIONS = [
 const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-6'],
   openrouter: ['anthropic/claude-sonnet-4-6', 'anthropic/claude-opus-4-6', 'openai/gpt-4o'],
-  ollama: ['qwen2.5:0.5b', 'qwen3:8b', 'qwen3:32b', 'llama3.3:70b'],
+  ollama: ['qwen2.5:0.5b', 'qwen3:8b', 'glm4:9b', 'qwen3:32b', 'llama3.3:70b'],
+  zai: ['glm-5.2', 'glm-4.6', 'glm-4.5-flash'],
   google: ['gemini-2.5-flash', 'gemini-2.5-pro'],
   bedrock: ['anthropic.claude-sonnet-4-6-v1', 'anthropic.claude-haiku-4-5-v1'],
 }
@@ -121,6 +123,7 @@ const PROVIDER_KEY_MAP: Record<string, string | null> = {
   google: 'GOOGLE_API_KEY',
   bedrock: 'AWS_BEARER_TOKEN_BEDROCK',
   ollama: null,
+  zai: 'GLM_API_KEY',
 }
 
 function slugify(name: string): string {

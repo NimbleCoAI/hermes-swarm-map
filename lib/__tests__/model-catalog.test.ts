@@ -6,7 +6,7 @@
 // this agent (needs a key, we know which env var, and it's absent). Everything
 // uncertain FAILS OPEN — a valid config must never be blocked.
 import { describe, it, expect } from 'vitest'
-import { validateCascadeEntries } from '../model-catalog'
+import { validateCascadeEntries, MODEL_CATALOG, ENV_TO_PROVIDER } from '../model-catalog'
 
 describe('validateCascadeEntries', () => {
   // --- Empty-id guard (always rejects, regardless of credentials) ----------
@@ -150,5 +150,45 @@ describe('validateCascadeEntries', () => {
     // Verify a no-key provider and an uncertain provider still pass.
     expect(validateCascadeEntries([{ provider: 'ollama', model: 'x' }])).toEqual([])
     expect(validateCascadeEntries([{ provider: 'nous', model: 'x' }])).toEqual([])
+  })
+
+  // --- zai (GLM) provider — Z.ai cloud, key-authenticated -------------------
+
+  it('accepts a zai/GLM model when GLM_API_KEY is configured', () => {
+    const errors = validateCascadeEntries([{ provider: 'zai', model: 'glm-5.2' }], new Set(['GLM_API_KEY']))
+    expect(errors).toEqual([])
+  })
+
+  it('accepts a zai/GLM model when an alternate ZAI_API_KEY is configured', () => {
+    const errors = validateCascadeEntries([{ provider: 'zai', model: 'glm-5.2' }], new Set(['ZAI_API_KEY']))
+    expect(errors).toEqual([])
+  })
+
+  it('rejects a zai/GLM model when the agent has no GLM key (the crash case)', () => {
+    const errors = validateCascadeEntries([{ provider: 'zai', model: 'glm-5.2' }], new Set(['ANTHROPIC_API_KEY']))
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('glm-5.2')
+    expect(errors[0]).toContain('zai')
+    expect(errors[0]).toContain('GLM_API_KEY')
+  })
+})
+
+describe('MODEL_CATALOG — GLM / open-model lane', () => {
+  it('exposes GLM-5.2 under a first-class zai provider', () => {
+    const zai = MODEL_CATALOG.zai
+    expect(zai, 'zai provider should be registered in the catalog').toBeDefined()
+    expect(zai.map((m) => m.id)).toContain('glm-5.2')
+  })
+
+  it('offers a genuinely-local GLM via the existing ollama provider (glm4:9b)', () => {
+    const ids = MODEL_CATALOG.ollama.map((m) => m.id)
+    expect(ids).toContain('glm4:9b')
+    const local = MODEL_CATALOG.ollama.find((m) => m.id === 'glm4:9b')
+    expect(local?.tier).toBe('local')
+  })
+
+  it('maps the GLM key env vars to the zai provider for /suggest detection', () => {
+    expect(ENV_TO_PROVIDER.GLM_API_KEY).toBe('zai')
+    expect(ENV_TO_PROVIDER.ZAI_API_KEY).toBe('zai')
   })
 })

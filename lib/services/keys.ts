@@ -84,6 +84,9 @@ const PROVIDER_PATTERNS: ProviderPattern[] = [
   { varPattern: /^CAPSOLVER_API_KEY$/i, provider: 'capsolver' },
   { varPattern: /^OPEN_MEASURES_API_KEY$/i, provider: 'open-measures' },
   { varPattern: /^PEXELS_API_KEY$/i, provider: 'pexels' },
+  // Z.ai (GLM). The runtime plugin accepts GLM_API_KEY / ZAI_API_KEY / Z_AI_API_KEY;
+  // GLM_API_KEY is the canonical one HSM writes (see PROVIDER_TO_VAR + deploy template).
+  { varPattern: /^(GLM_API_KEY|ZAI_API_KEY|Z_AI_API_KEY)$/i, provider: 'zai' },
 ]
 
 function detectProvider(varName: string, value: string): string | null {
@@ -304,6 +307,7 @@ export class KeysService {
     capsolver: 'CAPSOLVER_API_KEY',
     'open-measures': 'OPEN_MEASURES_API_KEY',
     pexels: 'PEXELS_API_KEY',
+    zai: 'GLM_API_KEY',
   }
 
   // Manual add (user-input key not from a .env file)

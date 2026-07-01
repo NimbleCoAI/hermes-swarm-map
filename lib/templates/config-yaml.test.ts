@@ -124,6 +124,16 @@ describe('generateDefaultConfig', () => {
     expect(result).not.toContain('base_url:')
   })
 
+  it('passes the zai provider through unchanged with no base_url (plugin bakes its endpoint)', () => {
+    const result = generateDefaultConfig({ provider: 'zai', primaryModel: 'glm-5.2' })
+    expect(result).toContain('provider: zai')
+    expect(result).toContain('default: glm-5.2')
+    // The runtime zai plugin owns base_url (https://api.z.ai/...); must NOT be
+    // rewritten to custom or given a localhost ollama URL.
+    expect(result).not.toContain('provider: custom')
+    expect(result).not.toContain('base_url:')
+  })
+
   // --- MCP Servers ---
 
   it('generates config without mcp_servers when none provided', () => {

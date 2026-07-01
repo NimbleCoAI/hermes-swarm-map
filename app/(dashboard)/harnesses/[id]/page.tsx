@@ -70,10 +70,10 @@ const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
   planned: 'bg-[var(--warning)]/10 text-[var(--warning)]',
 }
 
-const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'custom', 'gemini', 'nous', 'bedrock'] as const
+const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'custom', 'gemini', 'nous', 'bedrock', 'zai'] as const
 
 const KEY_PROVIDERS = [
-  'anthropic', 'openai', 'notion', 'github', 'telegram', 'signal',
+  'anthropic', 'openai', 'zai', 'notion', 'github', 'telegram', 'signal',
   'mattermost', 'aws', 'aws-bedrock', 'google-cloud', 'brave',
   'helius', 'coingecko', 'dehashed', 'opencorporates', 'capsolver',
   'open-measures', 'pexels',
