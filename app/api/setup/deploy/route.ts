@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
+import { toHarnessSlug } from '@/lib/services/harness'
 import { installBaselineTemplates } from '@/lib/services/templates'
 import { defaultEnabledPlugins } from '@/lib/services/artifacts-manifest'
 import { getUseCaseTemplate, installUseCaseTemplate, templateEnabledPlugins } from '@/lib/services/usecase-templates'
@@ -12,13 +13,6 @@ import { execSync } from 'child_process'
 
 const BASE_PORT = 8642
 const PORT_STEP = 10
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
 
 function expandPath(p: string): string {
   return p.replace(/^~/, os.homedir())
@@ -79,7 +73,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'name, provider, and primaryModel are required' }, { status: 400 })
     }
 
-    const slug = slugify(name)
+    const slug = toHarnessSlug(name)
     if (!slug) {
       return NextResponse.json({ ok: false, error: 'Invalid name — could not slugify' }, { status: 400 })
     }

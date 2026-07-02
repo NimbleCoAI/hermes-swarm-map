@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { HarnessService } from '../harness'
+import { HarnessService, toHarnessSlug } from '../harness'
 import { Storage } from '../storage'
 import { DockerService } from '../docker'
 import { AuditService } from '../audit'
@@ -54,6 +54,53 @@ describe('HarnessService.createOverlay', () => {
     const result = await service.createOverlay({ name: 'minimal' })
     expect(result.tier).toBe('individual')
     expect(result.platform).toBe('hermes')
+  })
+
+  // Slug normalization (re-cut of #90): docker image/service/network refs must
+  // be lowercase, and on a case-insensitive filesystem a capitalized name
+  // (e.g. "Mare") collides with its lowercase compose/data dirs — so `up`
+  // fails with "no such service: hermes-mare". Normalize at creation.
+  it('normalizes an uppercase name to a lowercase docker-safe slug', async () => {
+    storage.write('harnesses.json', [])
+    const result = await service.createOverlay({ name: 'Mare' })
+    expect(result.name).toBe('mare')
+    expect(result.id).toBe('h_mare')
+    expect(result.serviceName).toBe('hermes-mare')
+    // Exact-case dir checks via readdir — a plain existsSync('.hermes-mare')
+    // would false-pass on macOS's case-insensitive filesystem.
+    expect(fs.readdirSync(tmpDir)).toContain('.hermes-mare')
+    expect(path.dirname(result.composeFile!)).toBe(
+      path.join(tmpDir, '.hermes-swarm-map', 'compose', 'mare')
+    )
+  })
+
+  it('slugs spaces and mixed case to hyphens', async () => {
+    storage.write('harnesses.json', [])
+    const result = await service.createOverlay({ name: 'My Cool Agent' })
+    expect(result.name).toBe('my-cool-agent')
+    expect(result.id).toBe('h_my_cool_agent')
+    expect(result.serviceName).toBe('hermes-my-cool-agent')
+  })
+
+  it('rejects a name that slugs to an existing harness', async () => {
+    storage.write('harnesses.json', [{ id: 'h_mare', name: 'mare' }])
+    await expect(service.createOverlay({ name: 'Mare' })).rejects.toThrow(/already exists/)
+  })
+
+  it('rejects a name with no sluggable characters', async () => {
+    storage.write('harnesses.json', [])
+    await expect(service.createOverlay({ name: '!!!' })).rejects.toThrow()
+  })
+})
+
+describe('toHarnessSlug', () => {
+  it('lowercases, hyphenates non-alphanumerics, and trims edge dashes', () => {
+    expect(toHarnessSlug('Mare')).toBe('mare')
+    expect(toHarnessSlug('My Cool Agent')).toBe('my-cool-agent')
+    expect(toHarnessSlug('  Mare!! ')).toBe('mare')
+    expect(toHarnessSlug('A__B..C')).toBe('a-b-c')
+    expect(toHarnessSlug('already-a-slug')).toBe('already-a-slug')
+    expect(toHarnessSlug('!!!')).toBe('')
   })
 })
 

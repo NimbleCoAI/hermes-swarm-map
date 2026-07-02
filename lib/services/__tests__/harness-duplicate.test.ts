@@ -137,3 +137,58 @@ describe('HarnessService.duplicate — identity reset', () => {
     expect(env).not.toMatch(/^SLACK_APP_TOKEN=/m)
   })
 })
+
+// Slug normalization on duplicate (re-cut of #90): docker image/service/network
+// refs must be lowercase, and on a case-insensitive filesystem a capitalized
+// name collides with its lowercase compose/data dirs — the duplicate silently
+// reuses the wrong-cased compose and `up` fails with "no such service".
+describe('HarnessService.duplicate — slug normalization', () => {
+  let tmpDir: string
+  let homeDir: string
+  let storage: Storage
+  let service: HarnessService
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-dupslug-'))
+    homeDir = path.join(tmpDir, 'home')
+    fs.mkdirSync(homeDir, { recursive: true })
+    vi.spyOn(os, 'homedir').mockReturnValue(homeDir)
+    storage = new Storage(tmpDir)
+    storage.write('settings.json', { dataDir: tmpDir }) // keep compose in tmp
+    const audit = new AuditService(storage)
+    const config = new ConfigService(storage)
+    service = new HarnessService(storage, new DockerService(), audit, config)
+    storage.write('harnesses.json', [{ id: 'h_srcagent', name: 'srcagent', tier: 'team' }])
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('normalizes the new name to a lowercase docker-safe slug', async () => {
+    const result = await service.duplicateOverlay('h_srcagent', 'Dup Agent')
+    expect(result).toBeDefined()
+    expect(result!.name).toBe('dup-agent')
+    expect(result!.id).toBe('h_dup_agent')
+    expect(result!.serviceName).toBe('hermes-dup-agent')
+    // Exact-case dir checks via readdir — existsSync would false-pass on
+    // macOS's case-insensitive filesystem.
+    expect(fs.readdirSync(homeDir)).toContain('.hermes-dup-agent')
+    expect(fs.readdirSync(path.join(tmpDir, 'compose'))).toContain('dup-agent')
+  })
+
+  it('rejects when the slugged name collides with an existing harness', async () => {
+    storage.write('harnesses.json', [
+      { id: 'h_srcagent', name: 'srcagent', tier: 'team' },
+      { id: 'h_mare', name: 'mare' },
+    ])
+    const result = await service.duplicateOverlay('h_srcagent', 'Mare')
+    expect(result).toBeUndefined()
+  })
+
+  it('rejects a name with no sluggable characters', async () => {
+    const result = await service.duplicateOverlay('h_srcagent', '!!!')
+    expect(result).toBeUndefined()
+  })
+})
