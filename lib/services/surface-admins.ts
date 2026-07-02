@@ -116,9 +116,15 @@ export type AdminList = {
  * Security posture:
  * - isAdmin fails closed: unknown user / unreadable store / unsupported surface
  *   / wildcard allowlist → NOT admin.
- * - setAdmins is authorized against the CURRENT admin set (self-escalation
- *   guard): only an existing admin (explicit, or bootstrap = DM allowlist) may
- *   mutate the list, and identities are validated before they enter the store.
+ * - Mutations are transport-gated: root middleware.ts (PR #139) requires a
+ *   valid operator-session cookie on every PUT/POST/PATCH/DELETE, and agent
+ *   containers cannot obtain that cookie. That is the security boundary.
+ * - setAdmins additionally checks `actor` against the CURRENT admin set
+ *   (explicit, or bootstrap = DM allowlist). This is defense-in-depth plus
+ *   semantic authz — it records/verifies WHICH surface identity performed the
+ *   change and still blocks self-escalation if the transport gate is ever
+ *   disabled (kill-switch) — and identities are validated before they enter
+ *   the store.
  */
 export class SurfaceAdminService {
   constructor(
@@ -185,12 +191,16 @@ export class SurfaceAdminService {
   /**
    * Replace the explicit admin list for a surface.
    *
-   * Authorization (self-escalation guard): `actor` must ALREADY be an admin for
-   * this surface — either in the current explicit list, or, before any explicit
-   * list exists, in the DM allowlist (the bootstrap set established via the
-   * trusted connect/settings dashboard plane). A group member who is not already
-   * an admin therefore cannot add themselves, even by driving the agent to call
-   * this route.
+   * Transport authorization happens BEFORE this code runs: the operator-cookie
+   * middleware (middleware.ts, PR #139) gates every mutating /api request, so
+   * only a logged-in dashboard operator can reach this at all.
+   *
+   * Actor check (defense-in-depth + semantic attribution): `actor` must ALREADY
+   * be an admin for this surface — either in the current explicit list, or,
+   * before any explicit list exists, in the DM allowlist (the bootstrap set).
+   * This ties the change to a concrete surface identity for the audit log and
+   * keeps self-escalation blocked even if the transport gate is disabled via
+   * its kill-switch (HSM_OPERATOR_TOKEN unset).
    *
    * Returns a discriminated result rather than throwing so the route can map it
    * to the right HTTP status.
