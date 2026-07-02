@@ -712,16 +712,8 @@ export default function WizardPage() {
                         Register / connect a Signal number
                       </Button>
                       <p className="text-xs text-muted-foreground">
-                        Runs the same registration as the harness Surfaces tab (register → verify → profile). Or paste an already-registered number:
+                        Runs the same registration as the harness Surfaces tab (register → verify → profile), including an “already have a registered number” option — enter the number once, in there.
                       </p>
-                      <div>
-                        <FieldLabel>Phone Number (E.164)</FieldLabel>
-                        <Input
-                          value={state.signalPhone}
-                          onChange={(e) => update({ signalPhone: e.target.value })}
-                          placeholder="+15551234567"
-                        />
-                      </div>
                     </>
                   )}
                 </div>
@@ -974,7 +966,7 @@ export default function WizardPage() {
               {state.signalEnabled && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Signal</span>
-                  <span>{state.signalPhone}</span>
+                  <span>{signalCaptured?.phone ?? (signalCaptured ? 'registered' : 'not registered')}</span>
                 </div>
               )}
               {state.googleEnabled && (
