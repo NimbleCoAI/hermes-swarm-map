@@ -72,7 +72,8 @@ const PROVIDER_PATTERNS: ProviderPattern[] = [
   { varPattern: /^MATTERMOST_TOKEN$/i, provider: 'mattermost' },
   { varPattern: /^TELEGRAM_BOT_TOKEN$/i, provider: 'telegram' },
   { varPattern: /^SIGNAL_ACCOUNT$/i, provider: 'signal' },
-  { varPattern: /^NOTION_API_KEY$|^NOTION_TOKEN$/i, provider: 'notion', valuePattern: /^secret_/ },
+  // Notion tokens: legacy `secret_` prefix or current `ntn_` prefix.
+  { varPattern: /^NOTION_API_KEY$|^NOTION_TOKEN$/i, provider: 'notion', valuePattern: /^(secret_|ntn_)/ },
   { varPattern: /^AWS_ACCESS_KEY_ID$/i, provider: 'aws', valuePattern: /^AKIA/ },
   { varPattern: /^AWS_BEARER_TOKEN_BEDROCK$/i, provider: 'aws-bedrock' },
   { varPattern: /^GOOGLE_CLOUD_API_KEY$/i, provider: 'google-cloud' },

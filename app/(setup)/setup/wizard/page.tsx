@@ -51,6 +51,8 @@ type WizardState = {
   signalPhone: string
   googleEnabled: boolean
   githubMcpEnabled: boolean
+  notionEnabled: boolean
+  notionKey: string
   browserEnabled: boolean
   // Step 4
   llmKey: string
@@ -84,6 +86,8 @@ const INITIAL_STATE: WizardState = {
   signalPhone: '',
   googleEnabled: false,
   githubMcpEnabled: false,
+  notionEnabled: false,
+  notionKey: '',
   browserEnabled: false,
   llmKey: '',
   useExistingKey: false,
@@ -248,6 +252,8 @@ export default function WizardPage() {
           signalPhone: signalCaptured?.phone || state.signalPhone,
           googleEnabled: state.googleEnabled,
           githubMcpEnabled: state.githubMcpEnabled,
+          notionEnabled: state.notionEnabled,
+          notionKey: state.notionEnabled ? (state.notionKey || undefined) : undefined,
           // Key: reuse an existing registry key by id, or pass a new key (and
           // optionally persist it for reuse). The pasted value never includes a
           // resolved existing key — that resolution happens server-side.
@@ -770,6 +776,37 @@ export default function WizardPage() {
               )}
             </div>
 
+            {/* Notion */}
+            <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={state.notionEnabled}
+                  onChange={(e) => update({ notionEnabled: e.target.checked })}
+                  className="accent-[var(--accent)]"
+                />
+                <div>
+                  <div className="font-medium text-sm">Notion</div>
+                  <div className="text-xs text-muted-foreground">Pages, databases, search via official Notion MCP server (requires an integration token)</div>
+                </div>
+              </label>
+
+              {state.notionEnabled && (
+                <div className="pl-7 space-y-2">
+                  <FieldLabel>Notion integration token</FieldLabel>
+                  <Input
+                    type="password"
+                    value={state.notionKey}
+                    onChange={(e) => update({ notionKey: e.target.value })}
+                    placeholder="ntn_..."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Create an internal integration at <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener" className="underline">notion.so/my-integrations</a> and share the pages it should access.
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Browser (Camofox) */}
             <div className="rounded-lg border border-[var(--border)] p-4 space-y-3">
               <label className="flex items-center gap-3 cursor-pointer">
@@ -979,6 +1016,12 @@ export default function WizardPage() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">GitHub Tools</span>
                   <span>{state.githubToken ? 'enabled' : 'enabled (needs token)'}</span>
+                </div>
+              )}
+              {state.notionEnabled && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Notion</span>
+                  <span>{state.notionKey ? 'configured' : 'enabled (needs token)'}</span>
                 </div>
               )}
               <div className="flex justify-between">

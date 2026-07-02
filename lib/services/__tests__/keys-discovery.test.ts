@@ -43,3 +43,47 @@ describe('KeysService', () => {
     expect(removed).toBe(true)
   })
 })
+
+describe('notion token detection (env discovery)', () => {
+  let tmpHome: string
+  let prevHome: string | undefined
+  let keys: KeysService
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-notion-home-'))
+    prevHome = process.env.HOME
+    process.env.HOME = tmpHome
+    const storage = new Storage(fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-notion-store-')))
+    keys = new KeysService(storage, new AuditService(storage))
+  })
+
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME
+    else process.env.HOME = prevHome
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+  })
+
+  const writeAgentEnv = (name: string, line: string) => {
+    const dir = path.join(tmpHome, `.hermes-${name}`)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, '.env'), line + '\n')
+  }
+
+  it('detects a legacy secret_-prefixed NOTION_API_KEY as notion', () => {
+    writeAgentEnv('a', 'NOTION_API_KEY=secret_LEGACYTOKEN12345')
+    const found = keys.list(['a']).find((k) => k.provider === 'notion')
+    expect(found).toBeTruthy()
+  })
+
+  it('detects a current ntn_-prefixed NOTION_API_KEY as notion', () => {
+    writeAgentEnv('b', 'NOTION_API_KEY=ntn_NEWSTYLETOKEN12345')
+    const found = keys.list(['b']).find((k) => k.provider === 'notion')
+    expect(found).toBeTruthy()
+  })
+
+  it('detects an ntn_-prefixed NOTION_TOKEN as notion', () => {
+    writeAgentEnv('c', 'NOTION_TOKEN=ntn_NEWSTYLETOKEN67890')
+    const found = keys.list(['c']).find((k) => k.provider === 'notion')
+    expect(found).toBeTruthy()
+  })
+})

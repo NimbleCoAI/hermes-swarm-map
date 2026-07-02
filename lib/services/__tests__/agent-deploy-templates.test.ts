@@ -86,6 +86,23 @@ describe('generateEnvContent', () => {
     // Must be literal values, not shell interpolation placeholders.
     expect(env).not.toContain('${')
   })
+
+  it('writes literal NOTION_API_KEY and NOTION_TOKEN when a notion key is provided', () => {
+    // The notion MCP server reads NOTION_TOKEN; NOTION_API_KEY is HSM's canonical
+    // var (keys registry). Both written as literals via env_file — same rule as
+    // GITHUB_PERSONAL_ACCESS_TOKEN above (compose `environment:` overrides would
+    // resolve from the empty process env and blank them).
+    const env = generateEnvContent({ ...base, notionKey: 'ntn_test123' })
+    expect(env).toContain('NOTION_API_KEY=ntn_test123')
+    expect(env).toContain('NOTION_TOKEN=ntn_test123')
+    expect(env).not.toContain('${')
+  })
+
+  it('omits notion vars when no notion key is provided', () => {
+    const env = generateEnvContent({ ...base })
+    expect(env).not.toContain('NOTION_API_KEY')
+    expect(env).not.toContain('NOTION_TOKEN')
+  })
 })
 
 describe('generateAgentCompose', () => {

@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       mattermostEnabled, mattermostUrl, mattermostToken,
       telegramEnabled, telegramToken, discordEnabled, discordToken,
       slackEnabled, slackBotToken, slackAppToken, signalEnabled, signalPhone,
-      githubToken, braveKey, existingKeyId, saveKeyToRegistry } = body
+      githubToken, braveKey, notionKey, existingKeyId, saveKeyToRegistry } = body
     const bundledOllama = body.bundledOllama === true
 
     // Optional use-case template (e.g. Matilde) — installs gated git artifacts +
@@ -182,6 +182,7 @@ export async function POST(request: Request) {
       signalPhone: signalEnabled ? signalPhone : undefined,
       githubToken,
       braveKey,
+      notionKey,
       browserEnabled: body.browserEnabled === true,
     })
     fs.writeFileSync(path.join(agentDataDir, '.env'), envContent, { mode: 0o600 })
@@ -204,6 +205,18 @@ export async function POST(request: Request) {
         command: 'npx',
         args: ['-y', '@modelcontextprotocol/server-github'],
         env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_PERSONAL_ACCESS_TOKEN}' },
+      }
+    }
+
+    // Notion: command-based server, same shape as github (npx works in-image).
+    // The runtime resolves ${NOTION_TOKEN} from the process env, which the agent
+    // .env supplies as a literal (see generateEnvContent).
+    const notionMcpEnabled = body.notionEnabled === true && !!notionKey
+    if (notionMcpEnabled) {
+      mcpServers.notion = {
+        command: 'npx',
+        args: ['-y', '@notionhq/notion-mcp-server'],
+        env: { NOTION_TOKEN: '${NOTION_TOKEN}' },
       }
     }
 
