@@ -1,11 +1,11 @@
 # Create-New Wizard — Baseline Fixes (Phase 1)
 
 **Date:** 2026-06-17
-**Author:** Juniper Bevensee
-**Branch:** `dev/juniperbevensee/wizard-baseline-fixes` (off `main`)
-**Driver:** Get Matilde (science bot) born well; fix the gaps spotted while walking the create-new wizard.
+**Author:** project maintainer
+**Branch:** `dev/<author>/wizard-baseline-fixes` (off `main`)
+**Driver:** Get the first downstream bot package born well; fix the gaps spotted while walking the create-new wizard.
 
-This spec covers **Phase 1** only. Phase 2 (package opt-in / public use-case templates / Matilde
+This spec covers **Phase 1** only. Phase 2 (package opt-in / public use-case templates / use-case
 overlay) is sketched at the end and gets its own spec.
 
 ---
@@ -122,7 +122,7 @@ surfaces-tab regression test confirms unchanged behavior.
 
 New **Package** step + `infra/usecase-templates.json` registry; extend `artifacts-manifest.ts` to
 support `source: "git:<org>/<repo>#<ref>"` (note existing worktree
-`dev/juniper/artifact-git-source-trust-gate` is doing adjacent trust-gate work — coordinate).
+`dev/<author>/artifact-git-source-trust-gate` is doing adjacent trust-gate work — coordinate).
 Template install contract: clone repo → run its `instance-setup.sh` if present, else copy per an
-`overlay` map. First entry: **Matilde** (`NimbleCoAI/Matilde`), seeding `SOUL.Matilde.md`,
-recommending anthropic + science setup.
+`overlay` map. First entry: a downstream bot package (`<org>/<UseCase>` repo), seeding
+`SOUL.<UseCase>.md` and recommending its provider + use-case-specific setup.
