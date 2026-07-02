@@ -169,11 +169,13 @@ export function generateEnvContent(params: {
     }
     if (braveKey) lines.push(`BRAVE_API_KEY=${braveKey}`)
     if (notionKey) {
-      // NOTION_API_KEY is HSM's canonical var (keys registry); the notion MCP
-      // server reads NOTION_TOKEN. Both literal via env_file — same rule as
-      // GITHUB_PERSONAL_ACCESS_TOKEN above.
+      // Write ONLY the canonical NOTION_API_KEY (the var the keys registry
+      // manages for rotation/revocation). The notion MCP server reads
+      // NOTION_TOKEN, but that's mapped from NOTION_API_KEY in the config.yaml
+      // mcp_servers env block — so there's a single source of truth. Writing a
+      // second NOTION_TOKEN literal here would go stale on key rotation/unassign
+      // (the dashboard only touches NOTION_API_KEY), leaving a revoked token live.
       lines.push(`NOTION_API_KEY=${notionKey}`)
-      lines.push(`NOTION_TOKEN=${notionKey}`)
     }
   }
 

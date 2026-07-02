@@ -187,12 +187,14 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     expect(cfg).toContain('  notion:')
     expect(cfg).toContain('command: npx')
     expect(cfg).toContain('@notionhq/notion-mcp-server')
-    expect(cfg).toContain('NOTION_TOKEN: "${NOTION_TOKEN}"')
+    // MCP server reads NOTION_TOKEN, mapped from the canonical NOTION_API_KEY.
+    expect(cfg).toContain('NOTION_TOKEN: "${NOTION_API_KEY}"')
 
-    // Token is a literal in the agent .env (env_file), never a compose override.
+    // Only the canonical NOTION_API_KEY is written as a literal (env_file, never
+    // a compose override); no duplicate NOTION_TOKEN literal that could go stale.
     const env = fs.readFileSync(path.join(h.tmpHome, '.hermes-ntn', '.env'), 'utf-8')
     expect(env).toContain('NOTION_API_KEY=ntn_test123')
-    expect(env).toContain('NOTION_TOKEN=ntn_test123')
+    expect(env).not.toContain('NOTION_TOKEN=')
   })
 
   it('notion: disabled → no notion MCP server and no notion env vars', async () => {

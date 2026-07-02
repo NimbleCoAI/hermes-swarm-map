@@ -216,7 +216,7 @@ export async function POST(request: Request) {
       mcpServers.notion = {
         command: 'npx',
         args: ['-y', '@notionhq/notion-mcp-server'],
-        env: { NOTION_TOKEN: '${NOTION_TOKEN}' },
+        env: { NOTION_TOKEN: '${NOTION_API_KEY}' },
       }
     }
 

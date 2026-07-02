@@ -87,14 +87,14 @@ describe('generateEnvContent', () => {
     expect(env).not.toContain('${')
   })
 
-  it('writes literal NOTION_API_KEY and NOTION_TOKEN when a notion key is provided', () => {
-    // The notion MCP server reads NOTION_TOKEN; NOTION_API_KEY is HSM's canonical
-    // var (keys registry). Both written as literals via env_file — same rule as
-    // GITHUB_PERSONAL_ACCESS_TOKEN above (compose `environment:` overrides would
-    // resolve from the empty process env and blank them).
+  it('writes ONLY the canonical NOTION_API_KEY literal (not a duplicate NOTION_TOKEN)', () => {
+    // NOTION_API_KEY is HSM's canonical var (the one the keys registry rotates/
+    // revokes). The notion MCP server reads NOTION_TOKEN, but that's mapped from
+    // NOTION_API_KEY in the config.yaml mcp_servers env block — single source of
+    // truth. A second NOTION_TOKEN literal here would go stale on rotation.
     const env = generateEnvContent({ ...base, notionKey: 'ntn_test123' })
     expect(env).toContain('NOTION_API_KEY=ntn_test123')
-    expect(env).toContain('NOTION_TOKEN=ntn_test123')
+    expect(env).not.toContain('NOTION_TOKEN')
     expect(env).not.toContain('${')
   })
 
