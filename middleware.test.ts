@@ -48,6 +48,12 @@ describe('middleware auth gate — token SET', () => {
     expect((await res.json()).error).toBe('auth required')
   })
 
+  it('cookie-less POST to tools/discover (sync) → 401 (issue #141)', async () => {
+    const res = await middleware(req('/api/harnesses/h_test/tools/discover', 'POST'))
+    expect(res.status).toBe(401)
+    expect(passedThrough(res)).toBe(false)
+  })
+
   it('POST with an invalid/tampered cookie → 401', async () => {
     const good = await computeSessionValue(TOKEN)
     const tampered = (good[0] === 'a' ? 'b' : 'a') + good.slice(1)
