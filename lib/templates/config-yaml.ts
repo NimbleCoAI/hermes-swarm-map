@@ -3,6 +3,8 @@
  * Shared across all agent creation paths (overlay + full deploy).
  */
 
+import { MODEL_CATALOG } from '../model-catalog'
+
 export interface McpServerConfig {
   command?: string
   url?: string
@@ -19,6 +21,25 @@ export function generateDefaultConfig(params: {
   enabledPlugins?: string[]
 }): string {
   const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins } = params
+
+  // Compression summary_model must be a VALID id served by THIS agent's provider,
+  // emitted in litellm `provider/model` form — never a hardcoded foreign provider.
+  // Local providers ('ollama'/'custom') are declared as `custom` with a base_url
+  // in the model block below, so the summary must use the SAME `custom` prefix and
+  // reuse the primary model (the one actually served by the local endpoint) — a
+  // catalog 'local' id might not be pulled. Cloud providers use a cheaper
+  // 'fallback'/'local' catalog entry, else the caller's fallbackModel, else primary.
+  let summaryModel: string
+  if (provider === 'ollama' || provider === 'custom') {
+    summaryModel = `custom/${primaryModel}`
+  } else {
+    const catalogEntries = MODEL_CATALOG[provider] ?? []
+    const summaryEntry =
+      catalogEntries.find((e) => e.tier === 'fallback') ??
+      catalogEntries.find((e) => e.tier === 'local')
+    const summaryModelId = summaryEntry?.id ?? fallbackModel ?? primaryModel
+    summaryModel = `${provider}/${summaryModelId}`
+  }
 
   const fallbackLine = fallbackModel
     ? `  fallback: ${fallbackModel}`
@@ -68,7 +89,7 @@ compression:
   threshold: 0.50
   target_ratio: 0.20
   protect_last_n: 20
-  summary_model: "google/gemini-3-flash-preview"
+  summary_model: "${summaryModel}"
 
 # --- Persistent memory (carries knowledge across sessions) ---
 memory:

@@ -60,6 +60,41 @@ function parseToolsets(yaml: string): string[] {
   return names
 }
 
+// Parse the platform_toolsets: block from a config.yaml string.
+// Each line maps a platform to an inline array of toolset names, e.g.
+//   platform_toolsets:
+//     cli: [hermes-cli]
+//     signal: [hermes-signal]
+// Returns the flattened, de-duplicated list of toolset names across platforms.
+function parsePlatformToolsets(yaml: string): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+  let inBlock = false
+  for (const line of yaml.split('\n')) {
+    if (/^platform_toolsets:/.test(line)) {
+      inBlock = true
+      continue
+    }
+    if (inBlock) {
+      // An indented `key: [a, b]` entry belongs to the block.
+      const m = line.match(/^\s+[\w-]+:\s*\[(.*)\]\s*$/)
+      if (m) {
+        for (const raw of m[1].split(',')) {
+          const name = raw.trim().replace(/^["']|["']$/g, '')
+          if (name && !seen.has(name)) {
+            seen.add(name)
+            names.push(name)
+          }
+        }
+      } else if (line.trim().length > 0 && !/^\s/.test(line)) {
+        // A non-indented, non-blank line ends the block.
+        inBlock = false
+      }
+    }
+  }
+  return names
+}
+
 // List installed skill directories for a harness
 function listSkills(dataDir: string): string[] {
   try {
@@ -118,6 +153,12 @@ function discoverTools(harnessNames: string[]): Map<string, { tool: Tool; harnes
 
     // Collect toolsets
     for (const ts of parseToolsets(yamlContent)) {
+      toolNames.push(`toolset:${ts}`)
+    }
+
+    // Collect platform toolsets (the default block a freshly-generated
+    // config.yaml ships — without this, a plain agent surfaces no tools).
+    for (const ts of parsePlatformToolsets(yamlContent)) {
       toolNames.push(`toolset:${ts}`)
     }
 

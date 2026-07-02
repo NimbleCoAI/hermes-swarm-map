@@ -44,6 +44,20 @@ export async function POST() {
     const composePath = path.join(swarmDir, 'docker-compose.signal.yml')
     fs.writeFileSync(composePath, renderDeployedCompose())
 
+    // The compose runs with cwd=swarmDir and bind-mounts `./host-proxy.conf` as a
+    // FILE onto the nginx container. If that file is absent when the container is
+    // first created, Docker silently creates it as an empty DIRECTORY and the
+    // mount then fails ("not a directory"). Copy the real conf beside the compose
+    // (and self-heal a previously auto-created directory) so first-run works.
+    const infraDir = path.join(process.cwd(), 'infra', 'signal-cli')
+    const proxyConfDst = path.join(swarmDir, 'host-proxy.conf')
+    try {
+      if (fs.existsSync(proxyConfDst) && fs.statSync(proxyConfDst).isDirectory()) {
+        fs.rmSync(proxyConfDst, { recursive: true, force: true })
+      }
+    } catch { /* best-effort cleanup */ }
+    fs.copyFileSync(path.join(infraDir, 'host-proxy.conf'), proxyConfDst)
+
     // Remove old container if stopped
     try {
       execSync('docker rm signal-cli-daemon 2>/dev/null || true', { timeout: 5000 })

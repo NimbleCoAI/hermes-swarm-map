@@ -819,7 +819,7 @@ export class HarnessService {
         models: overlay.models?.length ? overlay.models : readModelConfig(dataDir),
         costToday: getCostToday(id),
         invocations: getInvocationsToday(id),
-        tools: overlay.tools ?? this.autoDiscoverTools(name) ?? [],
+        tools: overlay.tools?.length ? overlay.tools : (this.autoDiscoverTools(name) ?? []),
         ...(overlay.health ? { health: overlay.health } : {}),
         ...(overlay.cacheState ? { cacheState: overlay.cacheState } : {}),
         ...(overlay.cacheAge !== undefined ? { cacheAge: overlay.cacheAge } : {}),

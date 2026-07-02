@@ -229,6 +229,28 @@ describe('generateDefaultConfig', () => {
     expect(config).not.toContain('    command:')
   })
 
+  it('derives an anthropic compression summary_model — never a foreign provider', () => {
+    const result = generateDefaultConfig({ provider: 'anthropic', primaryModel: 'claude-sonnet-4-6' })
+    expect(result).not.toContain('gemini')
+    // summary_model line must reference a valid anthropic catalog id
+    const line = result.split('\n').find((l) => l.trim().startsWith('summary_model:')) ?? ''
+    expect(line).toContain('anthropic/')
+    expect(line).toContain('claude')
+  })
+
+  it('derives a local compression summary_model matching the declared custom provider', () => {
+    // ollama is declared as provider `custom` (with base_url) in the model block,
+    // so the summary must use the SAME `custom/` prefix (an `ollama/` prefix has
+    // no declared provider/base_url and won't resolve), reusing the primary model.
+    const result = generateDefaultConfig({ provider: 'ollama', primaryModel: 'llama3.1:8b' })
+    const line = result.split('\n').find((l) => l.trim().startsWith('summary_model:')) ?? ''
+    expect(line).toContain('custom/llama3.1:8b')
+    expect(line).not.toContain('ollama/')
+    expect(line).not.toContain('gemini')
+    expect(line).not.toContain('claude')
+    expect(line).not.toContain('gpt')
+  })
+
   it('produces valid YAML structure (no syntax errors)', () => {
     const result = generateDefaultConfig(baseParams)
     // Basic structural checks: no tabs, proper indentation, all colons have values or nested blocks

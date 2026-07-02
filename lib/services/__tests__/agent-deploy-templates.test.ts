@@ -75,6 +75,17 @@ describe('generateEnvContent', () => {
     expect(env).toContain('# SLACK_BOT_TOKEN=')
     expect(env).not.toMatch(/^SLACK_BOT_TOKEN=/m)
   })
+
+  it('writes GITHUB_TOKEN and a literal GITHUB_PERSONAL_ACCESS_TOKEN when a github token is provided', () => {
+    // The github MCP server reads GITHUB_PERSONAL_ACCESS_TOKEN; the compose sets
+    // it via ${GITHUB_TOKEN} interpolation that resolves from process env (empty),
+    // not env_file — so the token must ALSO be written as a literal PAT line.
+    const env = generateEnvContent({ ...base, githubToken: 'ghp_test123' })
+    expect(env).toContain('GITHUB_TOKEN=ghp_test123')
+    expect(env).toContain('GITHUB_PERSONAL_ACCESS_TOKEN=ghp_test123')
+    // Must be literal values, not shell interpolation placeholders.
+    expect(env).not.toContain('${')
+  })
 })
 
 describe('generateAgentCompose', () => {
@@ -96,9 +107,15 @@ describe('generateAgentCompose', () => {
     expect(c).toMatch(/depends_on:\s*\n\s*ollama-sci:\s*\n\s*condition: service_healthy/)
   })
 
-  it('still injects the github env when githubMcpEnabled', () => {
+  it('does NOT set GITHUB_PERSONAL_ACCESS_TOKEN via a compose environment override', () => {
+    // A compose `environment:` entry takes precedence over env_file, and
+    // ${GITHUB_TOKEN} resolves from the (empty) process env — so this override
+    // blanked the token the env_file supplies. The token now comes solely from
+    // the agent .env (env_file); the compose must not re-declare it.
     const c = generateAgentCompose(args.slug, args.port, args.agentDataDir, args.imageOrBuild, { githubMcpEnabled: true })
-    expect(c).toContain('GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}')
+    expect(c).not.toContain('GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}')
+    expect(c).not.toContain('environment:')
+    expect(c).toContain(`${args.agentDataDir}/.env`)
   })
 
   it('still mounts the google mcp volume when a dir is given', () => {
