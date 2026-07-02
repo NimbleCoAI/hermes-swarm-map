@@ -72,7 +72,9 @@ export async function POST(
   return NextResponse.json({
     discovered: resolvedTools,
     discoveredIds: discovered,
-    currentTools: harness.tools,
+    // Post-write truth: when we just synced, the harness now holds the
+    // discovered list — not the pre-sync snapshot captured above.
+    currentTools: synced ? discovered : harness.tools,
     synced,
   })
 }
