@@ -158,7 +158,14 @@ export function generateEnvContent(params: {
   if (githubToken || braveKey) {
     lines.push('')
     lines.push('# Optional integrations')
-    if (githubToken) lines.push(`GITHUB_TOKEN=${githubToken}`)
+    if (githubToken) {
+      lines.push(`GITHUB_TOKEN=${githubToken}`)
+      // The github MCP server reads GITHUB_PERSONAL_ACCESS_TOKEN. The compose
+      // sets it via ${GITHUB_TOKEN} interpolation, which resolves from the
+      // process env (empty), NOT from env_file — so the token would never reach
+      // the server. Write it as a literal PAT line too (mirrors the llm key).
+      lines.push(`GITHUB_PERSONAL_ACCESS_TOKEN=${githubToken}`)
+    }
     if (braveKey) lines.push(`BRAVE_API_KEY=${braveKey}`)
   }
 

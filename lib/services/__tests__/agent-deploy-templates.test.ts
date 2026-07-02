@@ -75,6 +75,17 @@ describe('generateEnvContent', () => {
     expect(env).toContain('# SLACK_BOT_TOKEN=')
     expect(env).not.toMatch(/^SLACK_BOT_TOKEN=/m)
   })
+
+  it('writes GITHUB_TOKEN and a literal GITHUB_PERSONAL_ACCESS_TOKEN when a github token is provided', () => {
+    // The github MCP server reads GITHUB_PERSONAL_ACCESS_TOKEN; the compose sets
+    // it via ${GITHUB_TOKEN} interpolation that resolves from process env (empty),
+    // not env_file — so the token must ALSO be written as a literal PAT line.
+    const env = generateEnvContent({ ...base, githubToken: 'ghp_test123' })
+    expect(env).toContain('GITHUB_TOKEN=ghp_test123')
+    expect(env).toContain('GITHUB_PERSONAL_ACCESS_TOKEN=ghp_test123')
+    // Must be literal values, not shell interpolation placeholders.
+    expect(env).not.toContain('${')
+  })
 })
 
 describe('generateAgentCompose', () => {
