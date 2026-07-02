@@ -22,17 +22,24 @@ export function generateDefaultConfig(params: {
 }): string {
   const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins } = params
 
-  // Compression summary_model must be a VALID id served by THIS agent's provider —
-  // never a hardcoded foreign provider. Prefer the provider's 'fallback'-tier
-  // (cheap/fast) entry, else its 'local'-tier entry, else the caller's
-  // fallbackModel, else the primary. Emit in litellm `provider/model` form, keyed
-  // by the provider string itself (e.g. 'ollama' → catalog key 'ollama').
-  const catalogEntries = MODEL_CATALOG[provider] ?? []
-  const summaryEntry =
-    catalogEntries.find((e) => e.tier === 'fallback') ??
-    catalogEntries.find((e) => e.tier === 'local')
-  const summaryModelId = summaryEntry?.id ?? fallbackModel ?? primaryModel
-  const summaryModel = `${provider}/${summaryModelId}`
+  // Compression summary_model must be a VALID id served by THIS agent's provider,
+  // emitted in litellm `provider/model` form — never a hardcoded foreign provider.
+  // Local providers ('ollama'/'custom') are declared as `custom` with a base_url
+  // in the model block below, so the summary must use the SAME `custom` prefix and
+  // reuse the primary model (the one actually served by the local endpoint) — a
+  // catalog 'local' id might not be pulled. Cloud providers use a cheaper
+  // 'fallback'/'local' catalog entry, else the caller's fallbackModel, else primary.
+  let summaryModel: string
+  if (provider === 'ollama' || provider === 'custom') {
+    summaryModel = `custom/${primaryModel}`
+  } else {
+    const catalogEntries = MODEL_CATALOG[provider] ?? []
+    const summaryEntry =
+      catalogEntries.find((e) => e.tier === 'fallback') ??
+      catalogEntries.find((e) => e.tier === 'local')
+    const summaryModelId = summaryEntry?.id ?? fallbackModel ?? primaryModel
+    summaryModel = `${provider}/${summaryModelId}`
+  }
 
   const fallbackLine = fallbackModel
     ? `  fallback: ${fallbackModel}`

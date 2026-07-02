@@ -107,9 +107,15 @@ describe('generateAgentCompose', () => {
     expect(c).toMatch(/depends_on:\s*\n\s*ollama-sci:\s*\n\s*condition: service_healthy/)
   })
 
-  it('still injects the github env when githubMcpEnabled', () => {
+  it('does NOT set GITHUB_PERSONAL_ACCESS_TOKEN via a compose environment override', () => {
+    // A compose `environment:` entry takes precedence over env_file, and
+    // ${GITHUB_TOKEN} resolves from the (empty) process env — so this override
+    // blanked the token the env_file supplies. The token now comes solely from
+    // the agent .env (env_file); the compose must not re-declare it.
     const c = generateAgentCompose(args.slug, args.port, args.agentDataDir, args.imageOrBuild, { githubMcpEnabled: true })
-    expect(c).toContain('GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}')
+    expect(c).not.toContain('GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_TOKEN}')
+    expect(c).not.toContain('environment:')
+    expect(c).toContain(`${args.agentDataDir}/.env`)
   })
 
   it('still mounts the google mcp volume when a dir is given', () => {

@@ -160,10 +160,10 @@ export function generateEnvContent(params: {
     lines.push('# Optional integrations')
     if (githubToken) {
       lines.push(`GITHUB_TOKEN=${githubToken}`)
-      // The github MCP server reads GITHUB_PERSONAL_ACCESS_TOKEN. The compose
-      // sets it via ${GITHUB_TOKEN} interpolation, which resolves from the
-      // process env (empty), NOT from env_file — so the token would never reach
-      // the server. Write it as a literal PAT line too (mirrors the llm key).
+      // The github MCP server reads GITHUB_PERSONAL_ACCESS_TOKEN. Write it as a
+      // literal here (via env_file) — do NOT set it in the compose `environment:`
+      // block, which resolves ${GITHUB_TOKEN} from the empty process env and, at
+      // higher precedence than env_file, would blank it. Literal mirrors the llm key.
       lines.push(`GITHUB_PERSONAL_ACCESS_TOKEN=${githubToken}`)
     }
     if (braveKey) lines.push(`BRAVE_API_KEY=${braveKey}`)
@@ -186,7 +186,10 @@ export function generateAgentCompose(
     cpus?: string
   },
 ): string {
-  const { googleMcpDir, githubMcpEnabled, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
+  // githubMcpEnabled is accepted for API compatibility but no longer used here:
+  // the github MCP token is delivered via the agent .env (env_file), not a compose
+  // `environment:` override (which resolves from the empty process env and blanks it).
+  const { googleMcpDir, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
   const sourceBlock = 'image' in imageOrBuild
     ? `    image: ${imageOrBuild.image}`
     : `    build:\n      context: ${imageOrBuild.build}\n      dockerfile: Dockerfile`
@@ -201,10 +204,6 @@ export function generateAgentCompose(
   const googleMcpVolumes = googleMcpDir
     ? `      - ${googleMcpDir}:/opt/google-multiplayer-mcp:ro\n      - ${agentDataDir}/google-tokens:/opt/google/tokens\n`
     : ``
-
-  const githubEnv = githubMcpEnabled
-    ? `    environment:\n      - GITHUB_PERSONAL_ACCESS_TOKEN=\${GITHUB_TOKEN}\n`
-    : ''
 
   // Optional bundled ollama sidecar (CPU, tiny model) — shares the default named
   // network, so hermes reaches it at http://ollama-<slug>:11434 (matches the env
@@ -225,7 +224,7 @@ ${ollamaDepends}    extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
       - ${agentDataDir}/.env
-${githubEnv}    ports:
+    ports:
       - published: ${port}
         target: 8642
 ${googleMcpPorts}    volumes:

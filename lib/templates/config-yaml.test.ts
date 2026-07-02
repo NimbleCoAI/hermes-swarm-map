@@ -238,10 +238,14 @@ describe('generateDefaultConfig', () => {
     expect(line).toContain('claude')
   })
 
-  it('derives a local/ollama compression summary_model, not a cloud one', () => {
+  it('derives a local compression summary_model matching the declared custom provider', () => {
+    // ollama is declared as provider `custom` (with base_url) in the model block,
+    // so the summary must use the SAME `custom/` prefix (an `ollama/` prefix has
+    // no declared provider/base_url and won't resolve), reusing the primary model.
     const result = generateDefaultConfig({ provider: 'ollama', primaryModel: 'llama3.1:8b' })
     const line = result.split('\n').find((l) => l.trim().startsWith('summary_model:')) ?? ''
-    expect(line).toContain('ollama/')
+    expect(line).toContain('custom/llama3.1:8b')
+    expect(line).not.toContain('ollama/')
     expect(line).not.toContain('gemini')
     expect(line).not.toContain('claude')
     expect(line).not.toContain('gpt')
