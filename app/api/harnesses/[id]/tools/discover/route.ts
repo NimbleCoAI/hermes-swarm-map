@@ -1,25 +1,9 @@
 import { NextResponse } from 'next/server'
 import { services } from '@/lib/services'
 
-/**
- * GET /api/harnesses/:id/tools/discover
- *
- * Scans the agent's config.yaml and skills directory to discover runtime tools.
- * Returns discovered tool IDs without persisting them — use PUT ../tools to save.
- *
- * Query params:
- *   ?sync=true — also persist the discovered tools into the harness overlay
- *                (only if no tools have been explicitly assigned via PUT)
- */
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params
+function discover(id: string) {
   const harness = services.harness.get(id)
-  if (!harness) {
-    return NextResponse.json({ error: 'Harness not found' }, { status: 404 })
-  }
+  if (!harness) return null
 
   const discovered = services.tools.discoverForHarness(harness.name)
 
@@ -28,12 +12,59 @@ export async function GET(
   const toolMap = new Map(allTools.map((t) => [t.id, t]))
   const resolvedTools = discovered.map((tid) => toolMap.get(tid)).filter(Boolean)
 
-  // Optionally sync discovered tools into overlay
-  const url = new URL(request.url)
-  const sync = url.searchParams.get('sync') === 'true'
+  return { harness, discovered, resolvedTools }
+}
 
+/**
+ * GET /api/harnesses/:id/tools/discover
+ *
+ * Scans the agent's config.yaml and skills directory to discover runtime tools.
+ * Pure read — never persists. Use POST to sync discovered tools into the
+ * harness overlay.
+ *
+ * This GET MUST stay side-effect-free: the root middleware intentionally
+ * passes GET/HEAD unauthenticated (agents' read hot-paths), so any write here
+ * would be reachable without an operator session (issue #141). The old
+ * `?sync=true` param is ignored for the same reason.
+ */
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const result = discover(id)
+  if (!result) {
+    return NextResponse.json({ error: 'Harness not found' }, { status: 404 })
+  }
+
+  return NextResponse.json({
+    discovered: result.resolvedTools,
+    discoveredIds: result.discovered,
+    currentTools: result.harness.tools,
+  })
+}
+
+/**
+ * POST /api/harnesses/:id/tools/discover
+ *
+ * Discovers runtime tools and persists them into the harness overlay — but
+ * only when no tools have been explicitly assigned (via PUT ../tools) and
+ * discovery actually found some. Gated behind the operator session by the
+ * root middleware (POST requires auth).
+ */
+export async function POST(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const result = discover(id)
+  if (!result) {
+    return NextResponse.json({ error: 'Harness not found' }, { status: 404 })
+  }
+
+  const { harness, discovered, resolvedTools } = result
   let synced = false
-  if (sync && harness.tools.length === 0 && discovered.length > 0) {
+  if (harness.tools.length === 0 && discovered.length > 0) {
     services.harness.updateConfig(id, { tools: discovered })
     synced = true
   }
