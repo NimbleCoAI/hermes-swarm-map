@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import fs from 'fs'
+import path from 'path'
 import { renderDeployedCompose } from './route'
 
 describe('signal-cli deploy compose (rendered from infra source of truth)', () => {
@@ -38,6 +40,17 @@ describe('signal-cli deploy compose (rendered from infra source of truth)', () =
   it('pins the build context to an absolute path (no relative build: .)', () => {
     expect(compose).toMatch(/context: \/.*infra\/signal-cli/)
     expect(compose).not.toMatch(/^\s*build: \.\s*$/m)
+  })
+
+  it('ships the host-proxy conf as a FILE that the compose bind-mounts (first-run guard)', () => {
+    // The compose mounts ./host-proxy.conf onto the nginx container as a file.
+    // The deploy route copies this source into ~/.hermes-swarm before `up` so
+    // Docker can't auto-create the missing path as a directory (mount failure).
+    // Guard the source of truth exists and is a file, and the mount is present.
+    const confPath = path.join(process.cwd(), 'infra', 'signal-cli', 'host-proxy.conf')
+    expect(fs.existsSync(confPath)).toBe(true)
+    expect(fs.statSync(confPath).isFile()).toBe(true)
+    expect(compose).toContain('./host-proxy.conf:/etc/nginx/conf.d/default.conf')
   })
 
   it('deploys an autoheal sidecar scoped to the daemon only', () => {
