@@ -44,6 +44,14 @@ export type Harness = {
   // the overlay and re-rendered into the compose on change. Memory-heavy
   // harnesses OOM-kill under the hardcoded 2G default; raise these to fit the job.
   resources?: { memory?: string; cpus?: string }
+  // Explicit per-surface admin list, keyed by platform ('signal', 'telegram', …),
+  // holding the runtime's native identity keys (Signal UUID/phone, Telegram
+  // numeric id, …). This is HSM-side policy the swarm_map_policy plugin queries
+  // live (no container recreate needed). When a platform is ABSENT here, the
+  // admin set falls back to that surface's DM allowlist ({PLATFORM}_ALLOWED_USERS
+  // in the agent .env) — so an agent with no explicit role config behaves exactly
+  // as before. See lib/services/surface-admins.ts.
+  surfaceAdmins?: Record<string, string[]>
 }
 
 export type Surface = {

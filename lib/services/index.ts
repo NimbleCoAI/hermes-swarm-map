@@ -7,6 +7,7 @@ import { ToolsService } from './tools'
 import { MemoryService } from './memory'
 import { ConfigService } from './config'
 import { SignalPinService } from './signal-pin'
+import { SurfaceAdminService } from './surface-admins'
 import path from 'path'
 import os from 'os'
 
@@ -38,4 +39,5 @@ export const services = {
   tools,
   memory: new MemoryService(storage),
   signalPin: new SignalPinService(keysService, process.env.SIGNAL_API_URL || 'http://localhost:8080'),
+  surfaceAdmins: new SurfaceAdminService(storage, audit),
 }
