@@ -40,6 +40,23 @@ export async function POST(
     } catch {
       return NextResponse.json({ error: 'Signal daemon not reachable. Deploy it first via Settings or run: cd ~/.hermes-swarm && docker compose -f docker-compose.signal.yml up -d' }, { status: 503 })
     }
+
+    // Default the bot's Signal profile name to the harness name, so an agent
+    // shows up under the name it was created with — including when an
+    // already-registered number is reused (fresh registration already sets this
+    // via the wizard, but reused numbers keep their old/generic profile).
+    // Best-effort: never fail the bond if the profile update doesn't land.
+    if (config.phone) {
+      const givenName = id.replace(/^h_/, '').replace(/_/g, '-')
+      try {
+        await fetch(`${signalUrl}/api/v1/rpc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'updateProfile', params: { account: config.phone, givenName }, id: 'profile' }),
+          signal: AbortSignal.timeout(8000),
+        })
+      } catch { /* best-effort */ }
+    }
   }
 
   const envVars = buildConnectEnvVars(platform, config)
