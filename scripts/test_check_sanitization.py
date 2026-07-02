@@ -194,6 +194,73 @@ class TestSelectFiles:
         assert "lib/services/foo.ts" not in sel
 
 
+class TestDiffOnlyScope:
+    """The diff-only PR gate scans ONLY changed files; the full-tree (--all)
+    push:main + scheduled lane still catches leaks in files a PR never touched.
+    This is the load-bearing guarantee of issue #77: loosen selection, not
+    detection."""
+
+    def _write(self, root, rel, content):
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+        return rel
+
+    def test_leak_in_changed_file_is_caught(self, tmp_path):
+        changed = self._write(tmp_path, "infra/templates/skills/new/SKILL.md", f"token: {GH_PAT_P}")
+        rc = cs.main([changed], root=str(tmp_path), client_factory=lambda: None, require_llm=False)
+        assert rc == 1
+
+    def test_preexisting_leak_in_unchanged_file_not_scanned_by_pr_gate(self, tmp_path):
+        # A leak already on main, in a file the PR does NOT touch.
+        self._write(tmp_path, "infra/templates/skills/old/SKILL.md", f"token: {GH_PAT_P}")
+        changed = self._write(tmp_path, "infra/templates/skills/new/SKILL.md",
+                              "Generic methodology for structuring a handoff.")
+        # PR gate: only the changed file is scanned → passes, does not grandfather-block.
+        rc_diff = cs.main([changed], root=str(tmp_path), client_factory=lambda: None, require_llm=False)
+        assert rc_diff == 0
+        # Full-tree / scheduled path: gather sees the pre-existing leak → caught.
+        rc_full = cs.main(cs.gather_base_files(str(tmp_path)), root=str(tmp_path),
+                          client_factory=lambda: None, require_llm=False)
+        assert rc_full == 1
+
+
+class TestGitChangedFiles:
+    """git_changed_files feeds the diff-only gate — it must return the FULL PR
+    range (three-dot BASE...HEAD), not just the tip commit."""
+
+    def _git(self, root):
+        import subprocess
+
+        def run(*a):
+            subprocess.run(["git", "-C", str(root), *a], check=True,
+                           capture_output=True, text=True)
+        return run
+
+    def test_three_dot_range_lists_only_pr_files(self, tmp_path):
+        git = self._git(tmp_path)
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "t")
+        (tmp_path / "base.md").write_text("base content")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+        git("checkout", "-q", "-b", "feature")
+        (tmp_path / "infra").mkdir()
+        (tmp_path / "infra" / "new.md").write_text("new content")
+        git("add", "-A")
+        git("commit", "-qm", "feature change")
+        # A second commit on the branch — three-dot must include it (full PR range),
+        # so the gate can't be bypassed by burying a leak in an earlier PR commit.
+        (tmp_path / "infra" / "second.md").write_text("second content")
+        git("add", "-A")
+        git("commit", "-qm", "second feature commit")
+        files = cs.git_changed_files("main", str(tmp_path))
+        assert "infra/new.md" in files
+        assert "infra/second.md" in files
+        assert "base.md" not in files
+
+
 class TestGatherScope:
     def test_gather_includes_top_level_soul_and_md(self, tmp_path):
         (tmp_path / "SOUL.md").write_text("x")
