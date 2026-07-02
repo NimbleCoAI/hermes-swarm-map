@@ -61,6 +61,12 @@ describe('middleware auth gate — token SET', () => {
     expect(passedThrough(res)).toBe(true)
   })
 
+  it('POST tools/discover with no cookie → 401 (sync side-effect stays gated, issue #141)', async () => {
+    const res = await middleware(req('/api/harnesses/h_1/tools/discover', 'POST'))
+    expect(res.status).toBe(401)
+    expect(passedThrough(res)).toBe(false)
+  })
+
   it('PUT / PATCH / DELETE with no cookie → 401', async () => {
     for (const m of ['PUT', 'PATCH', 'DELETE']) {
       const res = await middleware(req('/api/settings', m))

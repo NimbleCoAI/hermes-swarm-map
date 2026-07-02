@@ -89,6 +89,8 @@ describe('Tools discover API — POST syncs discovered tools', () => {
     expect(body.synced).toBe(true)
     expect(body.discoveredIds).toEqual(['tool_a', 'tool_b'])
     expect(body.discovered).toEqual(toolList)
+    // The response must reflect the post-write truth, not the pre-sync snapshot.
+    expect(body.currentTools).toEqual(['tool_a', 'tool_b'])
   })
 
   it('does NOT persist when the harness already has tools assigned', async () => {
