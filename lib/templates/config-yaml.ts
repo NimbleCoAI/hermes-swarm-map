@@ -3,6 +3,8 @@
  * Shared across all agent creation paths (overlay + full deploy).
  */
 
+import { MODEL_CATALOG } from '../model-catalog'
+
 export interface McpServerConfig {
   command?: string
   url?: string
@@ -19,6 +21,18 @@ export function generateDefaultConfig(params: {
   enabledPlugins?: string[]
 }): string {
   const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins } = params
+
+  // Compression summary_model must be a VALID id served by THIS agent's provider —
+  // never a hardcoded foreign provider. Prefer the provider's 'fallback'-tier
+  // (cheap/fast) entry, else its 'local'-tier entry, else the caller's
+  // fallbackModel, else the primary. Emit in litellm `provider/model` form, keyed
+  // by the provider string itself (e.g. 'ollama' → catalog key 'ollama').
+  const catalogEntries = MODEL_CATALOG[provider] ?? []
+  const summaryEntry =
+    catalogEntries.find((e) => e.tier === 'fallback') ??
+    catalogEntries.find((e) => e.tier === 'local')
+  const summaryModelId = summaryEntry?.id ?? fallbackModel ?? primaryModel
+  const summaryModel = `${provider}/${summaryModelId}`
 
   const fallbackLine = fallbackModel
     ? `  fallback: ${fallbackModel}`
@@ -68,7 +82,7 @@ compression:
   threshold: 0.50
   target_ratio: 0.20
   protect_last_n: 20
-  summary_model: "google/gemini-3-flash-preview"
+  summary_model: "${summaryModel}"
 
 # --- Persistent memory (carries knowledge across sessions) ---
 memory:
