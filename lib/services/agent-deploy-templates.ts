@@ -24,9 +24,10 @@ export function generateEnvContent(params: {
   signalPhone?: string
   githubToken?: string
   braveKey?: string
+  notionKey?: string
   browserEnabled?: boolean
 }): string {
-  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, browserEnabled } = params
+  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, notionKey, browserEnabled } = params
 
   const providerKeyMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',
@@ -155,7 +156,7 @@ export function generateEnvContent(params: {
     lines.push('# Browser tools (Camofox)')
     lines.push('CAMOFOX_URL=http://host.docker.internal:9377')
   }
-  if (githubToken || braveKey) {
+  if (githubToken || braveKey || notionKey) {
     lines.push('')
     lines.push('# Optional integrations')
     if (githubToken) {
@@ -167,6 +168,15 @@ export function generateEnvContent(params: {
       lines.push(`GITHUB_PERSONAL_ACCESS_TOKEN=${githubToken}`)
     }
     if (braveKey) lines.push(`BRAVE_API_KEY=${braveKey}`)
+    if (notionKey) {
+      // Write ONLY the canonical NOTION_API_KEY (the var the keys registry
+      // manages for rotation/revocation). The notion MCP server reads
+      // NOTION_TOKEN, but that's mapped from NOTION_API_KEY in the config.yaml
+      // mcp_servers env block — so there's a single source of truth. Writing a
+      // second NOTION_TOKEN literal here would go stale on key rotation/unassign
+      // (the dashboard only touches NOTION_API_KEY), leaving a revoked token live.
+      lines.push(`NOTION_API_KEY=${notionKey}`)
+    }
   }
 
   return lines.join('\n') + '\n'
