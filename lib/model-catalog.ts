@@ -8,6 +8,9 @@ export type ModelEntry = {
 
 export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
   anthropic: [
+    // Mythos-class tier above Opus — highest-judgment work (curation, taste).
+    { id: 'claude-fable-5', name: 'Claude Fable 5', tier: 'primary' },
+    { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', tier: 'primary' },
     { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', tier: 'primary' },
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', tier: 'fallback' },
   ],
@@ -37,6 +40,8 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
     { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash', tier: 'fallback' },
   ],
   openrouter: [
+    { id: 'anthropic/claude-fable-5', name: 'Claude Fable 5 (OR)', tier: 'primary' },
+    { id: 'anthropic/claude-opus-4-8', name: 'Claude Opus 4.8 (OR)', tier: 'primary' },
     { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (OR)', tier: 'primary' },
     { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (OR)', tier: 'fallback' },
   ],
