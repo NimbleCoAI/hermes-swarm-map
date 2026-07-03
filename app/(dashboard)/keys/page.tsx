@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useApi } from '@/lib/hooks/use-api'
 import { TierMix } from '@/components/shared/tier-mix'
 import { StatusDot } from '@/components/shared/status-dot'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { filterKeys } from '@/lib/keys-filter'
+import { parseKeyRequestParams } from '@/lib/keys-request'
 import type { Key, Harness } from '@/lib/types'
 import type { HabitatTier, HarnessStatus } from '@/lib/types'
 
@@ -20,7 +22,10 @@ function keyHealthToStatus(health: Key['health']): HarnessStatus {
   return 'error'
 }
 
-export default function KeysPage() {
+function KeysPageContent() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { data: keys, loading, refetch } = useApi<Key[]>('/api/keys')
   const { data: harnesses } = useApi<Harness[]>('/api/harnesses')
 
@@ -45,6 +50,23 @@ export default function KeysPage() {
 
   // Delete confirmation state
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+
+  // Credential-request prefill (?request=hedra&assign=h_mare&name=...) — intent
+  // only, applied once; the operator still pastes the secret value themselves.
+  const prefillApplied = useRef(false)
+  useEffect(() => {
+    if (prefillApplied.current) return
+    // Wait for the harness list before applying assignments so unknown ids are dropped.
+    if (searchParams.get('assign') && !harnesses) return
+    const prefill = parseKeyRequestParams(searchParams, harnesses?.map((h) => h.id))
+    if (!prefill) return
+    prefillApplied.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time sync of URL intent into form state
+    setShowAddForm(true)
+    setNewProvider(prefill.provider)
+    setNewAssignedTo(prefill.assignTo)
+    if (prefill.name) setNewName(prefill.name)
+  }, [searchParams, harnesses])
 
   function harnessNames(ids: string[]): string {
     if (!harnesses) return ids.join(', ')
@@ -94,6 +116,8 @@ export default function KeysPage() {
       }
       toast.success(`${newProvider} key added`)
       resetAddForm()
+      // Drop prefill params so a refresh doesn't re-open the form.
+      if (searchParams.has('request')) router.replace(pathname)
       refetch()
     } catch {
       toast.error('Failed to add key')
@@ -222,7 +246,10 @@ export default function KeysPage() {
                 className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
               >
                 <option value="">Select provider...</option>
-                {KEY_PROVIDERS.map((p) => (
+                {(newProvider && !KEY_PROVIDERS.includes(newProvider)
+                  ? [...KEY_PROVIDERS, newProvider]
+                  : KEY_PROVIDERS
+                ).map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
@@ -427,5 +454,13 @@ export default function KeysPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function KeysPage() {
+  return (
+    <Suspense>
+      <KeysPageContent />
+    </Suspense>
   )
 }
