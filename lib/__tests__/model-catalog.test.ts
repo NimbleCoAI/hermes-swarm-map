@@ -192,3 +192,26 @@ describe('MODEL_CATALOG — GLM / open-model lane', () => {
     expect(ENV_TO_PROVIDER.ZAI_API_KEY).toBe('zai')
   })
 })
+
+describe('MODEL_CATALOG — Anthropic freshness', () => {
+  it('exposes the current top-end Anthropic models (Fable 5, Opus 4.8)', () => {
+    const ids = MODEL_CATALOG.anthropic.map((m) => m.id)
+    expect(ids).toContain('claude-fable-5')
+    expect(ids).toContain('claude-opus-4-8')
+    // and does not regress the workhorse tiers
+    expect(ids).toContain('claude-sonnet-4-6')
+    expect(ids).toContain('claude-haiku-4-5-20251001')
+  })
+
+  it('mirrors the top-end models on openrouter', () => {
+    const ids = MODEL_CATALOG.openrouter.map((m) => m.id)
+    expect(ids).toContain('anthropic/claude-fable-5')
+    expect(ids).toContain('anthropic/claude-opus-4-8')
+  })
+
+  it('keeps Fable/Opus as primary tier (never auto-fallback targets)', () => {
+    for (const id of ['claude-fable-5', 'claude-opus-4-8']) {
+      expect(MODEL_CATALOG.anthropic.find((m) => m.id === id)?.tier).toBe('primary')
+    }
+  })
+})
