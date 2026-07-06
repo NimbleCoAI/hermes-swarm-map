@@ -178,6 +178,99 @@ describe('anthropic credential env-var routing (writeKeyToEnv/removeKeyFromEnv)'
   })
 })
 
+// Custom-provider keys have no entry in PROVIDER_TO_VAR, so they used to fall
+// back to CUSTOM_API_KEY — the wrong var for a key the user named "capsolver".
+// A custom key must resolve to a var derived from its name, or from an explicit
+// envVar when supplied, and remove must clear that same var.
+describe('custom-provider env-var routing (writeKeyToEnv/removeKeyFromEnv)', () => {
+  let tmpHome: string
+  let prevHome: string | undefined
+  let keys: KeysService
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-chome-'))
+    prevHome = process.env.HOME
+    process.env.HOME = tmpHome
+    const storage = new Storage(fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-cstore-')))
+    keys = new KeysService(storage, new AuditService(storage))
+  })
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME
+    else process.env.HOME = prevHome
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+  })
+
+  const read = (name: string) => fs.readFileSync(path.join(tmpHome, `.hermes-${name}`, '.env'), 'utf-8')
+
+  it('derives the var from a custom key name ("capsolver" → CAPSOLVER_API_KEY)', () => {
+    keys.writeKeyToEnv('agentC1', 'custom', 'CAP-secret', { name: 'capsolver' })
+    const env = read('agentC1')
+    expect(env).toMatch(/^CAPSOLVER_API_KEY=CAP-secret$/m)
+    expect(env).not.toMatch(/^CUSTOM_API_KEY=/m)
+  })
+
+  it('keeps a name that is already a full env-var identifier', () => {
+    keys.writeKeyToEnv('agentC2', 'custom', 'v', { name: 'OPEN_MEASURES_API_KEY' })
+    expect(read('agentC2')).toMatch(/^OPEN_MEASURES_API_KEY=v$/m)
+  })
+
+  it('lets an explicit envVar override the name-derived var', () => {
+    keys.writeKeyToEnv('agentC3', 'custom', 'CAP-x', { name: 'Team Key', envVar: 'CAPSOLVER_API_KEY' })
+    const env = read('agentC3')
+    expect(env).toMatch(/^CAPSOLVER_API_KEY=CAP-x$/m)
+    expect(env).not.toMatch(/^TEAM_KEY/m)
+  })
+
+  it('removeKeyFromEnv clears the same name-derived custom var', () => {
+    keys.writeKeyToEnv('agentC4', 'custom', 'CAP-y', { name: 'capsolver' })
+    keys.removeKeyFromEnv('agentC4', 'custom', { name: 'capsolver' })
+    expect(read('agentC4')).not.toMatch(/^CAPSOLVER_API_KEY=/m)
+  })
+
+  it('prefixes a digit-leading name so the var is a valid identifier ("2captcha")', () => {
+    keys.writeKeyToEnv('agentC5', 'custom', 'CAP-z', { name: '2captcha' })
+    const env = read('agentC5')
+    // Env vars cannot start with a digit — must be prefixed, not left as 2CAPTCHA_API_KEY.
+    expect(env).toMatch(/^_2CAPTCHA_API_KEY=CAP-z$/m)
+    expect(env).not.toMatch(/^2CAPTCHA/m)
+    const line = env.split('\n').find((l) => l.includes('CAP-z'))!
+    expect(line.split('=')[0]).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/)
+  })
+
+  it('does NOT treat a human label ending in "Key" as a complete identifier', () => {
+    keys.writeKeyToEnv('agentC6', 'custom', 'v', { name: 'Team Key' })
+    // "Team Key" is a label, not a var — it still gets the _API_KEY suffix.
+    expect(read('agentC6')).toMatch(/^TEAM_KEY_API_KEY=v$/m)
+  })
+
+  it('normalizes an explicit envVar hint ("capsolver api key" → CAPSOLVER_API_KEY)', () => {
+    keys.writeKeyToEnv('agentC7', 'custom', 'v', { envVar: 'capsolver api key' })
+    expect(read('agentC7')).toMatch(/^CAPSOLVER_API_KEY=v$/m)
+  })
+
+  it('a known provider ignores a stale envVar/name hint (stays on its canonical var)', () => {
+    keys.writeKeyToEnv('agentC8', 'brave', 'brave-secret', { name: 'Team Key', envVar: 'STALE_VAR' })
+    const env = read('agentC8')
+    expect(env).toMatch(/^BRAVE_SEARCH_API_KEY=brave-secret$/m)
+    expect(env).not.toMatch(/^STALE_VAR=/m)
+    expect(env).not.toMatch(/^TEAM_KEY/m)
+  })
+
+  it('falls back to CUSTOM_API_KEY for an unnamed custom key, and remove clears it', () => {
+    keys.writeKeyToEnv('agentC9', 'custom', 'v', { name: '   ' })
+    expect(read('agentC9')).toMatch(/^CUSTOM_API_KEY=v$/m)
+    keys.removeKeyFromEnv('agentC9', 'custom', { name: '   ' })
+    expect(read('agentC9')).not.toMatch(/^CUSTOM_API_KEY=/m)
+  })
+
+  it('persists envVar through add() so list() and reassignment see it', () => {
+    const added = keys.add({ provider: 'custom', value: 'CAP-p', name: 'Team Key', envVar: 'CAPSOLVER_API_KEY', assignedTo: [] })
+    expect(added.envVar).toBe('CAPSOLVER_API_KEY')
+    const listed = keys.list().find((k) => k.id === added.id)
+    expect(listed?.envVar).toBe('CAPSOLVER_API_KEY')
+  })
+})
+
 // A *discovered* key (value lives in an agent .env, surfaced by the registry)
 // used to self-delete when unassigned from its last agent: update() stored an
 // empty-value override, removeKeyFromEnv stripped the .env, and list() — which

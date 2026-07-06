@@ -67,6 +67,9 @@ export type Key = {
   id: string
   provider: string
   name?: string
+  // Explicit target .env var. Custom-provider keys use this (or fall back to a
+  // name-derived var) since they have no fixed provider→var mapping.
+  envVar?: string
   maskedValue: string
   assignedTo: string[]
   budgetUsd?: number
@@ -77,6 +80,7 @@ export type KeyInput = {
   provider: string
   value: string
   name?: string
+  envVar?: string
   budgetUsd?: number
 }
 
