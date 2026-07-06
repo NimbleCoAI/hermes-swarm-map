@@ -38,6 +38,7 @@ function KeysPageContent() {
   const [newValue, setNewValue] = useState('')
   const [newBudget, setNewBudget] = useState('')
   const [newName, setNewName] = useState('')
+  const [newEnvVar, setNewEnvVar] = useState('')
   const [newAssignedTo, setNewAssignedTo] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -91,6 +92,7 @@ function KeysPageContent() {
     setNewValue('')
     setNewBudget('')
     setNewName('')
+    setNewEnvVar('')
     setNewAssignedTo([])
   }
 
@@ -105,6 +107,7 @@ function KeysPageContent() {
           provider: newProvider,
           value: newValue,
           ...(newName ? { name: newName } : {}),
+          ...(newEnvVar ? { envVar: newEnvVar } : {}),
           ...(newBudget ? { budgetUsd: parseFloat(newBudget) } : {}),
           ...(newAssignedTo.length ? { assignedTo: newAssignedTo } : {}),
         }),
@@ -264,6 +267,18 @@ function KeysPageContent() {
                 className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
               />
             </div>
+            {newProvider === 'custom' && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Env var (optional)</label>
+                <input
+                  type="text"
+                  value={newEnvVar}
+                  onChange={(e) => setNewEnvVar(e.target.value)}
+                  placeholder="e.g. CAPSOLVER_API_KEY — else derived from name"
+                  className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm font-mono"
+                />
+              </div>
+            )}
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">API Key</label>
               <input

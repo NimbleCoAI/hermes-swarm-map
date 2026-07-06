@@ -58,6 +58,25 @@ function removeEnvVar(content: string, varName: string): string {
   return content.replace(new RegExp(`^${varName}=.*\\n?`, 'm'), '')
 }
 
+// Hints that let a key resolve to the right .env var name. Custom-provider keys
+// carry no entry in PROVIDER_TO_VAR, so they lean on these.
+type EnvVarHints = { name?: string; envVar?: string }
+
+// Coerce arbitrary text into a valid shell env-var identifier.
+function normalizeEnvVarName(raw: string): string {
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
+}
+
+// Derive an env var from a custom key's display name. A bare label like
+// "capsolver" becomes CAPSOLVER_API_KEY; a name that already looks like a full
+// identifier (ends in a known suffix, e.g. "OPEN_MEASURES_API_KEY") is kept.
+function envVarFromName(name: string): string {
+  const norm = normalizeEnvVarName(name)
+  if (!norm) return ''
+  if (/_(API_KEY|KEY|TOKEN|URL|SECRET|ID|ACCOUNT)$/.test(norm)) return norm
+  return `${norm}_API_KEY`
+}
+
 type ProviderPattern = {
   varPattern: RegExp
   provider: string
@@ -321,6 +340,7 @@ export class KeysService {
       id: fingerprintId(input.value),
       provider: input.provider,
       ...(input.name ? { name: input.name } : {}),
+      ...(input.envVar ? { envVar: input.envVar } : {}),
       maskedValue: maskValue(input.value),
       encryptedValue: this.encryption.encrypt(input.value),
       assignedTo: input.assignedTo ?? [],
@@ -339,13 +359,26 @@ export class KeysService {
   }
 
   // Resolve the env var a provider's credential is written to. Anthropic is
-  // value-dependent (see anthropicEnvVarForValue); everything else is fixed.
-  private resolveEnvVar(provider: string, value: string): string {
+  // value-dependent (see anthropicEnvVarForValue); known providers map through
+  // PROVIDER_TO_VAR. Custom/unknown providers use an explicit envVar hint, else
+  // derive from the key's name so a key named "capsolver" lands in
+  // CAPSOLVER_API_KEY rather than the useless CUSTOM_API_KEY fallback.
+  private resolveEnvVar(provider: string, value: string, hints?: EnvVarHints): string {
     if (provider === 'anthropic') return anthropicEnvVarForValue(value)
-    return KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
+    if (hints?.envVar) {
+      const explicit = normalizeEnvVarName(hints.envVar)
+      if (explicit) return explicit
+    }
+    const mapped = KeysService.PROVIDER_TO_VAR[provider]
+    if (mapped) return mapped
+    if (hints?.name) {
+      const fromName = envVarFromName(hints.name)
+      if (fromName) return fromName
+    }
+    return `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`
   }
 
-  writeKeyToEnv(harnessIdOrName: string, provider: string, value: string): void {
+  writeKeyToEnv(harnessIdOrName: string, provider: string, value: string, hints?: EnvVarHints): void {
     const name = harnessIdOrName.startsWith('h_') ? idToName(harnessIdOrName) : harnessIdOrName
     const dataDir = agentDataDir(name)
     const envPath = path.join(dataDir, '.env')
@@ -357,7 +390,7 @@ export class KeysService {
       // .env doesn't exist yet — will create
     }
 
-    const varName = this.resolveEnvVar(provider, value)
+    const varName = this.resolveEnvVar(provider, value, hints)
     content = upsertEnvVar(content, varName, value)
 
     // Anthropic's credential belongs in exactly one var depending on its format;
@@ -372,17 +405,19 @@ export class KeysService {
     fs.writeFileSync(envPath, content, { mode: 0o600 })
   }
 
-  removeKeyFromEnv(harnessIdOrName: string, provider: string): void {
+  removeKeyFromEnv(harnessIdOrName: string, provider: string, hints?: EnvVarHints): void {
     const name = harnessIdOrName.startsWith('h_') ? idToName(harnessIdOrName) : harnessIdOrName
     const dataDir = agentDataDir(name)
     const envPath = path.join(dataDir, '.env')
 
     try {
       let content = fs.readFileSync(envPath, 'utf-8')
-      // Anthropic may have been written to either var; clear both.
+      // Anthropic may have been written to either var; clear both. Everything
+      // else resolves to the single var writeKeyToEnv would have used (custom
+      // keys included, via the same name/envVar hints).
       const vars = provider === 'anthropic'
         ? [...ANTHROPIC_ENV_VARS]
-        : [KeysService.PROVIDER_TO_VAR[provider] ?? `${provider.toUpperCase().replace(/-/g, '_')}_API_KEY`]
+        : [this.resolveEnvVar(provider, '', hints)]
       for (const v of vars) content = removeEnvVar(content, v)
       fs.writeFileSync(envPath, content, { mode: 0o600 })
     } catch {
@@ -445,6 +480,7 @@ export class KeysService {
             ? { budgetUsd: discovered.budgetUsd }
             : {}),
         ...(partial.name ? { name: partial.name } : discovered?.name ? { name: discovered.name } : {}),
+        ...(partial.envVar ? { envVar: partial.envVar } : discovered?.envVar ? { envVar: discovered.envVar } : {}),
         health: partial.health ?? discovered?.health ?? 'good',
       })
     }
@@ -475,9 +511,9 @@ export class KeysService {
 
     const value = this.getDecryptedValue(id)
     if (value) {
-      for (const h of added) this.writeKeyToEnv(h, before.provider, value)
+      for (const h of added) this.writeKeyToEnv(h, before.provider, value, { name: before.name, envVar: before.envVar })
     }
-    for (const h of removed) this.removeKeyFromEnv(h, before.provider)
+    for (const h of removed) this.removeKeyFromEnv(h, before.provider, { name: before.name, envVar: before.envVar })
 
     return [...added, ...removed]
   }
@@ -531,15 +567,19 @@ export class KeysService {
     this.storage.write(KEYS_FILE, stored)
 
     // Write new value to all assigned harnesses' .env files
+    const rotatedHints: EnvVarHints = {
+      name: updates?.name ?? key.name,
+      envVar: updates?.envVar ?? key.envVar,
+    }
     for (const harnessId of finalAssignedTo) {
-      this.writeKeyToEnv(harnessId, key.provider, newValue)
+      this.writeKeyToEnv(harnessId, key.provider, newValue, rotatedHints)
     }
 
     // Remove from harnesses that were unassigned
     if (updates?.assignedTo) {
       const removed = key.assignedTo.filter((h) => !updates.assignedTo!.includes(h))
       for (const harnessId of removed) {
-        this.removeKeyFromEnv(harnessId, key.provider)
+        this.removeKeyFromEnv(harnessId, key.provider, rotatedHints)
       }
     }
 
@@ -557,7 +597,7 @@ export class KeysService {
     // files. Callers should read the key's `assignedTo` before removing and
     // recreate those harnesses afterward.
     for (const harnessId of key.assignedTo ?? []) {
-      this.removeKeyFromEnv(harnessId, key.provider)
+      this.removeKeyFromEnv(harnessId, key.provider, { name: key.name, envVar: key.envVar })
     }
     const filtered = stored.filter((k) => k.id !== id)
     this.storage.write(KEYS_FILE, filtered)

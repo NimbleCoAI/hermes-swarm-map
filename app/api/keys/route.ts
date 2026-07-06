@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   // value actually loads (env_file is read at container creation, not restart).
   if (body.assignedTo?.length && body.value) {
     for (const harnessId of body.assignedTo) {
-      services.keys.writeKeyToEnv(harnessId, body.provider, body.value)
+      services.keys.writeKeyToEnv(harnessId, body.provider, body.value, { name: body.name, envVar: body.envVar })
       try { services.harness.restart(harnessId, 'recreate') } catch {}
     }
   }
