@@ -62,18 +62,28 @@ function removeEnvVar(content: string, varName: string): string {
 // carry no entry in PROVIDER_TO_VAR, so they lean on these.
 type EnvVarHints = { name?: string; envVar?: string }
 
-// Coerce arbitrary text into a valid shell env-var identifier.
+// Coerce arbitrary text into a valid shell env-var identifier. Env var names
+// must match [A-Za-z_][A-Za-z0-9_]* — in particular they cannot start with a
+// digit, so a name like "2captcha" is prefixed with "_" rather than left as the
+// unloadable "2CAPTCHA".
 function normalizeEnvVarName(raw: string): string {
-  return raw.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
+  const v = raw.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '')
+  return /^[0-9]/.test(v) ? `_${v}` : v
 }
 
 // Derive an env var from a custom key's display name. A bare label like
-// "capsolver" becomes CAPSOLVER_API_KEY; a name that already looks like a full
-// identifier (ends in a known suffix, e.g. "OPEN_MEASURES_API_KEY") is kept.
+// "capsolver" becomes CAPSOLVER_API_KEY. A value the user already typed as a
+// full identifier (e.g. "OPEN_MEASURES_API_KEY") is kept as-is; a human label
+// that merely happens to end in a word like "Key" ("Team Key") is NOT treated
+// as complete — it still gets the _API_KEY suffix ("TEAM_KEY_API_KEY").
 function envVarFromName(name: string): string {
-  const norm = normalizeEnvVarName(name)
+  const trimmed = name.trim()
+  const alreadyIdentifier =
+    /^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed) &&
+    /_(API_KEY|KEY|TOKEN|URL|SECRET|ID|ACCOUNT)$/i.test(trimmed)
+  if (alreadyIdentifier) return normalizeEnvVarName(trimmed)
+  const norm = normalizeEnvVarName(trimmed)
   if (!norm) return ''
-  if (/_(API_KEY|KEY|TOKEN|URL|SECRET|ID|ACCOUNT)$/.test(norm)) return norm
   return `${norm}_API_KEY`
 }
 
@@ -365,12 +375,16 @@ export class KeysService {
   // CAPSOLVER_API_KEY rather than the useless CUSTOM_API_KEY fallback.
   private resolveEnvVar(provider: string, value: string, hints?: EnvVarHints): string {
     if (provider === 'anthropic') return anthropicEnvVarForValue(value)
+    // A known provider always uses its canonical var. The envVar/name hints are
+    // only meaningful for custom/unknown providers, so they must never redirect
+    // a mapped provider (a stale hint from the UI could otherwise send e.g. a
+    // Brave key to the wrong var).
+    const mapped = KeysService.PROVIDER_TO_VAR[provider]
+    if (mapped) return mapped
     if (hints?.envVar) {
       const explicit = normalizeEnvVarName(hints.envVar)
       if (explicit) return explicit
     }
-    const mapped = KeysService.PROVIDER_TO_VAR[provider]
-    if (mapped) return mapped
     if (hints?.name) {
       const fromName = envVarFromName(hints.name)
       if (fromName) return fromName
@@ -562,6 +576,7 @@ export class KeysService {
       maskedValue: maskValue(newValue),
       assignedTo: finalAssignedTo,
       ...(updates?.name !== undefined ? { name: updates.name } : {}),
+      ...(updates?.envVar !== undefined ? { envVar: updates.envVar } : {}),
       ...(updates?.budgetUsd !== undefined ? { budgetUsd: updates.budgetUsd } : {}),
     }
     this.storage.write(KEYS_FILE, stored)

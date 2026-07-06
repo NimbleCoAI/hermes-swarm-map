@@ -107,7 +107,7 @@ function KeysPageContent() {
           provider: newProvider,
           value: newValue,
           ...(newName ? { name: newName } : {}),
-          ...(newEnvVar ? { envVar: newEnvVar } : {}),
+          ...(newEnvVar && newProvider === 'custom' ? { envVar: newEnvVar } : {}),
           ...(newBudget ? { budgetUsd: parseFloat(newBudget) } : {}),
           ...(newAssignedTo.length ? { assignedTo: newAssignedTo } : {}),
         }),
@@ -245,7 +245,10 @@ function KeysPageContent() {
               <label className="text-xs text-muted-foreground mb-1 block">Provider</label>
               <select
                 value={newProvider}
-                onChange={(e) => setNewProvider(e.target.value)}
+                onChange={(e) => {
+                  setNewProvider(e.target.value)
+                  if (e.target.value !== 'custom') setNewEnvVar('')
+                }}
                 className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
               >
                 <option value="">Select provider...</option>
