@@ -64,6 +64,30 @@ describe('Settings API — PUT', () => {
     expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
   })
 
+  it('includes restarted:true in the response so the UI does not fire a second restart POST', async () => {
+    // The UI's handleSettingsSave() previously fired a separate POST /restart after
+    // the settings PUT. This collides with the recreate's restart-lock and returns
+    // 409 "restart already in progress", which the UI surfaces as "restart failed —
+    // restart manually". Fix: PUT returns restarted:true; UI drives its toast from
+    // that flag instead of firing a second restart.
+    const body = {
+      dmPolicy: 'approved-only',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: false,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {},
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.restarted).toBe(true)
+    // Restart must be called exactly once — the recreate in the PUT handler.
+    // A second restart call from the UI would hit the lock and 409.
+    expect(services.harness.restart).toHaveBeenCalledTimes(1)
+    expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
+  })
+
   it('expands Signal allowed users to include resolved UUIDs before writing', async () => {
     const body = {
       dmPolicy: 'approved-only',
