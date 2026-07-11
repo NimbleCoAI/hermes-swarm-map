@@ -44,6 +44,14 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
     { id: 'anthropic/claude-opus-4-8', name: 'Claude Opus 4.8 (OR)', tier: 'primary' },
     { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (OR)', tier: 'primary' },
     { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (OR)', tier: 'fallback' },
+    // Cheap metered workhorse rung — the missing "cheap-metered" tier the
+    // token-spend audit flagged ([intelligent-routing-cost]). Sits above the
+    // local-GLM floor so an agent that exhausts its Claude credits fails over
+    // to a cheap metered model, not straight to a degraded local one. Kimi
+    // K2.7 Code is confirmed-live on OpenRouter (~$0.72/$3.49 per M tok) and a
+    // capable agentic model. Per-agent cheaper picks (Qwen/DeepSeek-class) are
+    // free-text in the cascade editor — verify the exact slug live before use.
+    { id: 'moonshotai/kimi-k2.7-code', name: 'Kimi K2.7 Code (OR, cheap)', tier: 'fallback' },
   ],
   bedrock: [
     { id: 'us.anthropic.claude-sonnet-4-6-20250527-v1:0', name: 'Claude Sonnet 4.6 (Bedrock)', tier: 'primary' },

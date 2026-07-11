@@ -13,7 +13,10 @@ import type { Key, Harness } from '@/lib/types'
 import type { HabitatTier, HarnessStatus } from '@/lib/types'
 
 const KEY_PROVIDERS = [
-  'anthropic', 'openai', 'google', 'aws', 'github', 'brave', 'notion', 'telegram', 'custom',
+  // Model/inference providers first. `openrouter` maps to OPENROUTER_API_KEY on
+  // the write path (see KeysService.resolveEnvVar) — the fleet's cheap-metered
+  // rung ([intelligent-routing-cost]) can't be provisioned without it here.
+  'anthropic', 'openai', 'google', 'openrouter', 'aws', 'github', 'brave', 'notion', 'telegram', 'custom',
 ]
 
 function keyHealthToStatus(health: Key['health']): HarnessStatus {
