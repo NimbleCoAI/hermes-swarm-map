@@ -256,6 +256,18 @@ describe('custom-provider env-var routing (writeKeyToEnv/removeKeyFromEnv)', () 
     expect(env).not.toMatch(/^TEAM_KEY/m)
   })
 
+  it('routes an openrouter key to OPENROUTER_API_KEY, ignoring a stale hint', () => {
+    // openrouter is the fleet's cheap-metered provider ([intelligent-routing-cost]).
+    // It must be a *mapped* provider so a user-supplied name/envVar hint on the
+    // keys form can never redirect the key away from OPENROUTER_API_KEY (the var
+    // the hermes-agent openrouter provider reads).
+    keys.writeKeyToEnv('agentOR', 'openrouter', 'sk-or-v1-SECRET', { name: 'Fleet OR', envVar: 'STALE_VAR' })
+    const env = read('agentOR')
+    expect(env).toMatch(/^OPENROUTER_API_KEY=sk-or-v1-SECRET$/m)
+    expect(env).not.toMatch(/^STALE_VAR=/m)
+    expect(env).not.toMatch(/^FLEET_OR/m)
+  })
+
   it('falls back to CUSTOM_API_KEY for an unnamed custom key, and remove clears it', () => {
     keys.writeKeyToEnv('agentC9', 'custom', 'v', { name: '   ' })
     expect(read('agentC9')).toMatch(/^CUSTOM_API_KEY=v$/m)

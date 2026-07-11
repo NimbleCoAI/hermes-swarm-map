@@ -208,6 +208,26 @@ describe('MODEL_CATALOG — Anthropic freshness', () => {
     expect(ids).toContain('anthropic/claude-fable-5')
     expect(ids).toContain('anthropic/claude-opus-4-8')
   })
+})
+
+describe('MODEL_CATALOG — OpenRouter cheap metered workhorse lane', () => {
+  // The cost motivation ([intelligent-routing-cost], token-spend audit): every
+  // fleet agent primaries on metered Claude with NO cheap-metered rung in any
+  // cascade — so when Claude credits run dry the only fallback is a local model.
+  // The catalog must OFFER a genuinely-cheap OpenRouter workhorse so operators
+  // can build a metered cheap rung above the local floor.
+  it('offers a cheap metered workhorse via openrouter (not only premium mirrors)', () => {
+    const cheap = MODEL_CATALOG.openrouter.filter((m) => m.tier === 'fallback')
+    // At least one fallback-tier entry that is NOT a premium Anthropic mirror.
+    const nonPremium = cheap.filter((m) => !m.id.startsWith('anthropic/'))
+    expect(nonPremium.length).toBeGreaterThan(0)
+  })
+
+  it('exposes Kimi K2.7 (confirmed-live cheap agentic model) as a fallback rung', () => {
+    const kimi = MODEL_CATALOG.openrouter.find((m) => m.id === 'moonshotai/kimi-k2.7-code')
+    expect(kimi, 'kimi cheap workhorse should be in the openrouter catalog').toBeDefined()
+    expect(kimi?.tier).toBe('fallback')
+  })
 
   it('keeps Fable/Opus as primary tier (never auto-fallback targets)', () => {
     for (const id of ['claude-fable-5', 'claude-opus-4-8']) {

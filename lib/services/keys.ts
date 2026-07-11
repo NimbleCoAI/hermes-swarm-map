@@ -338,6 +338,7 @@ export class KeysService {
     'open-measures': 'OPEN_MEASURES_API_KEY',
     pexels: 'PEXELS_API_KEY',
     zai: 'GLM_API_KEY',
+    openrouter: 'OPENROUTER_API_KEY',
   }
 
   // Manual add (user-input key not from a .env file)

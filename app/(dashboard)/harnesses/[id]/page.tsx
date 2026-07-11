@@ -73,7 +73,7 @@ const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
 const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'custom', 'gemini', 'nous', 'bedrock', 'zai'] as const
 
 const KEY_PROVIDERS = [
-  'anthropic', 'openai', 'zai', 'notion', 'github', 'telegram', 'signal',
+  'anthropic', 'openai', 'openrouter', 'zai', 'notion', 'github', 'telegram', 'signal',
   'mattermost', 'aws', 'aws-bedrock', 'google-cloud', 'brave',
   'helius', 'coingecko', 'dehashed', 'opencorporates', 'capsolver',
   'open-measures', 'pexels',
