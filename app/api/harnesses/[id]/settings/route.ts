@@ -434,7 +434,13 @@ export async function PUT(
   // regenerated compose) actually loads. env_file is read at container creation,
   // not on a plain restart — without this, settings changes silently no-op until
   // the next manual rebuild.
-  try { services.harness.restart(id, 'recreate') } catch {}
+  //
+  // Return restarted:true so the UI can drive its "restarting…/saved" state from
+  // this flag instead of firing a second POST /restart. A second restart hits the
+  // recreate's restart-lock and returns 409 "restart already in progress", which
+  // the old UI surfaced as "restart failed — restart manually".
+  let restarted = false
+  try { services.harness.restart(id, 'recreate'); restarted = true } catch {}
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, restarted })
 }

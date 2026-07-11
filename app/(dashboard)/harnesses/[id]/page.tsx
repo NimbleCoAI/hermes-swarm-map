@@ -372,29 +372,17 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       })
       const data = await res.json()
       if (data.success) {
-        toast.success('Settings saved. Restarting agent...')
         setSettingsDirty(false)
-        setSettingsSaved(false)
-        setSettingsRestarting(true)
-        try {
-          const restartRes = await fetch(`/api/harnesses/${id}/restart`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'rebuild' }),
-          })
-          if (restartRes.ok) {
-            toast.success('Agent restarted with new settings')
-            refetch()
-          } else {
-            const restartData = await restartRes.json()
-            toast.error(restartData.error || 'Restart failed — restart manually')
-            setSettingsSaved(true)
-          }
-        } catch {
-          toast.error('Restart failed — restart manually')
+        if (data.restarted) {
+          // The PUT handler already recreated the container — no second restart needed.
+          // A second POST /restart would hit the recreate's lock and return 409,
+          // which the old code surfaced as "restart failed — restart manually".
+          toast.success('Settings saved. Agent restarting...')
+          setSettingsSaved(false)
+          refetch()
+        } else {
+          toast.success('Settings saved')
           setSettingsSaved(true)
-        } finally {
-          setSettingsRestarting(false)
         }
       } else {
         toast.error(data.error || 'Failed to save')
