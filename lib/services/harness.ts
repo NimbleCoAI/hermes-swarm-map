@@ -85,16 +85,87 @@ export function toHarnessSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-// Scan compose dirs AND live Docker port bindings to find next available port.
-//
-// `reservedPorts` are ports that are allocated-but-not-yet-observable — e.g.
-// persisted in harnesses.json but whose compose file hasn't been written and
-// whose container hasn't been created. Without seeding these, two near-
-// concurrent creates (or a create racing a duplicate/import) both derive the
-// same BASE_PORT and the second container is stuck "Created" with no network.
-function nextAvailablePort(composeBaseDir: string, reservedPorts: number[] = []): number {
+// Default source of Docker-published host ports. Uses `docker ps -a` (NOT just
+// running containers) so a STOPPED agent's published port is still counted —
+// a stopped agent is still "using" that host port the moment it's restarted, and
+// reassigning it would make the restart fail with "port is already allocated".
+// The `0.0.0.0:(\d+)->` binding format is emitted for created/exited containers
+// too, so stopped agents are caught here; the .env scan (source 3) is the
+// belt-and-suspenders catch-all for anything docker doesn't surface.
+function dockerPublishedPorts(): number[] {
+  const ports: number[] = []
+  try {
+    const output = execSync('docker ps -a --format "{{.Ports}}"', { timeout: 5000 }).toString()
+    for (const match of output.matchAll(/0\.0\.0\.0:(\d+)->/g)) {
+      ports.push(parseInt(match[1], 10))
+    }
+  } catch {}
+  return ports
+}
+
+// Scan every managed agent's data dir for its declared API_SERVER_PORT. This is
+// the robust catch-all for the cyborg↔personal collision: the monolithic
+// `personal` agent lives at ~/.hermes, declares its port only in its own .env,
+// and has NO compose file under composeBaseDir — so neither the compose scan nor
+// (when stopped) docker would ever surface its 8642, and a new agent could be
+// handed the same port. Enumerates ~/.hermes plus every ~/.hermes-<name>
+// sibling and reads API_SERVER_PORT from each .env. Defensive throughout:
+// a missing home dir, missing .env, or unparseable value is simply skipped.
+function agentEnvPorts(homeDir: string): number[] {
+  const ports: number[] = []
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(homeDir, { withFileTypes: true })
+  } catch {
+    return ports
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    // Match the personal agent (~/.hermes) and per-agent dirs (~/.hermes-<name>).
+    if (entry.name !== '.hermes' && !entry.name.startsWith('.hermes-')) continue
+    const envPath = path.join(homeDir, entry.name, '.env')
+    const pairs = parseEnvFilePairs(envPath)
+    const raw = pairs['API_SERVER_PORT']
+    if (!raw) continue
+    const p = parseInt(raw, 10)
+    if (!isNaN(p)) ports.push(p)
+  }
+  return ports
+}
+
+export interface UsedPortsOptions {
+  composeBaseDir: string
+  // Ports allocated-but-not-yet-observable (persisted in harnesses.json but whose
+  // compose file hasn't been written / container not yet created). Seeding these
+  // prevents two near-concurrent creates from both deriving the same BASE_PORT.
+  reservedPorts?: number[]
+  // Home dir to scan for agent `.env` files. Injectable for tests; defaults to
+  // the real home so production picks up ~/.hermes* automatically.
+  homeDir?: string
+  // Source of Docker-published ports. Injectable for tests (mock without a real
+  // daemon); defaults to `docker ps -a`.
+  dockerPorts?: () => number[]
+}
+
+// Collect every host port currently claimed by any source, so port assignment
+// never hands out one already in use. Sources:
+//   1. `published:` ports in per-agent compose files under composeBaseDir
+//   2. Docker-published ports (running AND stopped containers, via `docker ps -a`)
+//   3. API_SERVER_PORT declared in each agent's .env (catches the monolithic
+//      `personal` agent and any agent whose compose isn't under composeBaseDir)
+//   + any explicitly reserved (in-flight) ports.
+// Exported so the used-port scan is unit-testable in isolation.
+export function collectUsedPorts(opts: UsedPortsOptions): Set<number> {
+  const {
+    composeBaseDir,
+    reservedPorts = [],
+    homeDir = os.homedir(),
+    dockerPorts = dockerPublishedPorts,
+  } = opts
+
   const usedPorts = new Set<number>(reservedPorts.filter((p): p is number => typeof p === 'number'))
-  // Scan standalone compose files
+
+  // Source 1: standalone compose files
   try {
     const entries = fs.readdirSync(composeBaseDir, { withFileTypes: true })
     for (const entry of entries) {
@@ -112,13 +183,26 @@ function nextAvailablePort(composeBaseDir: string, reservedPorts: number[] = [])
       } catch {}
     }
   } catch {}
-  // Also scan live Docker containers for published ports (catches monolithic compose)
+
+  // Source 2: live/stopped Docker containers (catches monolithic compose)
   try {
-    const output = execSync('docker ps --format "{{.Ports}}"', { timeout: 5000 }).toString()
-    for (const match of output.matchAll(/0\.0\.0\.0:(\d+)->/g)) {
-      usedPorts.add(parseInt(match[1], 10))
+    for (const p of dockerPorts()) {
+      if (!isNaN(p)) usedPorts.add(p)
     }
   } catch {}
+
+  // Source 3: every managed agent's declared API_SERVER_PORT
+  for (const p of agentEnvPorts(homeDir)) {
+    usedPorts.add(p)
+  }
+
+  return usedPorts
+}
+
+// Find the next free host port, stepping by PORT_STEP from BASE_PORT over every
+// port collectUsedPorts reports as claimed. Accepts the same options object.
+export function nextAvailablePort(opts: UsedPortsOptions): number {
+  const usedPorts = collectUsedPorts(opts)
   let port = BASE_PORT
   while (usedPorts.has(port)) {
     port += PORT_STEP
@@ -1286,10 +1370,10 @@ export class HarnessService {
 
     // Pick next available port — seed reserved ports from persisted overlays so
     // the duplicate never reuses a port already handed to another agent.
-    const port = nextAvailablePort(
+    const port = nextAvailablePort({
       composeBaseDir,
-      overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
-    )
+      reservedPorts: overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
+    })
 
     // Copy source data directory if it exists, else scaffold fresh
     if (fs.existsSync(sourceDataDir) && !fs.existsSync(newDataDir)) {
@@ -1438,10 +1522,10 @@ export class HarnessService {
 
     // Pick next available port — seed reserved ports from persisted overlays so
     // an allocated-but-not-yet-started agent is never re-handed out.
-    const port = nextAvailablePort(
+    const port = nextAvailablePort({
       composeBaseDir,
-      overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
-    )
+      reservedPorts: overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
+    })
 
     // Agent data directory (where .env, config.yaml, SOUL.md live)
     const agentDir = path.join(os.homedir(), `.hermes-${input.name}`)
@@ -1627,7 +1711,7 @@ If this is your very first startup ever, introduce yourself briefly in your home
     const existingPort = existingVars.has('API_SERVER_PORT')
       ? parseInt(envContent.match(/API_SERVER_PORT=(\d+)/)?.[1] || '0', 10)
       : 0
-    const port = existingPort || nextAvailablePort(composeBaseDir, reservedPorts)
+    const port = existingPort || nextAvailablePort({ composeBaseDir, reservedPorts })
 
     if (!fs.existsSync(composePath)) {
       assertPortAvailable(importOverlays, port, importId)
