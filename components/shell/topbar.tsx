@@ -1,11 +1,14 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
 import { Sun, Moon, Search } from 'lucide-react'
 
 export function Topbar() {
   const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   return (
     <header className="flex items-center justify-between h-14 px-6 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -20,7 +23,7 @@ export function Topbar() {
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           className="h-8 w-8"
         >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {mounted ? (theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />) : <Moon className="h-4 w-4" />}
         </Button>
       </div>
     </header>
