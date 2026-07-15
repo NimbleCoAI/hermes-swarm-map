@@ -1,5 +1,11 @@
-import { execSync, spawn } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import type { RestartMode } from '@/lib/types'
+
+// SECURITY: every subprocess in this file is invoked via execFileSync/spawn with
+// an argv ARRAY and no shell. Never reintroduce a string command run through
+// /bin/sh (execSync, `sh -c`, exec) — settings-derived values (composeFile,
+// image, hermesDir, service) reach these calls and a shell would make any
+// metacharacter in them an injection point (findings F1–F5, 2026-07 review).
 
 type ContainerInfo = {
   name: string
@@ -32,7 +38,7 @@ export type ContainerStats = {
 export class DockerService {
   isAvailable(): boolean {
     try {
-      execSync('docker version', { stdio: 'pipe', timeout: 5000 })
+      execFileSync('docker', ['version'], { stdio: 'pipe', timeout: 5000 })
       return true
     } catch {
       return false
@@ -41,8 +47,9 @@ export class DockerService {
 
   listContainers(composeFile: string): ContainerInfo[] {
     try {
-      const output = execSync(
-        `docker compose -f ${composeFile} ps --format json`,
+      const output = execFileSync(
+        'docker',
+        ['compose', '-f', composeFile, 'ps', '--format', 'json'],
         { stdio: 'pipe', timeout: 10000 }
       ).toString()
 
@@ -61,7 +68,7 @@ export class DockerService {
 
   listComposeProjects(): ComposeProject[] {
     try {
-      const output = execSync('docker compose ls --format json', {
+      const output = execFileSync('docker', ['compose', 'ls', '--format', 'json'], {
         stdio: 'pipe',
         timeout: 10000,
       }).toString()
@@ -79,8 +86,9 @@ export class DockerService {
 
   inspectContainers(projectName: string): ContainerDetails[] {
     try {
-      const output = execSync(
-        `docker compose -p ${projectName} ps --format json`,
+      const output = execFileSync(
+        'docker',
+        ['compose', '-p', projectName, 'ps', '--format', 'json'],
         { stdio: 'pipe', timeout: 10000 }
       ).toString()
 
@@ -129,8 +137,9 @@ export class DockerService {
   // Get stats for ALL containers in one call (avoids per-container 10s penalty)
   getAllContainerStats(): Record<string, ContainerStats> {
     try {
-      const output = execSync(
-        `docker stats --no-stream --format '{{json .}}'`,
+      const output = execFileSync(
+        'docker',
+        ['stats', '--no-stream', '--format', '{{json .}}'],
         { stdio: 'pipe', timeout: 15000 }
       ).toString().trim()
 
@@ -167,8 +176,9 @@ export class DockerService {
 
   getContainerDetails(containerName: string): { startedAt?: string } {
     try {
-      const output = execSync(
-        `docker inspect ${containerName} --format '{{json .State}}'`,
+      const output = execFileSync(
+        'docker',
+        ['inspect', containerName, '--format', '{{json .State}}'],
         { stdio: 'pipe', timeout: 10000 }
       ).toString().trim()
       const state = JSON.parse(output)
@@ -194,14 +204,14 @@ export class DockerService {
    * Returns the ref it synced to and the commit it will build from, for logging.
    */
   syncBuildSource(sourceDir: string): { branch: string; commit: string; upstream: string } {
-    const git = (args: string) =>
-      execSync(`git -C ${sourceDir} ${args}`, { stdio: 'pipe', timeout: 120000 })
+    const git = (args: string[]) =>
+      execFileSync('git', ['-C', sourceDir, ...args], { stdio: 'pipe', timeout: 120000 })
         .toString()
         .trim()
 
     // Must be a git work tree.
     try {
-      if (git('rev-parse --is-inside-work-tree') !== 'true') {
+      if (git(['rev-parse', '--is-inside-work-tree']) !== 'true') {
         throw new Error('not a git work tree')
       }
     } catch (err) {
@@ -212,14 +222,14 @@ export class DockerService {
 
     // Refuse to build over uncommitted local changes — could ship un-pushed
     // edits, and a stash here could silently drop someone's WIP.
-    const dirty = git('status --porcelain')
+    const dirty = git(['status', '--porcelain'])
     if (dirty) {
       throw new Error(
         `rebuild: build source ${sourceDir} has uncommitted changes — refusing to build (would ship un-synced code). Commit/stash/clean it, then rebuild.`,
       )
     }
 
-    const branch = git('rev-parse --abbrev-ref HEAD')
+    const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'])
     if (branch === 'HEAD') {
       throw new Error(
         `rebuild: build source ${sourceDir} is in detached HEAD — refusing to build. Check out the intended branch, then rebuild.`,
@@ -229,7 +239,7 @@ export class DockerService {
     // Resolve the configured upstream tracking ref (e.g. origin/main).
     let upstream: string
     try {
-      upstream = git('rev-parse --abbrev-ref --symbolic-full-name @{u}')
+      upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
     } catch {
       throw new Error(
         `rebuild: build source ${sourceDir} (branch ${branch}) has no upstream tracking branch — refusing to build. Set one with \`git branch --set-upstream-to\`, then rebuild.`,
@@ -237,21 +247,21 @@ export class DockerService {
     }
 
     // Fetch then fast-forward only. A non-ff (diverged history) fails loud.
-    git('fetch')
+    git(['fetch'])
     try {
-      git(`merge --ff-only ${upstream}`)
+      git(['merge', '--ff-only', upstream])
     } catch {
       throw new Error(
         `rebuild: build source ${sourceDir} (branch ${branch}) cannot fast-forward to ${upstream} — local history has diverged. Refusing to build. Reconcile manually, then rebuild.`,
       )
     }
 
-    const commit = git('rev-parse --short HEAD')
+    const commit = git(['rev-parse', '--short', 'HEAD'])
     return { branch, commit, upstream }
   }
 
   restart(composeFile: string, service: string, mode: RestartMode, projectName?: string, buildSource?: string | null): void {
-    const projectFlag = projectName ? `-p ${projectName} ` : ''
+    const projArgs = projectName ? ['-p', projectName] : []
 
     // For modes that run `--build`, sync the local source to the code it's
     // supposed to build FIRST. Throws (fail loud) rather than shipping stale.
@@ -263,61 +273,59 @@ export class DockerService {
       )
     }
 
+    const detach = (args: string[]) => {
+      const child = spawn('docker', args, { stdio: 'ignore', detached: true })
+      child.unref()
+      return child
+    }
+
     switch (mode) {
       case 'quick': {
-        const args = ['compose', ...projectFlag.trim().split(' ').filter(Boolean),
-          '-f', composeFile, 'restart', service]
-        const child = spawn('docker', args, { stdio: 'ignore', detached: true })
-        child.unref()
+        detach(['compose', ...projArgs, '-f', composeFile, 'restart', service])
         break
       }
       case 'recreate': {
         // Recreate the container WITHOUT rebuilding the image — the correct
         // primitive for env_file changes (e.g. rotated API keys), which a plain
         // `restart` would not reload. Fast; no image build.
-        const args = ['compose', ...projectFlag.trim().split(' ').filter(Boolean),
-          '-f', composeFile, 'up', '-d', '--force-recreate', service]
-        const child = spawn('docker', args, { stdio: 'ignore', detached: true })
-        child.unref()
+        detach(['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--force-recreate', service])
         break
       }
       case 'rebuild': {
         // Fire-and-forget: Docker builds can exceed any reasonable timeout.
         // The container will come up on its own when the build finishes.
-        const args = ['compose', ...projectFlag.trim().split(' ').filter(Boolean),
-          '-f', composeFile, 'up', '-d', '--build', '--force-recreate', service]
-        const child = spawn('docker', args, { stdio: 'ignore', detached: true })
-        child.unref()
+        detach(['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--build', '--force-recreate', service])
         break
       }
       case 'purge': {
-        // Two-step rebuild: build --no-cache, then bring up. Both fire-and-forget
-        // via a shell so they run sequentially without blocking the caller.
-        const buildCmd =
-          `docker compose ${projectFlag}-f ${composeFile} build --no-cache ${service}`
-        const upCmd =
-          `docker compose ${projectFlag}-f ${composeFile} up -d --force-recreate ${service}`
-        const child = spawn('sh', ['-c', `${buildCmd} && ${upCmd}`], {
-          stdio: 'ignore',
-          detached: true,
+        // Two-step rebuild: build --no-cache, THEN bring up — sequenced without a
+        // shell by chaining on the build process's exit (only up on success).
+        const buildArgs = ['compose', ...projArgs, '-f', composeFile, 'build', '--no-cache', service]
+        const upArgs = ['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--force-recreate', service]
+        const build = spawn('docker', buildArgs, { stdio: 'ignore', detached: true })
+        build.on('exit', (code) => {
+          if (code === 0) {
+            const up = spawn('docker', upArgs, { stdio: 'ignore', detached: true })
+            up.unref()
+          }
         })
-        child.unref()
+        build.unref()
         break
       }
     }
   }
 
   start(composeFile: string, service: string, projectName?: string): void {
-    const projectFlag = projectName ? `-p ${projectName} ` : ''
-    execSync(`docker compose ${projectFlag}-f ${composeFile} up -d ${service}`, {
+    const projArgs = projectName ? ['-p', projectName] : []
+    execFileSync('docker', ['compose', ...projArgs, '-f', composeFile, 'up', '-d', service], {
       stdio: 'pipe',
       timeout: 60000,
     })
   }
 
   stop(composeFile: string, service: string, projectName?: string): void {
-    const projectFlag = projectName ? `-p ${projectName} ` : ''
-    execSync(`docker compose ${projectFlag}-f ${composeFile} stop ${service}`, {
+    const projArgs = projectName ? ['-p', projectName] : []
+    execFileSync('docker', ['compose', ...projArgs, '-f', composeFile, 'stop', service], {
       stdio: 'pipe',
       timeout: 30000,
     })
@@ -325,7 +333,7 @@ export class DockerService {
 
   pullImage(image: string): { ok: boolean; error?: string } {
     try {
-      execSync(`docker pull ${image}`, { stdio: 'pipe', timeout: 300000 })
+      execFileSync('docker', ['pull', image], { stdio: 'pipe', timeout: 300000 })
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : 'Pull failed' }
@@ -336,10 +344,10 @@ export class DockerService {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
       try {
-        execSync(`curl -sf ${url}`, { stdio: 'pipe', timeout: 5000 })
+        execFileSync('curl', ['-sf', url], { stdio: 'pipe', timeout: 5000 })
         return true
       } catch {
-        execSync('sleep 2', { stdio: 'pipe' })
+        execFileSync('sleep', ['2'], { stdio: 'pipe' })
       }
     }
     return false
@@ -352,10 +360,11 @@ export class DockerService {
   inspectState(service: string): { running: boolean; status: string; restartCount: number; startedAt: string } | null {
     try {
       // NOTE: RestartCount is a TOP-LEVEL field in `docker inspect`, not under .State.
-      // `{{.State.RestartCount}}` errors the whole template → execSync throws → this
+      // `{{.State.RestartCount}}` errors the whole template → execFileSync throws → this
       // returns null → /api/harnesses/:id/health reports every agent unhealthy.
-      const out = execSync(
-        `docker inspect ${service} --format '{{.State.Running}}|{{.State.Status}}|{{.RestartCount}}|{{.State.StartedAt}}'`,
+      const out = execFileSync(
+        'docker',
+        ['inspect', service, '--format', '{{.State.Running}}|{{.State.Status}}|{{.RestartCount}}|{{.State.StartedAt}}'],
         { stdio: 'pipe', timeout: 5000 },
       ).toString().trim()
       const [running, status, rc, startedAt] = out.split('|')
@@ -367,8 +376,9 @@ export class DockerService {
 
   getLogs(composeFile: string, service: string, lines: number = 50): string {
     try {
-      return execSync(
-        `docker compose -f ${composeFile} logs --tail=${lines} ${service}`,
+      return execFileSync(
+        'docker',
+        ['compose', '-f', composeFile, 'logs', `--tail=${lines}`, service],
         { stdio: 'pipe', timeout: 10000 }
       ).toString()
     } catch {
