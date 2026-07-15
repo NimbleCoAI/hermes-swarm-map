@@ -6,6 +6,7 @@
 import { hsmBaseUrl } from './hsm-url'
 import { anthropicEnvVarForValue } from './keys'
 import { ollamaSidecar } from './harness-compose'
+import { assertNoNewline } from '@/lib/env-helpers'
 
 export function generateEnvContent(params: {
   name: string
@@ -28,6 +29,16 @@ export function generateEnvContent(params: {
   browserEnabled?: boolean
 }): string {
   const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, notionKey, browserEnabled } = params
+
+  // Every user-supplied string below is spliced onto its own `.env` line. A
+  // newline in any of them would inject extra env lines — including overriding
+  // the secure-default policy block emitted above the tokens (F10). Reject.
+  for (const [field, value] of Object.entries({
+    name, provider, llmKey, mattermostUrl, mattermostToken, telegramToken,
+    discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, notionKey,
+  })) {
+    if (typeof value === 'string') assertNoNewline(value, field)
+  }
 
   const providerKeyMap: Record<string, string> = {
     anthropic: 'ANTHROPIC_API_KEY',

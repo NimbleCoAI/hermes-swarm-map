@@ -7,6 +7,8 @@
  * Do NOT set read_only, no-new-privileges, or noexec tmpfs — s6 writes executables to /run.
  */
 
+import { assertNoNewline } from '@/lib/env-helpers'
+
 export interface ComposeOptions {
   imageOrBuild?: { image: string } | { build: string }
   defaultImage?: string
@@ -307,6 +309,9 @@ networks:
  * inside the `hermes-<name>:` service. Used by the image-update (CD) path.
  */
 export function setComposeImage(compose: string, image: string): string {
+  // A newline here would let the ref inject arbitrary YAML keys under the hermes
+  // service (e.g. `privileged: true` + a `/:/host` bind) → host-root breakout (F8).
+  assertNoNewline(image, 'image ref')
   const lines = compose.split('\n')
   const svcIdx = lines.findIndex((l) => /^  hermes-[\w.-]+:\s*$/.test(l))
   if (svcIdx < 0 || svcIdx + 1 >= lines.length) {

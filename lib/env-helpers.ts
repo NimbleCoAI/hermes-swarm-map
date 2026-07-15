@@ -57,6 +57,22 @@ export const POLICY_VARS: Record<string, string[]> = {
 }
 
 /**
+ * Guard a value that will be spliced onto a single line of a generated file
+ * (.env or docker-compose YAML). A CR or LF in the value would inject additional
+ * `KEY=value` lines (policy override) or additional YAML keys (`privileged: true`
+ * + `/:/host` → container breakout to host root) — the mechanism behind findings
+ * F8–F11 of the 2026-07 security review. Values that legitimately live on one
+ * line (secrets, tokens, URLs, image refs) never contain a newline, so we reject
+ * rather than escape. `field` names the offending value in the thrown error.
+ */
+export function assertNoNewline(value: string, field = 'value'): string {
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`${field} must not contain newline characters`)
+  }
+  return value
+}
+
+/**
  * Merge env vars into an existing .env file content string.
  * Updates existing keys, appends new ones. Does not remove anything.
  */
@@ -67,6 +83,7 @@ export function mergeEnvVars(
   let result = content
 
   for (const [key, value] of Object.entries(vars)) {
+    assertNoNewline(value, key)
     const regex = new RegExp(`^${key}=.*$`, 'm')
     if (regex.test(result)) {
       result = result.replace(regex, `${key}=${value}`)
