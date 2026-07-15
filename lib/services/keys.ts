@@ -46,6 +46,24 @@ export function anthropicEnvVarForValue(value: string): 'ANTHROPIC_API_KEY' | 'A
   return 'ANTHROPIC_API_KEY'
 }
 
+// A value in our AES-256-GCM at-rest format is `iv:authTag:ciphertext`, all hex
+// (see encryption.ts). Used to tell a real decrypt failure (rotated/lost .key →
+// must fail loud) apart from a legacy pre-encryption plaintext value (no such
+// shape → returning it as-is is correct).
+const CIPHERTEXT_SHAPE = /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i
+function looksLikeCiphertext(value: string): boolean {
+  return CIPHERTEXT_SHAPE.test(value)
+}
+
+// What to return when `decrypt()` throws. D5: if the stored value is in our
+// ciphertext format, decryption genuinely failed (rotated/lost .key or
+// corruption) — returning the raw iv:tag:ciphertext would hand a garbage
+// credential to the agent, so fail closed (undefined). If it is NOT ciphertext,
+// it's a legacy plaintext value stored before encryption existed — return as-is.
+function decryptFallback(storedValue: string): string | undefined {
+  return looksLikeCiphertext(storedValue) ? undefined : storedValue
+}
+
 // Set VAR=value in a .env body — replacing an existing line or appending one.
 function upsertEnvVar(content: string, varName: string, value: string): string {
   const regex = new RegExp(`^${varName}=.*$`, 'm')
@@ -246,6 +264,17 @@ export class KeysService {
     ]
   }
 
+  // Every harness name key discovery should scan: the built-in defaults PLUS any
+  // harness the operator created via the app (persisted in harnesses.json). D2:
+  // without the overlay names, UI-created harnesses showed zero keys forever.
+  private allHarnessNames(): string[] {
+    const overlays = this.storage.read<Array<{ name?: string }>>('harnesses.json', [])
+    const overlayNames = overlays
+      .map((o) => o.name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0)
+    return Array.from(new Set([...this.defaultHarnessNames(), ...overlayNames]))
+  }
+
   // Load user overrides (budget, health, assignedTo overrides)
   private loadOverrides(): Map<string, KeyOverride> {
     const stored = this.storage.read<StoredKey[]>(KEYS_FILE, [])
@@ -258,7 +287,7 @@ export class KeysService {
   }
 
   list(harnessNames?: string[]): Key[] {
-    const names = harnessNames ?? this.defaultHarnessNames()
+    const names = harnessNames ?? this.allHarnessNames()
     const registry = discoverKeys(names, this.encryption)
     const storedAll = this.storage.read<StoredKey[]>(KEYS_FILE, [])
 
@@ -449,20 +478,20 @@ export class KeysService {
       try {
         return this.encryption.decrypt(key.encryptedValue)
       } catch {
-        return key.encryptedValue
+        return decryptFallback(key.encryptedValue)
       }
     }
 
     // Fall back to live discovery — discovered keys aren't persisted to keys.json
     // until explicitly modified, but we can read the actual value from .env files
-    const names = this.defaultHarnessNames()
+    const names = this.allHarnessNames()
     const registry = discoverKeys(names, this.encryption)
     const discovered = registry.get(id)
     if (discovered?.key.encryptedValue) {
       try {
         return this.encryption.decrypt(discovered.key.encryptedValue)
       } catch {
-        return discovered.key.encryptedValue
+        return decryptFallback(discovered.key.encryptedValue)
       }
     }
 
