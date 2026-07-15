@@ -276,10 +276,13 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
       }
       toast.success(`${key.provider} key assigned`)
       setShowAssignKey(false)
+      // Recreate (not 'quick') so the newly-assigned env_file value actually
+      // loads — a plain restart keeps the old creation-time env, so the key
+      // would appear assigned but never reach the running process (D3).
       await fetch(`/api/harnesses/${id}/restart`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'quick' }),
+        body: JSON.stringify({ mode: 'recreate' }),
       })
       toast.success('Restarting agent to apply key...')
       refetch()
@@ -309,10 +312,13 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
         return
       }
       toast.success(`${key.provider} key removed`)
+      // Recreate (not 'quick') so the revoked key is actually pulled from the
+      // running process — a plain restart reloads no env_file, leaving the
+      // revoked credential live despite the "removed" toast (D3).
       await fetch(`/api/harnesses/${id}/restart`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'quick' }),
+        body: JSON.stringify({ mode: 'recreate' }),
       })
       toast.success('Restarting agent to apply...')
       refetch()
@@ -840,6 +846,10 @@ export default function HarnessDetailPage({ params }: { params: Promise<{ id: st
 
         <TabsContent value="models" className="mt-4">
           <ModelCascadeEditor
+            // key forces a remount per harness — the editor seeds its cascade
+            // into local state once, so without this an in-app A→B nav keeps A's
+            // cascade and saving B's Models tab could persist A's cascade (D6).
+            key={id}
             models={modelConfig?.models ?? harness.models ?? []}
             provider={modelConfig?.provider ?? ''}
             fallbackProviders={modelConfig?.fallbackProviders ?? []}
