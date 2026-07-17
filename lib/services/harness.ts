@@ -681,6 +681,15 @@ export function guessDataDir(serviceName: string, containerName: string): string
   return path.join(home, '.hermes-' + serviceName)
 }
 
+// Resolve a harness's data dir from its NAME, honoring the personal special-case
+// (personal lives at ~/.hermes; every other agent at ~/.hermes-<name>). The
+// name-keyed twin of guessDataDir — used by duplicate/remove, which work from
+// the harness name rather than the service name (D1).
+export function agentDataDirForName(name: string): string {
+  const home = os.homedir()
+  return name === 'personal' ? path.join(home, '.hermes') : path.join(home, '.hermes-' + name)
+}
+
 // Read the last N lines of a log file without slurping the whole thing.
 // Reads a bounded window from the END of the file (capped) so a multi-MB
 // gateway.log never lands entirely in memory. Returns '' if the file is
@@ -1358,8 +1367,10 @@ export class HarnessService {
 
     // Determine agent dirs
     const sourceName = source.name ?? sourceId.replace(/^h_/, '').replace(/_/g, '-')
-    const sourceDataDir = path.join(os.homedir(), `.hermes-${sourceName}`)
-    const newDataDir = path.join(os.homedir(), `.hermes-${newName}`)
+    // personal's data lives at ~/.hermes, not ~/.hermes-personal (D1) — resolve
+    // through the shared name→dir helper so duplicating personal copies real data.
+    const sourceDataDir = agentDataDirForName(sourceName)
+    const newDataDir = agentDataDirForName(newName)
 
     // Settings for compose dir
     const settings = this.config?.getSettings()
@@ -1471,9 +1482,13 @@ export class HarnessService {
     this.storage.write(HARNESSES_FILE, overlays)
 
     if (deleteFiles) {
-      // Remove data directory
-      const dataDir = path.join(os.homedir(), `.hermes-${name}`)
-      if (fs.existsSync(dataDir)) {
+      // Remove data directory (resolved through the personal-aware helper, D1).
+      const dataDir = agentDataDirForName(name)
+      // Never delete the personal base ~/.hermes from a dashboard action — it's
+      // the root install, not a disposable overlay. Guard is explicit rather
+      // than relying on the old accidental ~/.hermes-personal miss.
+      const personalBase = path.join(os.homedir(), '.hermes')
+      if (dataDir !== personalBase && fs.existsSync(dataDir)) {
         fs.rmSync(dataDir, { recursive: true, force: true })
         filesDeleted = true
       }
