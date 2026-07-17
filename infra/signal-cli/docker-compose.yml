@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     labels:
       - "autoheal=true"
-    environment:
-      - MODE=json-rpc
     # No published port: signal-cli >=0.14.2 rejects non-localhost Host
     # headers (421), so the host port is owned by signal-host-proxy below,
     # which rewrites Host before forwarding.
@@ -20,6 +18,20 @@ services:
       - ${HOME}/.hermes-cryptids:${HOME}/.hermes-cryptids:ro
       - ${HOME}/.hermes-egregore:${HOME}/.hermes-egregore:ro
       - ${HOME}/.hermes-evil-duck:${HOME}/.hermes-evil-duck:ro
+    # Hardening: no privilege escalation, drop all capabilities EXCEPT
+    # DAC_OVERRIDE, plus bounded resources. DAC_OVERRIDE is required because the
+    # daemon runs as root and must traverse/read the agents' 0700-mode home dirs
+    # (owned by uid 501) to attach files, and write signal-data (owned by 501) —
+    # dropping it would break attachment send/receive. Everything else a JVM
+    # never needs (NET_ADMIN, SYS_*, MKNOD, …) is gone.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    mem_limit: 1024m
+    cpus: "1.5"
     healthcheck:
       # signal-cli runs in JSON-RPC daemon mode — there is no REST /v1/about
       # endpoint (it 404s), so probe the JSON-RPC endpoint. This overrides the
@@ -33,8 +45,12 @@ services:
     networks:
       - hermes-net
 
-  # Host-header rewriting proxy — see host-proxy.conf. Owns the published
-  # port 8080 that agents reach via host.docker.internal.
+  # Host-header rewriting proxy — see host-proxy.conf. Owns the published port
+  # 8080 that agents reach via host.docker.internal. Bound to 127.0.0.1 ONLY:
+  # on Docker Desktop, host.docker.internal reaches host-loopback services, so
+  # agents still connect while LAN/tailnet/other-network clients cannot. This is
+  # what closes the unauthenticated-daemon exposure (and makes the daemon's
+  # DNS-rebinding protection moot rather than defeated).
   signal-host-proxy:
     image: nginx:alpine
     container_name: signal-host-proxy
@@ -42,26 +58,68 @@ services:
     depends_on:
       - signal-cli-daemon
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./host-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    security_opt:
+      - no-new-privileges:true
+    # nginx master needs these to chown its runtime dirs and spawn workers as the
+    # unprivileged nginx user; everything else is dropped.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    mem_limit: 128m
+    cpus: "0.5"
     networks:
       - hermes-net
 
-  # Auto-restart when signal-cli enters websocket reconnect loop.
-  # The healthcheck detects degraded state via JSON-RPC responsiveness.
+  # Read/POST-scoped Docker API proxy. Replaces the raw /var/run/docker.sock
+  # mount that autoheal previously held (root-equivalent host control). Exposes
+  # ONLY container list + restart to autoheal, so a compromise of the third-party
+  # autoheal image can no longer launch privileged containers or own the host.
+  signal-docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: signal-docker-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1   # GET /containers/json + /containers/{id}/json (find unhealthy)
+      - POST=1         # POST /containers/{id}/restart (act on them)
+      - INFO=1         # autoheal pings /info on startup
+      # everything else (EXEC, IMAGES, VOLUMES, NETWORKS, SWARM, …) stays denied.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    cpus: "0.25"
+    networks:
+      - hermes-net
+
+  # Auto-restart signal-cli when its healthcheck fails. Talks to the Docker API
+  # through the scoped proxy above — it no longer holds the raw socket.
   signal-cli-autoheal:
     image: willfarrell/autoheal
     container_name: signal-cli-autoheal
     restart: unless-stopped
+    depends_on:
+      - signal-docker-proxy
     environment:
       # Scope to containers labelled autoheal=true (only the daemon) so this
       # never restarts agent harness containers.
       - AUTOHEAL_CONTAINER_LABEL=autoheal
       - AUTOHEAL_INTERVAL=30
       - AUTOHEAL_START_PERIOD=120
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Reach Docker via the scoped TCP proxy instead of a mounted socket.
+      - DOCKER_SOCK=tcp://signal-docker-proxy:2375
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 64m
+    cpus: "0.25"
     networks:
       - hermes-net
 
