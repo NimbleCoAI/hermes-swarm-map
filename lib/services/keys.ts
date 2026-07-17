@@ -6,6 +6,7 @@ import type { Key, KeyInput } from '@/lib/types'
 import type { Storage } from './storage'
 import type { AuditService } from './audit'
 import { Encryption } from './encryption'
+import { assertNoNewline } from '@/lib/env-helpers'
 
 const KEYS_FILE = 'keys.json'
 
@@ -47,7 +48,9 @@ export function anthropicEnvVarForValue(value: string): 'ANTHROPIC_API_KEY' | 'A
 }
 
 // Set VAR=value in a .env body — replacing an existing line or appending one.
-function upsertEnvVar(content: string, varName: string, value: string): string {
+// Exported for direct testing (it is a generated-file sink; see F9).
+export function upsertEnvVar(content: string, varName: string, value: string): string {
+  assertNoNewline(value, varName)
   const regex = new RegExp(`^${varName}=.*$`, 'm')
   if (regex.test(content)) return content.replace(regex, `${varName}=${value}`)
   return content.trimEnd() + `\n${varName}=${value}\n`

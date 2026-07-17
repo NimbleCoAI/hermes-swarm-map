@@ -2,33 +2,41 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DockerService } from '../docker'
 
-const mockExecSync = vi.hoisted(() => vi.fn())
+// DockerService is shell-free: it invokes execFileSync/spawn with an argv array
+// (see docker-injection.test.ts for the security property). These tests mock
+// that surface and assert the argv, and that behavior (fail-loud rebuild sync,
+// fire-and-forget restarts, the RestartCount regression) is preserved.
+const mockExecFileSync = vi.hoisted(() => vi.fn())
 const mockSpawn = vi.hoisted(() => vi.fn())
 
 vi.mock('child_process', () => ({
-  default: { execSync: mockExecSync, spawn: mockSpawn },
-  execSync: mockExecSync,
+  default: { execFileSync: mockExecFileSync, spawn: mockSpawn },
+  execFileSync: mockExecFileSync,
   spawn: mockSpawn,
 }))
+
+// Join a [cmd, args] call into a single string for substring assertions.
+const joined = (call: unknown[]) => [call[0], ...((call[1] as string[]) ?? [])].join(' ')
 
 describe('DockerService', () => {
   let docker: DockerService
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // Default spawn mock returns a fake child process
-    const fakeChild = { unref: vi.fn() }
+    // Default spawn mock returns a fake child process. `on` is needed because
+    // purge mode chains the `up` on the build child's exit event.
+    const fakeChild = { unref: vi.fn(), on: vi.fn() }
     mockSpawn.mockReturnValue(fakeChild)
     docker = new DockerService()
   })
 
   it('checks if docker is available', () => {
-    mockExecSync.mockReturnValueOnce(Buffer.from('Docker version 24.0.0'))
+    mockExecFileSync.mockReturnValueOnce(Buffer.from('Docker version 24.0.0'))
     expect(docker.isAvailable()).toBe(true)
   })
 
   it('returns false when docker is not available', () => {
-    mockExecSync.mockImplementationOnce(() => { throw new Error('not found') })
+    mockExecFileSync.mockImplementationOnce(() => { throw new Error('not found') })
     expect(docker.isAvailable()).toBe(false)
   })
 
@@ -37,7 +45,7 @@ describe('DockerService', () => {
       { Name: 'hermes-audrey-1', Service: 'audrey', State: 'running' },
       { Name: 'hermes-cryptid-1', Service: 'cryptid', State: 'exited' },
     ])
-    mockExecSync.mockReturnValueOnce(Buffer.from(jsonOutput))
+    mockExecFileSync.mockReturnValueOnce(Buffer.from(jsonOutput))
 
     const containers = docker.listContainers('/path/to/docker-compose.yml')
     expect(containers).toHaveLength(2)
@@ -46,10 +54,16 @@ describe('DockerService', () => {
       service: 'audrey',
       state: 'running',
     })
+    // composeFile is passed as its own argv element — never spliced into a string
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['compose', '-f', '/path/to/docker-compose.yml', 'ps', '--format', 'json']),
+      expect.any(Object),
+    )
   })
 
   it('returns empty array when compose ps fails', () => {
-    mockExecSync.mockImplementationOnce(() => { throw new Error('no compose') })
+    mockExecFileSync.mockImplementationOnce(() => { throw new Error('no compose') })
     const containers = docker.listContainers('/bad/path.yml')
     expect(containers).toEqual([])
   })
@@ -59,8 +73,8 @@ describe('DockerService', () => {
     // .State. A `{{.State.RestartCount}}` template errors out ("map has no entry for
     // key RestartCount"), so inspectState would catch the throw and return null —
     // making /api/harnesses/:id/health report EVERY agent "unhealthy/running:false".
-    mockExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes('.State.RestartCount')) {
+    mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+      if (args.join(' ').includes('.State.RestartCount')) {
         throw new Error('template: :1:45: map has no entry for key "RestartCount"')
       }
       return Buffer.from('true|running|3|2026-06-18T23:10:59Z')
@@ -78,7 +92,7 @@ describe('DockerService', () => {
 
   it('restarts a service in quick mode (fire-and-forget via spawn)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'quick')
-    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockExecFileSync).not.toHaveBeenCalled()
     expect(mockSpawn).toHaveBeenCalledWith(
       'docker',
       expect.arrayContaining(['-f', '/path/compose.yml', 'restart', 'audrey']),
@@ -89,7 +103,7 @@ describe('DockerService', () => {
 
   it('restarts a service in rebuild mode (fire-and-forget via spawn)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'rebuild')
-    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockExecFileSync).not.toHaveBeenCalled()
     expect(mockSpawn).toHaveBeenCalledWith(
       'docker',
       expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--build', '--force-recreate', 'audrey']),
@@ -101,7 +115,7 @@ describe('DockerService', () => {
 
   it('recreates a service in recreate mode (force-recreate, NO rebuild)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'recreate')
-    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockExecFileSync).not.toHaveBeenCalled()
     expect(mockSpawn).toHaveBeenCalledWith(
       'docker',
       expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--force-recreate', 'audrey']),
@@ -113,36 +127,41 @@ describe('DockerService', () => {
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
-  it('restarts a service in purge mode (fire-and-forget via spawn)', () => {
+  it('restarts a service in purge mode: build then up, both via docker argv (no shell)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'purge')
-    expect(mockExecSync).not.toHaveBeenCalled()
+    expect(mockExecFileSync).not.toHaveBeenCalled()
+    // No `sh -c` — the build step is a direct docker argv call.
+    expect(mockSpawn).not.toHaveBeenCalledWith('sh', expect.anything(), expect.anything())
     expect(mockSpawn).toHaveBeenCalledWith(
-      'sh',
-      expect.arrayContaining(['-c', expect.stringContaining('--no-cache audrey')]),
+      'docker',
+      expect.arrayContaining(['-f', '/path/compose.yml', 'build', '--no-cache', 'audrey']),
       expect.objectContaining({ detached: true, stdio: 'ignore' })
     )
+    // The `up` is chained on the build child's exit event.
+    expect(mockSpawn.mock.results[0].value.on).toHaveBeenCalledWith('exit', expect.any(Function))
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
   describe('rebuild syncs the build source before building', () => {
     // Stub a clean, fast-forwardable git checkout. Each git call returns the
-    // right value based on the subcommand.
+    // right value based on the subcommand (matched against the joined argv).
     function stubCleanGit(opts?: { dirty?: string; branch?: string; noUpstream?: boolean; nonFf?: boolean }) {
       const branch = opts?.branch ?? 'main'
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes('rev-parse --is-inside-work-tree')) return Buffer.from('true')
-        if (cmd.includes('status --porcelain')) return Buffer.from(opts?.dirty ?? '')
-        if (cmd.includes('rev-parse --abbrev-ref HEAD')) return Buffer.from(branch)
-        if (cmd.includes('symbolic-full-name @{u}')) {
+      mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+        const a = args.join(' ')
+        if (a.includes('rev-parse --is-inside-work-tree')) return Buffer.from('true')
+        if (a.includes('status --porcelain')) return Buffer.from(opts?.dirty ?? '')
+        if (a.includes('rev-parse --abbrev-ref HEAD')) return Buffer.from(branch)
+        if (a.includes('symbolic-full-name @{u}')) {
           if (opts?.noUpstream) throw new Error('no upstream')
           return Buffer.from(`origin/${branch}`)
         }
-        if (cmd.includes('fetch')) return Buffer.from('')
-        if (cmd.includes('merge --ff-only')) {
+        if (a.includes('fetch')) return Buffer.from('')
+        if (a.includes('merge --ff-only')) {
           if (opts?.nonFf) throw new Error('not possible to fast-forward')
           return Buffer.from('Updating')
         }
-        if (cmd.includes('rev-parse --short HEAD')) return Buffer.from('abc1234')
+        if (a.includes('rev-parse --short HEAD')) return Buffer.from('abc1234')
         return Buffer.from('')
       })
     }
@@ -150,7 +169,7 @@ describe('DockerService', () => {
     it('fetches and fast-forwards the source, then builds', () => {
       stubCleanGit()
       docker.restart('/path/compose.yml', 'audrey', 'rebuild', undefined, '/src/hermes')
-      const calls = mockExecSync.mock.calls.map((c) => c[0] as string)
+      const calls = mockExecFileSync.mock.calls.map(joined)
       expect(calls.some((c) => c.includes('git -C /src/hermes fetch'))).toBe(true)
       expect(calls.some((c) => c.includes('git -C /src/hermes merge --ff-only origin/main'))).toBe(true)
       // build still fires
@@ -187,13 +206,13 @@ describe('DockerService', () => {
 
     it('does NOT sync for non-build modes (quick/recreate)', () => {
       docker.restart('/c.yml', 'audrey', 'quick', undefined, '/src/hermes')
-      const calls = mockExecSync.mock.calls.map((c) => c[0] as string)
+      const calls = mockExecFileSync.mock.calls.map(joined)
       expect(calls.some((c) => c.includes('git -C'))).toBe(false)
     })
 
     it('does NOT sync when no build source is provided (image-only harness)', () => {
       docker.restart('/c.yml', 'audrey', 'rebuild')
-      const calls = mockExecSync.mock.calls.map((c) => c[0] as string)
+      const calls = mockExecFileSync.mock.calls.map(joined)
       expect(calls.some((c) => c.includes('git -C'))).toBe(false)
       expect(mockSpawn).toHaveBeenCalled()
     })

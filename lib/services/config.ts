@@ -3,6 +3,60 @@ import path from 'path'
 import os from 'os'
 import type { Settings, Model, Person, Surface } from '@/lib/types'
 import type { Storage } from './storage'
+import { assertNoNewline } from '@/lib/env-helpers'
+
+/**
+ * Validate a settings patch against an explicit allowlist before it is merged
+ * into stored settings (P3/F6). Rejects unknown keys, wrong types, out-of-range
+ * ports, and newline-bearing strings (path/image/host values that flow into
+ * filesystem scans and generated compose files). Returns a patch containing only
+ * known, well-typed keys. Throws on any violation.
+ */
+export function validateSettingsPatch(input: unknown): Partial<Settings> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new Error('settings patch must be a JSON object')
+  }
+  const out: Partial<Settings> = {}
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    switch (key) {
+      case 'hermesDir':
+      case 'dataDir':
+      case 'defaultImage':
+      case 'vncBindHost':
+      case 'controlBindHost':
+        if (typeof value !== 'string') throw new Error(`${key} must be a string`)
+        assertNoNewline(value, key)
+        out[key] = value
+        break
+      case 'theme':
+        if (value !== 'light' && value !== 'dark') throw new Error('theme must be "light" or "dark"')
+        out.theme = value
+        break
+      case 'composeFiles':
+        if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+          throw new Error('composeFiles must be an array of strings')
+        }
+        ;(value as string[]).forEach((v, i) => assertNoNewline(v, `composeFiles[${i}]`))
+        out.composeFiles = value as string[]
+        break
+      case 'onboarded':
+      case 'useLocalBuild':
+      case 'localApiEnabled':
+        if (typeof value !== 'boolean') throw new Error(`${key} must be a boolean`)
+        out[key] = value
+        break
+      case 'localApiPort':
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 65535) {
+          throw new Error('localApiPort must be an integer between 1 and 65535')
+        }
+        out.localApiPort = value
+        break
+      default:
+        throw new Error(`unknown settings key: ${key}`)
+    }
+  }
+  return out
+}
 
 const SETTINGS_FILE = 'settings.json'
 const MODELS_FILE = 'models.json'
@@ -70,8 +124,9 @@ export class ConfigService {
   }
 
   updateSettings(partial: Partial<Settings>): Settings {
+    const validated = validateSettingsPatch(partial)
     const current = this.getSettings()
-    const updated = { ...current, ...partial }
+    const updated = { ...current, ...validated }
     this.storage.write(SETTINGS_FILE, updated)
     return updated
   }
