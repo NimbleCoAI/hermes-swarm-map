@@ -8,6 +8,7 @@ import { MemoryService } from './memory'
 import { ConfigService } from './config'
 import { SignalPinService } from './signal-pin'
 import { SurfaceAdminService } from './surface-admins'
+import { LettaService } from './letta'
 import path from 'path'
 import os from 'os'
 
@@ -40,4 +41,7 @@ export const services = {
   memory: new MemoryService(storage),
   signalPin: new SignalPinService(keysService, process.env.SIGNAL_API_URL || 'http://localhost:8080'),
   surfaceAdmins: new SurfaceAdminService(storage, audit),
+  // SPIKE (Path 1): agents-as-API-resources layer, distinct from the container
+  // model. Base URL from LETTA_BASE_URL, defaults to the compose-published :8283.
+  letta: new LettaService(),
 }
