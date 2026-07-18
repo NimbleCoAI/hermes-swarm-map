@@ -9,6 +9,7 @@ import { ConfigService } from './config'
 import { SignalPinService } from './signal-pin'
 import { SurfaceAdminService } from './surface-admins'
 import { LettaService } from './letta'
+import { LettaAgentProvider } from './letta-agent-provider'
 import path from 'path'
 import os from 'os'
 
@@ -27,6 +28,11 @@ const tools = new ToolsService(storage)
 
 const keysService = new KeysService(storage, audit, DATA_DIR)
 
+// Agents-as-API-resources layer (design §1c). Maps Letta agents → Harness so
+// the fleet list/detail render them uniformly, gated by harness.runtime.
+const lettaService = new LettaService()
+const lettaAgents = new LettaAgentProvider(lettaService)
+
 // Wire ToolsService into HarnessService for auto-discovery of tools
 harness.setToolsService(tools)
 
@@ -43,5 +49,7 @@ export const services = {
   surfaceAdmins: new SurfaceAdminService(storage, audit),
   // SPIKE (Path 1): agents-as-API-resources layer, distinct from the container
   // model. Base URL from LETTA_BASE_URL, defaults to the compose-published :8283.
-  letta: new LettaService(),
+  letta: lettaService,
+  // Provider that maps Letta agents → Harness objects for the fleet UI (slice 1).
+  lettaAgents,
 }

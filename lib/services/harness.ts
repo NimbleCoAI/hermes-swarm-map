@@ -17,6 +17,7 @@ import { getUseCaseTemplate, reapplyUseCaseTemplate as reapplyTemplateToDataDir 
 import type { ToolsService } from './tools'
 import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from './harness-compose'
 import { RegistryService, parseImageRef } from './registry'
+import type { ContainerRuntimeAdapter } from './runtime-adapter'
 
 const DEFAULT_IMAGE_REPO = 'nimblecoai/hermes-agent-mt'
 import { hsmBaseUrl } from './hsm-url'
@@ -681,6 +682,34 @@ export function guessDataDir(serviceName: string, containerName: string): string
   return path.join(home, '.hermes-' + serviceName)
 }
 
+// --- Container-runtime seam (design §1b) ------------------------------------
+// The Hermes adapter is a behavior-preserving wrapper around the module
+// functions discover() already calls inline. Extracting them behind
+// ContainerRuntimeAdapter lets discover() dispatch on runtime instead of
+// hardcoding the `hermes-`/`seraph-` prefix. readSoul/guessDataDir/
+// readModelConfig are module-local, so this delegates with ZERO behavior change.
+export const hermesAdapter: ContainerRuntimeAdapter = {
+  runtime: 'hermes',
+  // Preserves the exact gate from discover(): hermes-* and seraph-* containers.
+  matches: (containerName) =>
+    containerName.startsWith('hermes-') || containerName.startsWith('seraph-'),
+  dataDir: (serviceName, containerName) => guessDataDir(serviceName, containerName),
+  readPersona: (dataDir) => readSoul(dataDir),
+  readModels: (dataDir) => readModelConfig(dataDir),
+}
+
+// Registry of container adapters. Hermes is the only member in slice 1;
+// claude-code-proxy/custom slot in here later (design §1b). Letta is NOT here —
+// it's an AgentResourceProvider (REST), not a container adapter.
+const containerAdapters: ContainerRuntimeAdapter[] = [hermesAdapter]
+
+/** Pick the container adapter that owns this live container, if any. */
+export function pickContainerAdapter(
+  containerName: string,
+): ContainerRuntimeAdapter | undefined {
+  return containerAdapters.find((a) => a.matches(containerName))
+}
+
 // Resolve a harness's data dir from its NAME, honoring the personal special-case
 // (personal lives at ~/.hermes; every other agent at ~/.hermes-<name>). The
 // name-keyed twin of guessDataDir — used by duplicate/remove, which work from
@@ -878,12 +907,17 @@ export class HarnessService {
       const name = containerNameToHarnessName(containerName)
       const id = 'h_' + name.replace(/-/g, '_')
 
-      // Only include containers that look like hermes agents or have an overlay
-      const isHermes = containerName.startsWith('hermes-') || containerName.startsWith('seraph-')
-      if (!isHermes && !overlays[id]) continue
+      // Dispatch on the container-runtime seam (design §1b). A container is
+      // included if a runtime adapter claims it OR it has a stored overlay.
+      // Overlay-only containers keep Hermes semantics (the historical default),
+      // so `effAdapter` falls back to hermesAdapter — behavior-identical to the
+      // old inline `isHermes`/`runtime:'hermes'`/guessDataDir path.
+      const adapter = pickContainerAdapter(containerName)
+      if (!adapter && !overlays[id]) continue
+      const effAdapter = adapter ?? hermesAdapter
 
-      const dataDir = guessDataDir(live.serviceName, containerName)
-      const persona = readSoul(dataDir)
+      const dataDir = effAdapter.dataDir(live.serviceName, containerName)
+      const persona = effAdapter.readPersona(dataDir)
 
       const stats = allStats[containerName] ?? { cpu: 0, memMiB: 0 }
 
@@ -896,7 +930,7 @@ export class HarnessService {
         // Discoverable fields
         id,
         name,
-        runtime: 'hermes',
+        runtime: effAdapter.runtime,
         status: stateToStatus(live.state),
         health: { errors: 0 },
         persona: persona || overlay.persona || `Hermes agent: ${name}`,
@@ -909,7 +943,7 @@ export class HarnessService {
         tier: overlay.tier ?? 'individual',
         platform: overlay.platform ?? 'hermes',
         channel: overlay.channel ?? (port ? `:${port}` : ''),
-        models: overlay.models?.length ? overlay.models : readModelConfig(dataDir),
+        models: overlay.models?.length ? overlay.models : effAdapter.readModels(dataDir),
         costToday: getCostToday(id),
         invocations: getInvocationsToday(id),
         tools: overlay.tools?.length ? overlay.tools : (this.autoDiscoverTools(name) ?? []),
