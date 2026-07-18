@@ -1,5 +1,5 @@
 {
-  "_comment": "Public use-case templates offered by the create-new wizard. Each artifact 'source' is a PINNED git ref fetched + trust-gate-scanned before install (see lib/services/usecase-templates.ts). Private repos require ARTIFACT_GIT_TOKEN on the HSM host.",
+  "_comment": "GENERATED from NimbleCoOrg/artefact-registry (artefacts.json -> bin/sync.mjs) — do not hand-edit; add or wire use-case templates in the registry. Each artifact source is a PINNED git ref, trust-gate-scanned before install (see hermes-swarm-map lib/services/usecase-templates.ts). Private repos require ARTIFACT_GIT_TOKEN on the HSM host.",
   "templates": [
     {
       "id": "matilde",
@@ -13,10 +13,22 @@
         "browser": false
       },
       "artifacts": [
-        { "type": "skills", "name": "matilde-methodology", "source": "git:NimbleCoAI/Matilde#v0.4.1:hermes-skill" },
-        { "type": "plugins", "name": "matilde", "source": "git:NimbleCoAI/Matilde#v0.4.1:matilde_plugin", "enabled": true }
+        {
+          "type": "skills",
+          "name": "matilde-methodology",
+          "source": "git:NimbleCoAI/Matilde#v0.4.1:hermes-skill"
+        },
+        {
+          "type": "plugins",
+          "name": "matilde",
+          "source": "git:NimbleCoAI/Matilde#v0.4.1:matilde_plugin",
+          "enabled": true
+        }
       ],
-      "soul": { "source": "git:NimbleCoAI/Matilde#v0.4.1:docker", "file": "SOUL.Matilde.md" }
+      "soul": {
+        "source": "git:NimbleCoAI/Matilde#v0.4.1:docker",
+        "file": "SOUL.Matilde.md"
+      }
     }
   ]
 }
