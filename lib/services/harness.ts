@@ -266,7 +266,7 @@ function copyDirRecursive(src: string, dest: string): void {
 function defaultSoulContent(name: string): string {
   return `# ${name}
 
-You are **${name}**, a Hermes agent in a multi-tenant deployment managed by Hermes Swarm Map.
+You are **${name}**, a Hermes agent in a multi-tenant deployment managed by Swarm Map.
 
 ## How You Work
 

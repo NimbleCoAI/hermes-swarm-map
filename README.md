@@ -1,4 +1,7 @@
-# Hermes Swarm Map
+# Swarm Map
+
+> **Swarm Map (SM)** — formerly Hermes Swarm Map / HSM.
+
 A commons, public goods project of [NimbleCo](https://www.nimbleco.ai/). 
 
 **Multiplayer admin and orchestrator platform for Hermes.** Deploy, manage, and monitor multiple [Hermes Agent](https://github.com/NimbleCoAI/hermes-agent) instances from one dashboard — with built-in multi-tenant security, model cascades, and platform connections.
@@ -10,19 +13,19 @@ A commons, public goods project of [NimbleCo](https://www.nimbleco.ai/).
 
 ---
 
-## Why Hermes Swarm Map?
+## Why Swarm Map?
 
 AI agents are most useful when they're always on — running on a server, reachable from your phone, remembering context across conversations. But running *multiple* agents across *multiple* platforms for *multiple* users? That's where it gets hard.
 
-Hermes Swarm Map is the control plane. One UI to deploy, configure, and manage a fleet of Hermes agents — each with its own personality, memory, platform connections, and budget. Everything a single agent can do, but multiplied and multiplayer.
+Swarm Map is the control plane. One UI to deploy, configure, and manage a fleet of Hermes agents — each with its own personality, memory, platform connections, and budget. Everything a single agent can do, but multiplied and multiplayer.
 
 ## What People Build With It
 
-**The indie hacker** runs 3 agents: a customer support bot on Telegram, a research assistant on Signal, and a coding helper via API. Each has its own model cascade (Claude for complex tasks, Gemini Flash for quick ones), its own budget cap, and its own personality. HSM manages all three from one dashboard.
+**The indie hacker** runs 3 agents: a customer support bot on Telegram, a research assistant on Signal, and a coding helper via API. Each has its own model cascade (Claude for complex tasks, Gemini Flash for quick ones), its own budget cap, and its own personality. SM manages all three from one dashboard.
 
-**The small team** gives each team member their own AI assistant on Mattermost. Memory is scoped per-channel — what the engineering channel discusses stays there. The team lead manages API keys, monitors costs, and approves new group connections from HSM.
+**The small team** gives each team member their own AI assistant on Mattermost. Memory is scoped per-channel — what the engineering channel discusses stays there. The team lead manages API keys, monitors costs, and approves new group connections from SM.
 
-**The AI researcher** runs 8 specialized agents across Signal and Telegram for different research domains. HSM handles group approval policies, model fallback chains, and cost tracking across the fleet. New agents deploy in minutes via the wizard.
+**The AI researcher** runs 8 specialized agents across Signal and Telegram for different research domains. SM handles group approval policies, model fallback chains, and cost tracking across the fleet. New agents deploy in minutes via the wizard.
 
 ## What You Get
 
@@ -111,7 +114,7 @@ Set `ALLOWED_DEV_ORIGINS` in `.env` for dev mode on remote machines (see Configu
 
 ## Security Model
 
-HSM assumes a **reasonably trusted team** — all users with access to the dashboard can manage all agents, keys, and configuration. There is no per-user role separation or access scoping within a deployment.
+SM assumes a **reasonably trusted team** — all users with access to the dashboard can manage all agents, keys, and configuration. There is no per-user role separation or access scoping within a deployment.
 
 **What's protected:**
 - API keys are encrypted at rest (AES-256-GCM) with a machine-local key
@@ -124,7 +127,7 @@ HSM assumes a **reasonably trusted team** — all users with access to the dashb
 - Skills, tools, and agent configurations are shared across all operators
 - The underlying Hermes agent harnesses remain vulnerable to prompt injection from malicious external content (messages, ingested documents), the same as any LLM-based system
 
-**In practice:** run HSM on a private network or behind authentication (Tailscale, nginx basic auth, etc.) and limit access to people you trust with your API keys and agent configurations.
+**In practice:** run SM on a private network or behind authentication (Tailscale, nginx basic auth, etc.) and limit access to people you trust with your API keys and agent configurations.
 ---
 
 ## API Reference

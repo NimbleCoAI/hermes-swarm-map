@@ -14,7 +14,7 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Hermes Swarm Map',
+  title: 'Swarm Map',
   description: 'Agent orchestration GUI for Hermes',
 }
 

@@ -1,4 +1,4 @@
-# Contributing to Hermes Swarm Map
+# Contributing to Swarm Map
 
 Thanks for your interest in contributing. This guide covers setup, project structure, and how to get a PR merged.
 
