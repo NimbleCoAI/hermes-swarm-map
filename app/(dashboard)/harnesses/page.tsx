@@ -11,9 +11,20 @@ import { toast } from 'sonner'
 
 export default function HarnessesPage() {
   const router = useRouter()
-  const { data: harnesses, loading, refetch } = useApi<Harness[]>('/api/harnesses', 5000)
+  const { data: containerHarnesses, loading, refetch } = useApi<Harness[]>('/api/harnesses', 5000)
+  // Letta agents come from a separate async REST path (design §1c) — merge them
+  // into the fleet list. Failure is soft: no Letta server → just no Letta rows.
+  const { data: lettaHarnesses } = useApi<Harness[]>('/api/letta/harnesses', 10000)
 
-  const running = harnesses?.filter((h) => h.status === 'running') ?? []
+  const harnesses =
+    containerHarnesses || lettaHarnesses
+      ? [...(containerHarnesses ?? []), ...(Array.isArray(lettaHarnesses) ? lettaHarnesses : [])]
+      : undefined
+
+  // Only container harnesses can be bulk-restarted (Letta agents aren't containers).
+  const running = containerHarnesses?.filter((h) => h.status === 'running') ?? []
+
+  const isLetta = (h: Harness) => h.runtime === 'letta' || h.runtime === 'letta-server'
 
   async function restartAll() {
     try {
@@ -178,24 +189,40 @@ export default function HarnessesPage() {
                   <td className="px-4 py-3">
                     <TierBadge tier={h.tier} />
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{h.platform} / {h.channel}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {isLetta(h) ? (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs uppercase tracking-wide">{h.runtime}</span>
+                    ) : (
+                      <>{h.platform} / {h.channel}</>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">{h.models?.[0] ?? '—'}</td>
-                  <td className="px-4 py-3 text-right">${(h.costToday ?? 0).toFixed(2)}</td>
-                  <td className="px-4 py-3 text-right">{h.invocations ?? 0}</td>
+                  {/* Letta agents have no per-agent container stats (design §4b) */}
+                  <td className="px-4 py-3 text-right">{isLetta(h) ? '—' : `$${(h.costToday ?? 0).toFixed(2)}`}</td>
+                  <td className="px-4 py-3 text-right">{isLetta(h) ? '—' : (h.invocations ?? 0)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button variant="ghost" size="xs" onClick={() => restartOne(h.id)} disabled={h.status === 'restarting'}>
-                        {h.status === 'restarting' ? 'Rebuilding...' : 'Restart'}
-                      </Button>
-                      <Button variant="ghost" size="xs" onClick={() => stopOne(h.id)}>
-                        Stop
-                      </Button>
-                      <Button variant="ghost" size="xs" onClick={() => duplicateOne(h.id, h.name)} title="Duplicate">
-                        ⧉
-                      </Button>
-                      <Button variant="ghost" size="xs" onClick={() => removeOne(h.id, h.name)} title="Remove" className="text-destructive hover:text-destructive">
-                        ✕
-                      </Button>
+                      {isLetta(h) ? (
+                        // No container lifecycle for a Postgres row — just open it.
+                        <Link href={`/harnesses/${h.id}`}>
+                          <Button variant="ghost" size="xs">Open</Button>
+                        </Link>
+                      ) : (
+                        <>
+                          <Button variant="ghost" size="xs" onClick={() => restartOne(h.id)} disabled={h.status === 'restarting'}>
+                            {h.status === 'restarting' ? 'Rebuilding...' : 'Restart'}
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => stopOne(h.id)}>
+                            Stop
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => duplicateOne(h.id, h.name)} title="Duplicate">
+                            ⧉
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={() => removeOne(h.id, h.name)} title="Remove" className="text-destructive hover:text-destructive">
+                            ✕
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
