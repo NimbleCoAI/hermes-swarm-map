@@ -238,7 +238,7 @@ export async function POST(request: Request) {
       : `## Personality\n\nCustomize this section to give ${name} a distinct voice, tone, and purpose.\nWhat kind of assistant should ${name} be? Formal? Casual? Technical? Creative?`
     const soulContent = `# ${name}
 
-You are **${name}**, a Hermes agent in a multi-tenant deployment managed by Hermes Swarm Map.
+You are **${name}**, a Hermes agent in a multi-tenant deployment managed by Swarm Map.
 
 ## How You Work
 

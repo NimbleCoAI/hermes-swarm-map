@@ -58,7 +58,7 @@ export default function SetupWelcomePage() {
   return (
     <div className="space-y-8">
       <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Hermes Swarm Map</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Swarm Map</h1>
         <p className="text-muted-foreground">Agent orchestration for Hermes. Let&apos;s get you set up.</p>
       </div>
 

@@ -1,4 +1,4 @@
-# Claude Code — Hermes Swarm Map
+# Claude Code — Swarm Map
 
 See **AGENTS.md** for architecture, patterns, service layer, and what not to do. Read it before touching any code.
 

@@ -6,11 +6,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ---
 
-# Agent Guide — Hermes Swarm Map
+# Agent Guide — Swarm Map
 
 ## What It Is
 
-Hermes Swarm Map is an open-source admin GUI + REST API for orchestrating Hermes agent harnesses. Discover, create, configure, start/stop/restart, and audit Hermes agents running in Docker — including API keys, tool registries, model fallback chains, and memory scopes.
+Swarm Map (SM) — formerly Hermes Swarm Map — is an open-source admin GUI + REST API for orchestrating Hermes agent harnesses. Discover, create, configure, start/stop/restart, and audit Hermes agents running in Docker — including API keys, tool registries, model fallback chains, and memory scopes.
 
 **The REST API is first-class.** Everything the GUI does, the API does. This means any AI agent (Claude Code, Hermes, custom scripts) can programmatically orchestrate the fleet — deploy new agents, restart harnesses, read logs, manage model cascades. See the API reference in README.md.
 
