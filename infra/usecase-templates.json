@@ -16,17 +16,17 @@
         {
           "type": "skills",
           "name": "matilde-methodology",
-          "source": "git:NimbleCoAI/Matilde#v0.4.1:hermes-skill"
+          "source": "git:NimbleCoOrg/Matilde#v0.4.1:hermes-skill"
         },
         {
           "type": "plugins",
           "name": "matilde",
-          "source": "git:NimbleCoAI/Matilde#v0.4.1:matilde_plugin",
+          "source": "git:NimbleCoOrg/Matilde#v0.4.1:matilde_plugin",
           "enabled": true
         }
       ],
       "soul": {
-        "source": "git:NimbleCoAI/Matilde#v0.4.1:docker",
+        "source": "git:NimbleCoOrg/Matilde#v0.4.1:docker",
         "file": "SOUL.Matilde.md"
       }
     }
