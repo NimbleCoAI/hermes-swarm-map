@@ -69,6 +69,15 @@ describe('generateEnvContent', () => {
     expect(env).toContain('SLACK_REQUIRE_MENTION=true')
   })
 
+  it('writes SLACK_CHANNEL_POLICY=approved-only in the secure policy defaults', () => {
+    // Secure-by-default: with the runtime contract, approved-only + empty
+    // SLACK_ALLOWED_CHANNELS approves NO channels, so a fresh agent responds in
+    // none until the operator approves them. Emitted unconditionally (like the
+    // Signal group-invite default), independent of whether Slack tokens are set.
+    const env = generateEnvContent({ ...base })
+    expect(env).toContain('SLACK_CHANNEL_POLICY=approved-only')
+  })
+
   it('leaves slack vars commented out when tokens are missing/partial', () => {
     // Only one token → not a usable Slack connection → stays commented.
     const env = generateEnvContent({ ...base, slackBotToken: 'xoxb-x' })

@@ -52,9 +52,14 @@ type SurfaceSettings = {
   allowAllGroups: boolean
 }
 
-// Env var names for group invite policy per platform
+// Env var names for group invite policy per platform. The single "group invite
+// policy" UI toggle is written to every platform's var in the PUT write-loop, so
+// each connected surface honors the same approved-only/allow-all choice. Slack's
+// runtime reads SLACK_CHANNEL_POLICY (approved-only = empty SLACK_ALLOWED_CHANNELS
+// means NO channels approved; allow-all = empty means respond everywhere).
 const GROUP_INVITE_VARS: Record<string, string> = {
   signal: 'SIGNAL_GROUP_INVITE_POLICY',
+  slack: 'SLACK_CHANNEL_POLICY',
 }
 
 // Env var names for mention-gating per platform
@@ -127,15 +132,22 @@ export async function GET(
     }
   }
 
-  // Read group invite policy — check any platform's env var (Signal is primary)
+  // Read group invite policy back from the per-platform env vars. HSM writes the
+  // single UI toggle to every var in GROUP_INVITE_VARS from the same value, so
+  // they normally agree. They can only disagree on a hand-edited or older .env
+  // (e.g. SIGNAL_GROUP_INVITE_POLICY present but SLACK_CHANNEL_POLICY absent).
+  // In that case prefer the secure reading: report 'approved-only' if EITHER var
+  // explicitly says approved-only, and only report 'allow-all' when a var says
+  // allow-all AND none says approved-only. Default (no vars set) is approved-only.
   let groupInvitePolicy: 'approved-only' | 'allow-all' = 'approved-only'
+  let sawApprovedOnly = false
+  let sawAllowAll = false
   for (const varName of Object.values(GROUP_INVITE_VARS)) {
     const val = env[varName]
-    if (val === 'allow-all') {
-      groupInvitePolicy = 'allow-all'
-      break
-    }
+    if (val === 'approved-only') sawApprovedOnly = true
+    else if (val === 'allow-all') sawAllowAll = true
   }
+  if (sawAllowAll && !sawApprovedOnly) groupInvitePolicy = 'allow-all'
 
   // Read mention-gating from the .env the way the runtime resolves that env var,
   // so the UI can't claim "@mention only" while the agent answers everything. The
