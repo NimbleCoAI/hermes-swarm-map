@@ -5,7 +5,7 @@ import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
 import { resolveIdentifier, expandSignalAllowlist } from '@/lib/resolvers'
 import { services } from '@/lib/services'
-import { generateStandaloneCompose } from '@/lib/services/harness-compose'
+import { adapterForRuntime } from '@/lib/services/harness'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -409,7 +409,7 @@ export async function PUT(
           })()
         : undefined
 
-      const compose = generateStandaloneCompose(harness.name, port, dataDir, {
+      const compose = adapterForRuntime(harness.runtime).generateCompose(harness.name, port, dataDir, {
         vpnEnabled: vpnForCompose,
         imageOrBuild,
         defaultImage: settings.defaultImage,
