@@ -696,18 +696,42 @@ export const hermesAdapter: ContainerRuntimeAdapter = {
   dataDir: (serviceName, containerName) => guessDataDir(serviceName, containerName),
   readPersona: (dataDir) => readSoul(dataDir),
   readModels: (dataDir) => readModelConfig(dataDir),
+  serviceName: (name) => `hermes-${name}`,
+  generateCompose: (name, port, dataDir, options) =>
+    generateStandaloneCompose(name, port, dataDir, options),
+  scaffold: (dataDir, name, port) => scaffoldAgentDir(dataDir, name, port),
+  readImageRef: (compose) => readComposeImage(compose),
+  setImageRef: (compose, ref) => setComposeImage(compose, ref),
+  defaultImageRepo: DEFAULT_IMAGE_REPO,
 }
 
-// Registry of container adapters. Hermes is the only member in slice 1;
+// Registry of container adapters. Hermes is the only member;
 // claude-code-proxy/custom slot in here later (design §1b). Letta is NOT here —
 // it's an AgentResourceProvider (REST), not a container adapter.
 const containerAdapters: ContainerRuntimeAdapter[] = [hermesAdapter]
+
+/** Register a container adapter (future runtimes; exported for tests). */
+export function registerContainerAdapter(adapter: ContainerRuntimeAdapter): void {
+  if (!containerAdapters.some((a) => a.runtime === adapter.runtime)) {
+    containerAdapters.push(adapter)
+  }
+}
 
 /** Pick the container adapter that owns this live container, if any. */
 export function pickContainerAdapter(
   containerName: string,
 ): ContainerRuntimeAdapter | undefined {
   return containerAdapters.find((a) => a.matches(containerName))
+}
+
+/**
+ * Pick the adapter for a harness's *persisted* runtime. Falls back to Hermes
+ * for undefined/unknown runtimes — the historical default for overlay rows
+ * that predate the `runtime` field. Letta rows never reach the container
+ * paths that call this (they have no container to operate on).
+ */
+export function adapterForRuntime(runtime?: Harness['runtime']): ContainerRuntimeAdapter {
+  return containerAdapters.find((a) => a.runtime === runtime) ?? hermesAdapter
 }
 
 // Resolve a harness's data dir from its NAME, honoring the personal special-case
@@ -909,12 +933,13 @@ export class HarnessService {
 
       // Dispatch on the container-runtime seam (design §1b). A container is
       // included if a runtime adapter claims it OR it has a stored overlay.
-      // Overlay-only containers keep Hermes semantics (the historical default),
-      // so `effAdapter` falls back to hermesAdapter — behavior-identical to the
-      // old inline `isHermes`/`runtime:'hermes'`/guessDataDir path.
+      // Overlay-only containers dispatch on their PERSISTED runtime — not a
+      // blind Hermes fallback — so a container whose name no adapter claims
+      // still gets the adapter its overlay recorded. Rows without a runtime
+      // (pre-seam overlays) keep Hermes semantics, the historical default.
       const adapter = pickContainerAdapter(containerName)
       if (!adapter && !overlays[id]) continue
-      const effAdapter = adapter ?? hermesAdapter
+      const effAdapter = adapter ?? adapterForRuntime(overlays[id]?.runtime)
 
       const dataDir = effAdapter.dataDir(live.serviceName, containerName)
       const persona = effAdapter.readPersona(dataDir)
@@ -1082,7 +1107,10 @@ export class HarnessService {
       if (fs.existsSync(candidate)) composeFile = candidate
     }
     const serviceName =
-      harness.serviceName || (composeFile && harness.name ? `hermes-${harness.name}` : undefined)
+      harness.serviceName ||
+      (composeFile && harness.name
+        ? adapterForRuntime(harness.runtime).serviceName(harness.name)
+        : undefined)
     if (!composeFile || !serviceName) return undefined
     return { composeFile, serviceName }
   }
@@ -1279,7 +1307,7 @@ export class HarnessService {
     if (!target) return null
     try {
       const compose = fs.readFileSync(target.composeFile, 'utf-8')
-      return readComposeImage(compose) ?? 'local-build'
+      return adapterForRuntime(harness.runtime).readImageRef(compose) ?? 'local-build'
     } catch {
       return null
     }
@@ -1301,7 +1329,10 @@ export class HarnessService {
     const harness = this.get(id)
     if (!harness) throw new Error(`Harness ${id} not found`)
     const current = this.currentImage(id)
-    const repo = current && current !== 'local-build' ? parseImageRef(current).repo : DEFAULT_IMAGE_REPO
+    const repo =
+      current && current !== 'local-build'
+        ? parseImageRef(current).repo
+        : adapterForRuntime(harness.runtime).defaultImageRepo
     const latestDigest = await registry.getDigest(repo, 'latest')
     const updateAvailable =
       !!latestDigest && (current === 'local-build' || (!!harness.lastKnownDigest && harness.lastKnownDigest !== latestDigest))
@@ -1327,7 +1358,10 @@ export class HarnessService {
     if (!harness || !target) throw new Error(`Harness ${id} not found`)
     if (!fs.existsSync(target.composeFile)) throw new Error(`Harness ${id} compose file not found at ${target.composeFile}`)
     const compose = fs.readFileSync(target.composeFile, 'utf-8')
-    fs.writeFileSync(target.composeFile, setComposeImage(compose, ref))
+    fs.writeFileSync(
+      target.composeFile,
+      adapterForRuntime(harness.runtime).setImageRef(compose, ref),
+    )
     const parsed = parseImageRef(ref)
     const digest = parsed.digest ?? (parsed.tag ? await registry.getDigest(parsed.repo, parsed.tag) : null)
     this.updateConfig(id, { pinnedImageRef: ref, lastKnownDigest: digest ?? harness.lastKnownDigest })
@@ -1420,6 +1454,10 @@ export class HarnessService {
       reservedPorts: overlays.map((h) => h.apiPort).filter((p): p is number => typeof p === 'number'),
     })
 
+    // Provision through the source's runtime adapter — a duplicate is the
+    // same kind of agent as its source (pre-seam rows default to Hermes).
+    const dupAdapter = adapterForRuntime(source.runtime)
+
     // Copy source data directory if it exists, else scaffold fresh
     if (fs.existsSync(sourceDataDir) && !fs.existsSync(newDataDir)) {
       // Deep copy using recursive dir copy
@@ -1455,7 +1493,7 @@ export class HarnessService {
       // persona/name. A duplicate is a new agent; persona is customized afterward.
       fs.writeFileSync(path.join(newDataDir, 'SOUL.md'), defaultSoulContent(newName), 'utf-8')
     } else if (!fs.existsSync(newDataDir)) {
-      await scaffoldAgentDir(newDataDir, newName, port)
+      await dupAdapter.scaffold(newDataDir, newName, port)
     }
 
     // Generate standalone compose for the duplicate
@@ -1464,7 +1502,7 @@ export class HarnessService {
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
       assertPortAvailable(overlays, port, newId)
-      fs.writeFileSync(composePath, generateStandaloneCompose(newName, port, newDataDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
+      fs.writeFileSync(composePath, dupAdapter.generateCompose(newName, port, newDataDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
     }
 
     const duplicate: Partial<Harness> = {
@@ -1474,7 +1512,7 @@ export class HarnessService {
       channel: `:${port}`,
       apiPort: port,
       composeFile: composePath,
-      serviceName: `hermes-${newName}`,
+      serviceName: dupAdapter.serviceName(newName),
       parentId: sourceId,
       platform: undefined, // reset — no surfaces connected yet
     }
@@ -1579,9 +1617,13 @@ export class HarnessService {
     // Agent data directory (where .env, config.yaml, SOUL.md live)
     const agentDir = path.join(os.homedir(), `.hermes-${input.name}`)
 
+    // createOverlay provisions Hermes agents only — the Letta path branches at
+    // the deploy route (design §3c) and never reaches container provisioning.
+    const adapter = hermesAdapter
+
     // Scaffold agent data directory if it doesn't exist
     if (!fs.existsSync(agentDir)) {
-      await scaffoldAgentDir(agentDir, input.name, port)
+      await adapter.scaffold(agentDir, input.name, port)
     }
 
     // Git auth is provisioned by the agent runtime at container boot (a
@@ -1594,7 +1636,7 @@ export class HarnessService {
     const composePath = path.join(agentComposeDir, 'docker-compose.yml')
     if (!fs.existsSync(composePath)) {
       assertPortAvailable(overlays, port, id)
-      fs.writeFileSync(composePath, generateStandaloneCompose(input.name, port, agentDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
+      fs.writeFileSync(composePath, adapter.generateCompose(input.name, port, agentDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
     }
 
     const overlay: Partial<Harness> = {
@@ -1607,7 +1649,7 @@ export class HarnessService {
       models: input.models ?? ['claude-sonnet-4-5'],
       tools: input.tools ?? [],
       composeFile: composePath,
-      serviceName: `hermes-${input.name}`,
+      serviceName: adapter.serviceName(input.name),
     }
 
     overlays.push(overlay)
@@ -1767,7 +1809,7 @@ If this is your very first startup ever, introduce yourself briefly in your home
       fs.mkdirSync(agentComposeDir, { recursive: true })
       fs.writeFileSync(
         composePath,
-        generateStandaloneCompose(slug, port, workDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }),
+        hermesAdapter.generateCompose(slug, port, workDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }),
         'utf-8'
       )
       composeGenerated = true
@@ -1814,7 +1856,7 @@ If this is your very first startup ever, introduce yourself briefly in your home
     if (persona) patches.persona = persona
     if (tools.length > 0) patches.tools = tools
     patches.composeFile = composePath
-    patches.serviceName = `hermes-${slug}`
+    patches.serviceName = hermesAdapter.serviceName(slug)
     // Persist the port the compose actually publishes — createOverlay above
     // allocated its own throwaway port, so pin the authoritative one here (and
     // align the display channel) for the next allocation to reserve.
