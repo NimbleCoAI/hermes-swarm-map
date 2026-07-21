@@ -11,10 +11,14 @@
  *   Lifecycle buttons  → Send message (Reset/Delete deferred to a later phase)
  *   Overview CPU/mem    → model handle + agent identity
  *   Logs tab            → message / turn viewer (send + rendered reply)
- *   Memory rows         → core-memory block viewer (the airlock's key surface)
+ *   Memory rows         → core-memory blocks + memfs context-file view (A3)
  *
- * Everything here is read-only except "send a message" (which the spike route
- * already supports). Create/update/reset need a live Letta server (Phase 4).
+ * MEMFS (2026-07-21 research, memory/specs/2026-07-21-letta-memfs-api-and-a3.md):
+ * a modern Letta agent's memory is a git-backed file tree; `system/` files are
+ * pinned into the prompt, the rest open on demand. We surface BOTH the
+ * core-memory blocks (`/core-memory/blocks`) and the live file view (`/files`).
+ * Everything here is read-only except "send a message". Block/file WRITES and
+ * the memfs↔REST live-sync semantics need a live server (Phase 4).
  */
 
 import { useState } from 'react'
@@ -23,7 +27,7 @@ import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/shared/status-dot'
 import { useApi } from '@/lib/hooks/use-api'
 import type { Harness } from '@/lib/types'
-import type { LettaBlock, LettaMessage } from '@/lib/services/letta'
+import type { LettaBlock, LettaFile, LettaMessage } from '@/lib/services/letta'
 import { toast } from 'sonner'
 
 /** Best-effort stringify of a Letta message's `content` (spike-loose typing). */
@@ -93,6 +97,7 @@ export function LettaAgentDetail({ harness }: { harness: Harness }) {
       ) : (
         <>
           <MemoryBlocks agentId={agentId} />
+          <ContextFiles agentId={agentId} />
           <MessageViewer agentId={agentId} name={harness.name} />
         </>
       )}
@@ -126,14 +131,14 @@ function ServerAgentsList() {
   )
 }
 
-/** Core-memory block viewer — the single most important Letta-native surface (design §4a). */
+/** Core-memory block viewer — the seed layer that projects into memfs system/ files (design §4a). */
 function MemoryBlocks({ agentId }: { agentId: string }) {
   const { data: blocks, loading, error } = useApi<LettaBlock[]>(`/api/letta/agents/${agentId}/blocks`)
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <h3 className="text-sm font-semibold mb-2">Memory blocks</h3>
+      <h3 className="text-sm font-semibold mb-2">Core memory (blocks)</h3>
       <p className="text-xs text-muted-foreground mb-3">
-        Read-only in slice 1. Editing (the airlock&apos;s <code>shareable</code> block) lands with the live server.
+        Read-only. Under memfs these blocks project into <code>system/</code> files (e.g. <code>persona.md</code>). Editing lands with the live server (Phase 4).
       </p>
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {error && <p className="text-sm text-destructive">Couldn&apos;t read memory: {error}</p>}
@@ -144,11 +149,63 @@ function MemoryBlocks({ agentId }: { agentId: string }) {
             <div key={b.id ?? b.label ?? i} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-accent-foreground">{b.label}</span>
+                {b.read_only && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">read-only</span>
+                )}
+                {b.hidden && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">hidden</span>
+                )}
                 {typeof b.limit === 'number' && (
                   <span className="text-xs text-muted-foreground">limit {b.limit}</span>
                 )}
               </div>
+              {b.description && <div className="mt-0.5 text-xs text-muted-foreground italic">{b.description}</div>}
               <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{b.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * memfs context-file view — the "what's in this agent's memory right now"
+ * surface (GET /v1/agents/{id}/files). `system/` files are pinned into the
+ * prompt every turn; others open on demand. The open/pinned marker is a
+ * CONTEXT-LOADING indicator, NOT an access-control boundary (memfs has no
+ * per-file ACL — see the airlock note in the spec).
+ */
+function ContextFiles({ agentId }: { agentId: string }) {
+  const { data: files, loading, error } = useApi<LettaFile[]>(`/api/letta/agents/${agentId}/files`)
+  const isSystem = (name?: string) => !!name && (name.startsWith('system/') || name.includes('/system/'))
+  return (
+    <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h3 className="text-sm font-semibold mb-2">Context files (memfs)</h3>
+      <p className="text-xs text-muted-foreground mb-3">
+        The agent&apos;s git-backed memory file tree. <span className="font-medium">Pinned</span> = a <code>system/</code> file loaded into the prompt every turn; <span className="font-medium">open</span> = currently in context. This is a loading indicator, not a permission boundary.
+      </p>
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {error && <p className="text-sm text-destructive">Couldn&apos;t read context files: {error}</p>}
+      {files && files.length === 0 && (
+        <p className="text-sm text-muted-foreground">No context files (agent may predate memfs, or files aren&apos;t exposed on this server).</p>
+      )}
+      {files && files.length > 0 && (
+        <div className="space-y-2">
+          {files.map((f, i) => (
+            <div key={f.file_id ?? f.file_name ?? i} className="rounded-md border border-[var(--border)] px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs">{f.file_name ?? '(unnamed)'}</span>
+                {isSystem(f.file_name) && (
+                  <span className="rounded bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--accent)]">pinned</span>
+                )}
+                {f.is_open && !isSystem(f.file_name) && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">open</span>
+                )}
+              </div>
+              {f.is_open && f.visible_content && (
+                <div className="mt-1 whitespace-pre-wrap text-muted-foreground text-xs">{f.visible_content}</div>
+              )}
             </div>
           ))}
         </div>
