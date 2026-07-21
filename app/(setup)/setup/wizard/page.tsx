@@ -675,6 +675,9 @@ export default function WizardPage() {
                       placeholder="xapp-..."
                     />
                   </div>
+                  <div className="text-xs text-muted-foreground">
+                    New Slack agents start locked down — approve channels in the agent&apos;s settings to activate, or the bot stays silent.
+                  </div>
                 </div>
               )}
             </div>

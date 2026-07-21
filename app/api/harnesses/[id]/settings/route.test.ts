@@ -88,6 +88,47 @@ describe('Settings API — PUT', () => {
     expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
   })
 
+  // Capture the content written to the agent .env (the first writeFileSync arg is
+  // the path; a later write targets resolved-identities.json, so match on .env).
+  function writtenEnv(): string {
+    const calls = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    const envCall = calls.find(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
+    return (envCall?.[1] as string) ?? ''
+  }
+
+  it('writes SLACK_CHANNEL_POLICY alongside SIGNAL_GROUP_INVITE_POLICY when group invite policy is approved-only', async () => {
+    // The group-invite-policy toggle must also drive Slack: HSM previously wrote
+    // only the Signal var, so the toggle silently no-op'd for Slack agents. Both
+    // vars now come from the same body.groupInvitePolicy value.
+    const body = {
+      dmPolicy: 'approved-only',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {},
+    }
+    await PUT(makeRequest(body), makeParams('h_test'))
+    const env = writtenEnv()
+    expect(env).toContain('SLACK_CHANNEL_POLICY=approved-only')
+    expect(env).toContain('SIGNAL_GROUP_INVITE_POLICY=approved-only')
+  })
+
+  it('writes SLACK_CHANNEL_POLICY=allow-all when group invite policy is allow-all', async () => {
+    const body = {
+      dmPolicy: 'approved-only',
+      groupInvitePolicy: 'allow-all',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {},
+    }
+    await PUT(makeRequest(body), makeParams('h_test'))
+    const env = writtenEnv()
+    expect(env).toContain('SLACK_CHANNEL_POLICY=allow-all')
+    expect(env).toContain('SIGNAL_GROUP_INVITE_POLICY=allow-all')
+  })
+
   it('expands Signal allowed users to include resolved UUIDs before writing', async () => {
     const body = {
       dmPolicy: 'approved-only',
@@ -145,5 +186,40 @@ describe('Settings API — GET mention-gating reflects the runtime', () => {
 
   it('reports NOT gated when the line is absent — runtime default is not-gated', async () => {
     expect((await getWithEnv('GITHUB_TOKEN=x\n')).mentionGating).toBe(false)
+  })
+})
+
+describe('Settings API — GET group invite policy read-back', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  async function getPolicy(envContent: string) {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(envContent as never)
+    const res = await GET(makeRequest({}) as Request, makeParams('h_test'))
+    return (await res.json()) as { groupInvitePolicy: 'approved-only' | 'allow-all' }
+  }
+
+  it('defaults to approved-only when no policy vars are set', async () => {
+    expect((await getPolicy('GITHUB_TOKEN=x\n')).groupInvitePolicy).toBe('approved-only')
+  })
+
+  it('reports allow-all when both vars agree on allow-all', async () => {
+    const env = 'SIGNAL_GROUP_INVITE_POLICY=allow-all\nSLACK_CHANNEL_POLICY=allow-all\n'
+    expect((await getPolicy(env)).groupInvitePolicy).toBe('allow-all')
+  })
+
+  it('reports allow-all from an older .env that only has the Signal var', async () => {
+    expect((await getPolicy('SIGNAL_GROUP_INVITE_POLICY=allow-all\n')).groupInvitePolicy).toBe('allow-all')
+  })
+
+  it('prefers approved-only when the vars disagree — secure reading wins', async () => {
+    // Hand-edited/legacy .env where one surface is locked down and the other open.
+    const env = 'SIGNAL_GROUP_INVITE_POLICY=approved-only\nSLACK_CHANNEL_POLICY=allow-all\n'
+    expect((await getPolicy(env)).groupInvitePolicy).toBe('approved-only')
   })
 })

@@ -161,6 +161,12 @@ export function generateEnvContent(params: {
   lines.push(`MATTERMOST_OBSERVE_UNMENTIONED=true`)
   lines.push(`TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true`)
   lines.push(`SIGNAL_GROUP_INVITE_POLICY=approved-only`)
+  // Slack channel policy: approved-only means an empty SLACK_ALLOWED_CHANNELS
+  // approves NO channels, so a freshly deployed agent responds in none until the
+  // operator approves them (matches the admin-approval security model). The Hermes
+  // runtime treats allow-all + empty as "respond everywhere" — the unsafe default
+  // we're locking down here.
+  lines.push(`SLACK_CHANNEL_POLICY=approved-only`)
   // Browser tools (Camofox)
   if (browserEnabled) {
     lines.push('')

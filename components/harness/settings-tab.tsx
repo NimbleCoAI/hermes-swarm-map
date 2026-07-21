@@ -241,8 +241,8 @@ if (loading) {
         </div>
         <p className="text-xs text-muted-foreground">
           {settings.groupInvitePolicy === 'approved-only'
-            ? 'Only approved users can add this agent to groups.'
-            : 'Anyone can add this agent to groups.'}
+            ? 'Only approved users can add this agent to groups. On Slack, the agent responds only in approved channels.'
+            : 'Anyone can add this agent to groups. On Slack, the agent responds in every channel.'}
         </p>
       </div>
 
