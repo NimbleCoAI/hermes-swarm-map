@@ -21,6 +21,11 @@ const h = vi.hoisted(() => ({
   setAssignment: vi.fn(),
   add: vi.fn(),
   createOverlay: vi.fn(async () => ({ id: 'h_matilde' })),
+  // Letta branch: docker.start + healthCheck + the letta REST client.
+  dockerStart: vi.fn(),
+  healthCheck: vi.fn(() => false),
+  listAgents: vi.fn(async () => [] as Array<{ id: string; name: string }>),
+  createAgent: vi.fn(async (cfg: { name: string }) => ({ id: 'agent-xyz', name: cfg.name })),
 }))
 
 vi.mock('child_process', () => ({ execSync: vi.fn(() => Buffer.from('')) }))
@@ -42,10 +47,11 @@ vi.mock('@/lib/services/usecase-templates', () => ({
 
 vi.mock('@/lib/services', () => ({
   services: {
-    docker: { isAvailable: () => true, pullImage: () => ({ ok: true }), healthCheck: () => false },
+    docker: { isAvailable: () => true, pullImage: () => ({ ok: true }), healthCheck: h.healthCheck, start: h.dockerStart },
     config: { getSettings: () => ({ ...h.settings, dataDir: h.tmpData }) },
     keys: { getDecryptedValue: h.getDecryptedValue, list: h.list, update: h.update, setAssignment: h.setAssignment, add: h.add },
     harness: { createOverlay: h.createOverlay },
+    letta: { listAgents: h.listAgents, createAgent: h.createAgent },
   },
 }))
 
@@ -71,6 +77,13 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     h.add.mockClear()
     h.createOverlay.mockClear()
     h.createOverlay.mockResolvedValue({ id: 'h_matilde' })
+    h.dockerStart.mockClear()
+    h.healthCheck.mockReset()
+    h.healthCheck.mockReturnValue(false)
+    h.listAgents.mockReset()
+    h.listAgents.mockResolvedValue([])
+    h.createAgent.mockReset()
+    h.createAgent.mockImplementation(async (cfg: { name: string }) => ({ id: 'agent-xyz', name: cfg.name }))
     tmpl.get.mockReset()
     tmpl.install.mockReset()
     tmpl.install.mockResolvedValue([])
@@ -249,5 +262,54 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     })
     expect(res.status).toBe(400)
     expect(tmpl.install).not.toHaveBeenCalled()
+  })
+
+  // ── A2: the Letta runtime branch ──────────────────────────────────────────
+  it('Letta: creates the agent over REST and does NOT scaffold a per-agent dir or container', async () => {
+    h.healthCheck.mockReturnValue(true) // server reachable
+    const { execSync } = await import('child_process')
+    vi.mocked(execSync).mockClear()
+
+    const res = await deploy({
+      name: 'scout', runtime: 'letta', lettaModel: 'anthropic/claude-3-5-sonnet',
+      llmKey: 'sk-ant-server-key', persona: 'be terse',
+    })
+    const data = await res.json()
+    expect(res.status).toBe(200)
+    expect(data).toMatchObject({ ok: true, runtime: 'letta', harnessId: 'h_letta_agent-xyz', agentId: 'agent-xyz' })
+
+    // Agent created with the MODERN memfs agent type (per Letta team feedback).
+    expect(h.createAgent).toHaveBeenCalledTimes(1)
+    expect((h.createAgent.mock.calls[0][0] as { agent_type?: string }).agent_type).toBe('letta_v1_agent')
+
+    // The Letta server was brought up; the server key landed in the server .env (0600).
+    expect(h.dockerStart).toHaveBeenCalled()
+    const serverEnv = path.join(h.tmpData, 'letta', '.env')
+    expect(fs.readFileSync(serverEnv, 'utf-8')).toContain('ANTHROPIC_API_KEY=sk-ant-server-key')
+
+    // No Hermes side effects: no per-agent data dir, no per-agent compose up.
+    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-scout'))).toBe(false)
+    expect(h.createOverlay).not.toHaveBeenCalled()
+    const cmds = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
+    expect(cmds.some((c) => /compose -f .* up -d/.test(c))).toBe(false)
+  })
+
+  it('Letta: 409 when an agent with the same name already exists on the server', async () => {
+    h.healthCheck.mockReturnValue(true)
+    h.listAgents.mockResolvedValue([{ id: 'a1', name: 'scout' }])
+    const res = await deploy({
+      name: 'scout', runtime: 'letta', lettaModel: 'anthropic/claude-3-5-sonnet', llmKey: 'sk-ant',
+    })
+    expect(res.status).toBe(409)
+    expect(h.createAgent).not.toHaveBeenCalled()
+  })
+
+  it('Letta: 502 when the server never becomes reachable', async () => {
+    h.healthCheck.mockReturnValue(false) // never healthy
+    const res = await deploy({
+      name: 'scout', runtime: 'letta', lettaModel: 'anthropic/claude-3-5-sonnet', llmKey: 'sk-ant',
+    })
+    expect(res.status).toBe(502)
+    expect(h.createAgent).not.toHaveBeenCalled()
   })
 })

@@ -6,6 +6,7 @@ import { defaultEnabledPlugins } from '@/lib/services/artifacts-manifest'
 import { getUseCaseTemplate, installUseCaseTemplate, templateEnabledPlugins } from '@/lib/services/usecase-templates'
 import { generateDefaultConfig, type McpServerConfig } from '@/lib/templates/config-yaml'
 import { generateEnvContent, generateAgentCompose } from '@/lib/services/agent-deploy-templates'
+import { deployLettaAgent } from '@/lib/services/letta-deploy-templates'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -69,7 +70,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: `Unknown use-case template "${templateId}".` }, { status: 400 })
     }
 
-    if (!name || !provider || !primaryModel) {
+    // Letta deploys carry a single `lettaModel` handle instead of provider +
+    // primaryModel; the model is validated inside deployLettaAgent below.
+    if (!name || (body.runtime !== 'letta' && (!provider || !primaryModel))) {
       return NextResponse.json({ ok: false, error: 'name, provider, and primaryModel are required' }, { status: 400 })
     }
 
@@ -88,6 +91,30 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, error: `Selected key "${existingKeyId}" not found in the registry.` }, { status: 400 })
       }
       llmKey = resolved
+    }
+
+    // ── Letta runtime branch (design §3c) ──────────────────────────────────
+    // A Letta deploy inverts the Hermes layering: bring the server up once,
+    // then create the agent over REST. Everything below (image resolution,
+    // port alloc, .env / config.yaml / SOUL.md scaffolding, per-agent compose,
+    // container start) is Hermes-only and skipped. createdAgentDir stays
+    // undefined, so the catch's cleanup is a no-op for this path. The pasted
+    // `llmKey` is a SERVER-WIDE provider key here, not a per-agent secret.
+    if (body.runtime === 'letta') {
+      const lettaSettings = services.config.getSettings()
+      const swarmMapDataDir = lettaSettings.dataDir
+        ? expandPath(lettaSettings.dataDir)
+        : path.join(os.homedir(), '.hermes-swarm-map')
+      const result = await deployLettaAgent({
+        docker: services.docker,
+        letta: services.letta,
+        slug,
+        model: body.lettaModel || primaryModel,
+        persona,
+        serverKey: llmKey,
+        swarmMapDataDir,
+      })
+      return NextResponse.json(result.body, { status: result.status })
     }
 
     // Check Docker is available
