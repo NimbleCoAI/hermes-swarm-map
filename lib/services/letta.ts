@@ -62,14 +62,27 @@ export interface LettaMessageResponse {
   [k: string]: unknown
 }
 
-/** Minimal create payload. Letta defaults most of this; blocks are the interesting part. */
+/** Minimal create payload. Letta defaults most of this. */
 export interface CreateAgentConfig {
   name: string
+  /**
+   * Agent architecture. `letta_v1_agent` is the modern memfs agent (memory
+   * projected into git-backed context-repo files, edited via filesystem tools);
+   * `memgpt_agent` is the LEGACY memory-blocks architecture. Letta's team flagged
+   * memory_blocks as "a very old style" (2026-07 feedback) — default to the
+   * modern type. See www.letta.com/blog/our-next-phase.
+   */
+  agent_type?: string
   /** e.g. "anthropic/claude-3-5-sonnet-20241022" — a provider-independent handle. */
   model?: string
   /** Optional embedding handle, e.g. "openai/text-embedding-3-small". */
   embedding?: string
-  /** Core-memory blocks the agent boots with (e.g. a curated `shareable` block). */
+  /**
+   * LEGACY (memgpt_agent only): core-memory blocks the agent boots with. Under
+   * memfs these become files in the agent's context repo instead — do not use
+   * for modern agents. Retained for the airlock `shareable`-block path until its
+   * memfs mapping is validated live (Phase 4).
+   */
   memory_blocks?: LettaBlock[]
   system?: string
   [k: string]: unknown
@@ -127,9 +140,15 @@ export class LettaService {
     return (text ? JSON.parse(text) : undefined) as T
   }
 
-  /** GET /v1/agents — list all agents on the server. */
-  async listAgents(): Promise<LettaAgent[]> {
-    return this.request<LettaAgent[]>('/v1/agents')
+  /**
+   * GET /v1/agents — list agents on the server. Pass `{ name }` to use the
+   * server-side exact-match filter (`?name=`) instead of listing everything —
+   * the reliable way to check name existence, since a bare list is paginated
+   * (bounded default limit) and would miss a collision past the first page.
+   */
+  async listAgents(opts?: { name?: string }): Promise<LettaAgent[]> {
+    const qs = opts?.name ? `?name=${encodeURIComponent(opts.name)}` : ''
+    return this.request<LettaAgent[]>(`/v1/agents${qs}`)
   }
 
   /** GET /v1/agents/{id} — one agent's full state. */
