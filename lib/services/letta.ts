@@ -224,12 +224,20 @@ export class LettaService {
    * GET /v1/agents/{id}/files — the agent's live context-file view (memfs).
    * Pass `{ isOpen: true }` to list only files currently loaded into context.
    * `limit` is capped at 200 by the server.
+   *
+   * The endpoint returns a PAGINATED ENVELOPE `{ files, next_cursor, has_more }`
+   * (confirmed live 2026-07-21 against self-hosted letta/letta) — NOT a bare
+   * array like /core-memory/blocks. We unwrap to the files array, tolerating a
+   * bare-array response from a future/older server shape.
    */
   async listFiles(id: string, opts?: { isOpen?: boolean; limit?: number }): Promise<LettaFile[]> {
     const qs = new URLSearchParams()
     if (opts?.isOpen !== undefined) qs.set('is_open', String(opts.isOpen))
     if (opts?.limit !== undefined) qs.set('limit', String(opts.limit))
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
-    return this.request<LettaFile[]>(`/v1/agents/${encodeURIComponent(id)}/files${suffix}`)
+    const resp = await this.request<{ files?: LettaFile[] } | LettaFile[]>(
+      `/v1/agents/${encodeURIComponent(id)}/files${suffix}`,
+    )
+    return Array.isArray(resp) ? resp : (resp?.files ?? [])
   }
 }
