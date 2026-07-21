@@ -45,6 +45,10 @@ export function lettaAgentIdFromHarnessId(harnessId: string): string {
  * `runtime === 'letta'` to hide them rather than showing 0% CPU.
  */
 export function lettaAgentToHarness(agent: LettaAgent, serverReachable: boolean): Harness {
+  // Persona for the fleet-list display only. Under memfs the live persona is
+  // `system/persona.md`, seeded from this block — so the block is a display
+  // SEED, not the authoritative live value. The detail view shows both the
+  // blocks and the live file tree (/files); this is just the list-row summary.
   const firstBlock = agent.memory_blocks?.find((b) => b.label === 'persona') ?? agent.memory_blocks?.[0]
   return {
     id: AGENT_ID_PREFIX + agent.id,

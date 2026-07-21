@@ -13,23 +13,51 @@
  * a hardened SDK. Response types are `Record`/`unknown`-ish on purpose; a real
  * build would generate types from Letta's OpenAPI spec.
  *
- * Endpoints verified against docs.letta.com (2026-07-18):
- *   GET    /v1/agents                     list agents
- *   POST   /v1/agents                     create agent
- *   GET    /v1/agents/{id}                get one agent
- *   POST   /v1/agents/{id}/messages       send a message (returns the turn)
- *   GET    /v1/agents/{id}/blocks         list core-memory blocks
- * (The blocks path is the CURRENT shape; older docs showed
- *  /v1/agents/{id}/core-memory/blocks. This uses the current one.)
+ * Endpoints verified against docs.letta.com (blocks/files re-verified 2026-07-21):
+ *   GET    /v1/agents                          list agents
+ *   POST   /v1/agents                          create agent
+ *   GET    /v1/agents/{id}                      get one agent
+ *   POST   /v1/agents/{id}/messages             send a message (returns the turn)
+ *   GET    /v1/agents/{id}/core-memory/blocks   list core-memory blocks
+ *   GET    /v1/agents/{id}/files                memfs context-file view
+ * (CORRECTION: the spike used /v1/agents/{id}/blocks, which does NOT exist — the
+ *  real path is under /core-memory. Confirmed against the API reference.)
  */
 
-/** A Letta memory block — the native "expose this slice, hide that" granularity. */
+/**
+ * A Letta core-memory block. Under memfs these project into files
+ * (`system/persona.md` etc.) but the block REST surface remains the read/seed
+ * path. Fields per the confirmed Block schema (docs.letta.com, 2026-07-21).
+ * NOTE: `read_only` is flagged deprecated in the current Block schema — treat as
+ * advisory, confirm longevity against a live server before relying on it.
+ */
 export interface LettaBlock {
   id?: string
   label: string
   value: string
   limit?: number
   description?: string
+  hidden?: boolean
+  read_only?: boolean
+  metadata?: Record<string, unknown>
+  tags?: string[]
+  [k: string]: unknown
+}
+
+/**
+ * A file in a memfs agent's live context view (`GET /v1/agents/{id}/files`).
+ * `is_open` = currently loaded into context; `visible_content` = the open slice.
+ * This is the memfs "what's in context right now" surface.
+ */
+export interface LettaFile {
+  file_id?: string
+  file_name?: string
+  folder_id?: string
+  is_open?: boolean
+  visible_content?: string
+  start_line?: number
+  end_line?: number
+  last_accessed_at?: string
   [k: string]: unknown
 }
 
@@ -184,11 +212,24 @@ export class LettaService {
   }
 
   /**
-   * GET /v1/agents/{id}/blocks — the agent's core-memory blocks. This is the
-   * granularity the "Librarian in an Airlock" use-case hangs on (one curated
-   * `shareable` block, the rest private).
+   * GET /v1/agents/{id}/core-memory/blocks — the agent's core-memory blocks.
+   * (The spike used `/v1/agents/{id}/blocks`, which does not exist — the real
+   * path is under `/core-memory`, confirmed against docs.letta.com 2026-07-21.)
    */
   async getMemoryBlocks(id: string): Promise<LettaBlock[]> {
-    return this.request<LettaBlock[]>(`/v1/agents/${encodeURIComponent(id)}/blocks`)
+    return this.request<LettaBlock[]>(`/v1/agents/${encodeURIComponent(id)}/core-memory/blocks`)
+  }
+
+  /**
+   * GET /v1/agents/{id}/files — the agent's live context-file view (memfs).
+   * Pass `{ isOpen: true }` to list only files currently loaded into context.
+   * `limit` is capped at 200 by the server.
+   */
+  async listFiles(id: string, opts?: { isOpen?: boolean; limit?: number }): Promise<LettaFile[]> {
+    const qs = new URLSearchParams()
+    if (opts?.isOpen !== undefined) qs.set('is_open', String(opts.isOpen))
+    if (opts?.limit !== undefined) qs.set('limit', String(opts.limit))
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return this.request<LettaFile[]>(`/v1/agents/${encodeURIComponent(id)}/files${suffix}`)
   }
 }
