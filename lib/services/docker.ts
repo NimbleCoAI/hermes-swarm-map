@@ -315,9 +315,13 @@ export class DockerService {
     }
   }
 
-  start(composeFile: string, service: string, projectName?: string): void {
+  start(composeFile: string, service: string, projectName?: string, envFile?: string): void {
     const projArgs = projectName ? ['-p', projectName] : []
-    execFileSync('docker', ['compose', ...projArgs, '-f', composeFile, 'up', '-d', service], {
+    // `--env-file` is a top-level compose option (before the subcommand). Used by
+    // the Letta server bring-up to inject server-wide provider keys from a
+    // 0600 .env without mutating this process's environment.
+    const envArgs = envFile ? ['--env-file', envFile] : []
+    execFileSync('docker', ['compose', ...projArgs, ...envArgs, '-f', composeFile, 'up', '-d', service], {
       stdio: 'pipe',
       timeout: 60000,
     })
