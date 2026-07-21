@@ -58,6 +58,22 @@ describe('LettaService memfs read endpoints', () => {
     expect(fetchFn.mock.calls[0][0]).toBe('http://letta.test/v1/agents/agent-1/files')
   })
 
+  it('listFiles unwraps the paginated { files, next_cursor, has_more } envelope', async () => {
+    // The live server returns an envelope, not a bare array (confirmed 2026-07-21).
+    stubFetch({ files: [{ file_name: 'system/persona.md', is_open: true }], next_cursor: null, has_more: false })
+    const files = await letta.listFiles('agent-1')
+    expect(Array.isArray(files)).toBe(true)
+    expect(files).toHaveLength(1)
+    expect(files[0].file_name).toBe('system/persona.md')
+  })
+
+  it('listFiles still tolerates a bare-array response (older/future server)', async () => {
+    stubFetch([{ file_name: 'notes.md' }])
+    const files = await letta.listFiles('agent-1')
+    expect(files).toHaveLength(1)
+    expect(files[0].file_name).toBe('notes.md')
+  })
+
   it('surfaces a non-ok response as an error (route maps it to 502)', async () => {
     stubFetch({ detail: 'nope' }, false)
     await expect(letta.getMemoryBlocks('agent-1')).rejects.toThrow(/failed/i)
