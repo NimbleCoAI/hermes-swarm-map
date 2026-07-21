@@ -29,6 +29,32 @@
         "source": "git:NimbleCoOrg/Matilde#v0.4.1:docker",
         "file": "SOUL.Matilde.md"
       }
+    },
+    {
+      "id": "agentic-startup-generalist",
+      "name": "Agentic Startup Generalist",
+      "description": "Generalist founder-support agent: PMF research, operations, venture support.",
+      "recommends": {
+        "provider": "anthropic",
+        "primaryModel": "claude-opus-4-8"
+      },
+      "artifacts": [
+        {
+          "type": "skills",
+          "name": "agentic-startup-generalist-methodology",
+          "source": "git:NimbleCoOrg/agentic-startup-generalist#v0.1.0:hermes-skill"
+        },
+        {
+          "type": "plugins",
+          "name": "agentic-startup-generalist",
+          "source": "git:NimbleCoOrg/agentic-startup-generalist#v0.1.0:hermes-plugin",
+          "enabled": true
+        }
+      ],
+      "soul": {
+        "source": "git:NimbleCoOrg/agentic-startup-generalist#v0.1.0:docker",
+        "file": "SOUL.template.md"
+      }
     }
   ]
 }
