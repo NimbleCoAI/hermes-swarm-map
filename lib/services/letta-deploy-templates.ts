@@ -33,10 +33,17 @@ export const LETTA_SERVICE = 'letta'
 /**
  * The server image the compose declares (docker/letta-compose.yml). Pulled
  * explicitly before `up -d` so a first-run ~500MB fetch doesn't blow the
- * compose-up timeout. Keep in sync with the compose `image:`; a real deploy
- * pins a digest (spec §C2).
+ * compose-up timeout.
+ *
+ * Pinned to 0.16.8 (spec §C2) — the newest stable numeric tag, exactly what
+ * :latest resolved to during the 2026-07-19 live spike, and the last line
+ * before Letta's v1-SDK transition (which makes :latest actively dangerous for
+ * the /v1/agents/{id}/messages contract the door relies on).
+ * Digest for the record: sha256:aa66c3eeee13d2dfc40c650d709b550237ee31bfc91942a52fa488a13fa8c102
+ * Keep in sync with the compose `image:` — update both refs together (a
+ * drift-guard test string-matches the compose line against this constant).
  */
-export const LETTA_IMAGE = 'letta/letta:latest'
+export const LETTA_IMAGE = 'letta/letta:0.16.8'
 /** Default REST base URL — matches the compose-published :8283 and the client default. */
 export const LETTA_DEFAULT_BASE_URL = 'http://localhost:8283'
 

@@ -1,6 +1,7 @@
 # =============================================================================
-# SPIKE ARTIFACT — Letta runtime (Path 1). Do NOT wire into the deploy wizard.
-# Branch: dev/juniperbevensee/swarm-map-letta-runtime  ·  see spec §4 steps 1–3.
+# Letta server compose — WIRED into the deploy wizard via ensureLettaServer()
+# (lib/services/letta-deploy-templates.ts, slice A2). Originally a spike
+# artifact from dev/juniperbevensee/swarm-map-letta-runtime; see spec §4.
 #
 # The whole point of this file: prove that HSM's EXISTING, runtime-neutral
 # DockerService (lib/services/docker.ts) can start/stop/logs a Letta *server*
@@ -27,9 +28,10 @@
 
 services:
   letta:
-    # Pin to :latest for the spike — Letta's self-host docs give no stable
-    # semver tag to pin against. A real deploy should pin a digest.
-    image: letta/letta:latest
+    # Pinned to 0.16.8 (spec §C2) — keep in sync with LETTA_IMAGE in
+    # lib/services/letta-deploy-templates.ts; update both refs together.
+    # Digest: sha256:aa66c3eeee13d2dfc40c650d709b550237ee31bfc91942a52fa488a13fa8c102
+    image: letta/letta:0.16.8
     container_name: letta
     restart: unless-stopped
     ports:
