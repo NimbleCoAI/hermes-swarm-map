@@ -72,7 +72,7 @@ export function generateStandaloneCompose(
   options?: ComposeOptions,
 ): string {
   const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
-  const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoai/hermes-agent-mt:latest' }
+  const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoorg/hermes-agent-mt:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`

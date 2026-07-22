@@ -72,7 +72,7 @@ Switch to the MT fork image for per-context memory isolation — the core featur
 
 | Before | After |
 |--------|-------|
-| `nousresearch/hermes-agent:latest` | `ghcr.io/nimblecoai/hermes-agent-mt:latest` |
+| `nousresearch/hermes-agent:latest` | `ghcr.io/nimblecoorg/hermes-agent-mt:latest` |
 | Global memory (all conversations share one MEMORY.md) | Per-context memory (each group/DM gets its own) |
 | No context ID sanitization | Path traversal protection on context IDs |
 
@@ -82,7 +82,7 @@ Switch to the MT fork image for per-context memory isolation — the core featur
    ```yaml
    services:
      hermes-your-agent:
-       image: ghcr.io/nimblecoai/hermes-agent-mt:latest  # was nousresearch/...
+       image: ghcr.io/nimblecoorg/hermes-agent-mt:latest  # was nousresearch/...
        # everything else stays the same
    ```
 

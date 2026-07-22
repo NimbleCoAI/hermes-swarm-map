@@ -1239,7 +1239,7 @@ export default function WizardPage() {
               {isLetta ? (
                 <>This will ensure the Letta server is running (<span className="font-mono">docker/letta-compose.yml</span>) and create the agent <span className="font-mono">{slug}</span> on it via the REST API.</>
               ) : (
-                <>This will pull <span className="font-mono">ghcr.io/nimblecoai/hermes-agent-mt:latest</span>, scaffold{' '}
+                <>This will pull <span className="font-mono">ghcr.io/nimblecoorg/hermes-agent-mt:latest</span>, scaffold{' '}
                 <span className="font-mono">~/.hermes-{slug}/</span>, and start the container.</>
               )}
             </p>
