@@ -10,6 +10,7 @@ import {
   ensureLettaServer,
   deployLettaAgent,
   lettaServerDir,
+  LETTA_IMAGE,
   LETTA_MODERN_AGENT_TYPE,
   LETTA_LEGACY_AGENT_TYPE,
 } from '../letta-deploy-templates'
@@ -118,7 +119,9 @@ describe('ensureLettaServer', () => {
       composeFile: '/repo/docker/letta-compose.yml',
       baseUrl: 'http://localhost:8283',
     })
-    expect(docker.pullImage).toHaveBeenCalled()
+    // C2: the pre-pull must use the exact pinned ref — a looser assertion here
+    // let :latest drift silently while the compose pinned something else.
+    expect(docker.pullImage).toHaveBeenCalledWith('letta/letta:0.16.8')
     // start(composeFile, service, project, envFile)
     const call = docker.start.mock.calls[0]
     expect(call[0]).toBe('/repo/docker/letta-compose.yml')
@@ -140,6 +143,25 @@ describe('ensureLettaServer', () => {
     await expect(
       ensureLettaServer(docker as never, { swarmMapDataDir: dir, composeFile: '/c.yml' }),
     ).rejects.toThrow(/did not become reachable/)
+  })
+})
+
+describe('LETTA_IMAGE pin (C2)', () => {
+  it('is the exact pinned ref', () => {
+    expect(LETTA_IMAGE).toBe('letta/letta:0.16.8')
+  })
+
+  it('drift guard: docker/letta-compose.yml image: matches LETTA_IMAGE', () => {
+    // The pre-pull (LETTA_IMAGE) and the compose the server actually runs from
+    // MUST reference the same image, or the pull warms one ref while compose-up
+    // fetches another. String-match the compose `image:` line against the const.
+    const composeText = fs.readFileSync(
+      path.join(process.cwd(), 'docker/letta-compose.yml'),
+      'utf-8',
+    )
+    const imageLine = composeText.split('\n').find((l) => l.trim().startsWith('image:'))
+    expect(imageLine).toBeDefined()
+    expect(imageLine).toContain(LETTA_IMAGE)
   })
 })
 
