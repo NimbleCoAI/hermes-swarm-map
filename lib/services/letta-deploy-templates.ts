@@ -65,9 +65,13 @@ export function repoLettaComposePath(): string {
   return path.join(process.cwd(), process.env.LETTA_COMPOSE_FILE || 'docker/letta-compose.yml')
 }
 
-/** The Letta server's config directory under the swarm-map data dir (holds the server .env). */
-export function lettaServerDir(swarmMapDataDir: string): string {
-  return path.join(swarmMapDataDir, 'letta')
+/**
+ * The Letta server's config directory under the swarm-map data dir (holds the
+ * server .env). The default (unnamed) instance lives at `<dataDir>/letta/`;
+ * a named instance (spec §C1) at `<dataDir>/letta-<name>/`.
+ */
+export function lettaServerDir(swarmMapDataDir: string, name?: string): string {
+  return path.join(swarmMapDataDir, name ? `letta-${name}` : 'letta')
 }
 
 /**
@@ -151,6 +155,19 @@ export interface EnsureLettaServerOptions {
   composeFile?: string
   /** Health-check budget in ms (server cold-start pulls a ~500MB image first run). */
   timeoutMs?: number
+  /**
+   * Instance name (spec §C1): scopes the compose project (`letta-<name>`) and
+   * the server dir (`<dataDir>/letta-<name>/`) so multiple Letta servers can
+   * coexist on one host (one per trust boundary). Omit for the singleton
+   * default instance — behavior is then byte-for-byte the pre-C1 default.
+   */
+  name?: string
+  /**
+   * Published REST port (spec §C1). Non-default ports are delivered to the
+   * compose via LETTA_PORT in the server .env ("${LETTA_PORT:-8283}:8283") and
+   * used for the health poll + returned baseUrl. Defaults to LETTA_DEFAULT_PORT.
+   */
+  port?: number
 }
 
 export interface LettaServerInfo {
@@ -172,12 +189,23 @@ export async function ensureLettaServer(
   opts: EnsureLettaServerOptions,
 ): Promise<LettaServerInfo> {
   const composeFile = opts.composeFile ?? repoLettaComposePath()
-  const baseUrl = (opts.baseUrl ?? process.env.LETTA_BASE_URL ?? LETTA_DEFAULT_BASE_URL).replace(
-    /\/+$/,
-    '',
-  )
-  const serverDir = lettaServerDir(opts.swarmMapDataDir)
-  const envFile = writeServerEnv(serverDir, opts.serverEnv ?? {})
+  const port = opts.port ?? LETTA_DEFAULT_PORT
+  const project = opts.name ? `${LETTA_PROJECT}-${opts.name}` : LETTA_PROJECT
+  // Default instance keeps the pre-C1 resolution chain byte-for-byte; a
+  // non-default port derives its base URL from the port it publishes on.
+  const baseUrl = (
+    opts.baseUrl ??
+    (port === LETTA_DEFAULT_PORT
+      ? process.env.LETTA_BASE_URL ?? LETTA_DEFAULT_BASE_URL
+      : `http://localhost:${port}`)
+  ).replace(/\/+$/, '')
+  const serverDir = lettaServerDir(opts.swarmMapDataDir, opts.name)
+  // LETTA_PORT is written only for a non-default port — the compose publishes
+  // "${LETTA_PORT:-8283}:8283", so the default instance needs (and gets) no
+  // env line, preserving the "no keys → no env-file" behavior.
+  const serverEnv: Record<string, string> = { ...(opts.serverEnv ?? {}) }
+  if (port !== LETTA_DEFAULT_PORT) serverEnv.LETTA_PORT = String(port)
+  const envFile = writeServerEnv(serverDir, serverEnv)
 
   // Pull the image first (best-effort): a first-run ~500MB fetch would otherwise
   // blow `up -d`'s timeout. If the pull fails (offline with the image already
@@ -185,18 +213,18 @@ export async function ensureLettaServer(
   // the error. Mirrors the Hermes deploy path.
   docker.pullImage(LETTA_IMAGE)
 
-  // `docker compose -p letta [--env-file .env] -f <compose> up -d letta`.
-  docker.start(composeFile, LETTA_SERVICE, LETTA_PROJECT, envFile)
+  // `docker compose -p <project> [--env-file .env] -f <compose> up -d letta`.
+  docker.start(composeFile, LETTA_SERVICE, project, envFile)
 
   // The server answers GET /v1/agents with a 200 (JSON array) once ready.
   // First run pulls the image, so allow a generous default budget.
   const healthy = docker.healthCheck(`${baseUrl}/v1/agents`, opts.timeoutMs ?? 120_000)
   if (!healthy) {
     throw new Error(
-      `Letta server did not become reachable at ${baseUrl} within the timeout — check \`docker compose -p ${LETTA_PROJECT} logs ${LETTA_SERVICE}\`.`,
+      `Letta server did not become reachable at ${baseUrl} within the timeout — check \`docker compose -p ${project} logs ${LETTA_SERVICE}\`.`,
     )
   }
-  return { composeFile, service: LETTA_SERVICE, project: LETTA_PROJECT, baseUrl }
+  return { composeFile, service: LETTA_SERVICE, project, baseUrl }
 }
 
 export interface DefaultAgentConfigInput {
@@ -271,6 +299,12 @@ export interface DeployLettaAgentInput {
   baseUrl?: string
   composeFile?: string
   timeoutMs?: number
+  /**
+   * Optional server-instance selector (spec §C1), passed through to
+   * ensureLettaServer. Unused by the deploy route in v1 (which always targets
+   * the singleton default instance).
+   */
+  instance?: { name?: string; port?: number }
 }
 
 export interface DeployResult {
@@ -308,6 +342,8 @@ export async function deployLettaAgent(input: DeployLettaAgentInput): Promise<De
       baseUrl: input.baseUrl,
       composeFile: input.composeFile,
       timeoutMs: input.timeoutMs,
+      name: input.instance?.name,
+      port: input.instance?.port,
     })
   } catch (err) {
     return { status: 502, body: { ok: false, error: err instanceof Error ? err.message : 'Failed to start the Letta server' } }

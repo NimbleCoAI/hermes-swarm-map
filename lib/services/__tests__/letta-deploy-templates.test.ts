@@ -138,6 +138,26 @@ describe('ensureLettaServer', () => {
     expect(docker.start.mock.calls[0][3]).toBeUndefined()
   })
 
+  // C1: parameterized instance (name/port/dir), singleton default untouched.
+  it('C1: a named instance gets a letta-<name> project + dir, LETTA_PORT, and health on the given port', async () => {
+    const docker = fakeDocker()
+    const info = await ensureLettaServer(docker as never, {
+      swarmMapDataDir: dir,
+      composeFile: '/c.yml',
+      name: 'acme',
+      port: 8300,
+    })
+    const call = docker.start.mock.calls[0]
+    expect(call[2]).toBe('letta-acme') // compose project
+    const envFile = path.join(dir, 'letta-acme', '.env')
+    expect(call[3]).toBe(envFile) // env-file lives in the instance dir
+    // The published port is delivered to the compose via LETTA_PORT.
+    expect(fs.readFileSync(envFile, 'utf-8')).toContain('LETTA_PORT=8300')
+    expect(docker.healthCheck).toHaveBeenCalledWith('http://localhost:8300/v1/agents', expect.any(Number))
+    expect(info.baseUrl).toBe('http://localhost:8300')
+    expect(info.project).toBe('letta-acme')
+  })
+
   it('throws when the server never becomes reachable', async () => {
     const docker = fakeDocker({ healthCheck: vi.fn(() => false) })
     await expect(
