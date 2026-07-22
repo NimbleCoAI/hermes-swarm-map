@@ -264,9 +264,14 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     expect(tmpl.install).not.toHaveBeenCalled()
   })
 
-  // ── A2: the Letta runtime branch ──────────────────────────────────────────
-  it('Letta: creates the agent over REST and does NOT scaffold a per-agent dir or container', async () => {
-    h.healthCheck.mockReturnValue(true) // server reachable
+  // ── B2: the Letta runtime branch — linked pair (brain + Hermes door) ──────
+  // A2's "no per-agent dir/compose/overlay" contract INVERTS here: after the
+  // Letta brain agent is created over REST, the route falls through into the
+  // Hermes block and deploys a door gateway whose .env carries the B1-contract
+  // LETTA_BRAIN_* vars pointing at the brain.
+  it('Letta: creates the brain over REST, then deploys a Hermes door wired to it', async () => {
+    h.healthCheck.mockReturnValue(true) // server + door reachable
+    h.createOverlay.mockResolvedValue({ id: 'h_scout' })
     const { execSync } = await import('child_process')
     vi.mocked(execSync).mockClear()
 
@@ -276,40 +281,73 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     })
     const data = await res.json()
     expect(res.status).toBe(200)
-    expect(data).toMatchObject({ ok: true, runtime: 'letta', harnessId: 'h_letta_agent-xyz', agentId: 'agent-xyz' })
 
-    // Agent created with the MODERN memfs agent type (per Letta team feedback).
+    // (a) The brain agent was created on the Letta server (modern memfs type).
     expect(h.createAgent).toHaveBeenCalledTimes(1)
     expect((h.createAgent.mock.calls[0][0] as { agent_type?: string }).agent_type).toBe('letta_v1_agent')
 
-    // The Letta server was brought up; the server key landed in the server .env (0600).
+    // The Letta server was brought up; the server key landed in the server .env.
     expect(h.dockerStart).toHaveBeenCalled()
     const serverEnv = path.join(h.tmpData, 'letta', '.env')
     expect(fs.readFileSync(serverEnv, 'utf-8')).toContain('ANTHROPIC_API_KEY=sk-ant-server-key')
 
-    // No Hermes side effects: no per-agent data dir, no per-agent compose up.
-    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-scout'))).toBe(false)
-    expect(h.createOverlay).not.toHaveBeenCalled()
+    // (b) The DOOR agent dir exists, with the B1-contract brain vars at 0600.
+    const doorEnvPath = path.join(h.tmpHome, '.hermes-scout', '.env')
+    const doorEnv = fs.readFileSync(doorEnvPath, 'utf-8')
+    expect(doorEnv).toContain('LETTA_BRAIN_URL=http://host.docker.internal:8283')
+    expect(doorEnv).toContain('LETTA_BRAIN_AGENT_ID=agent-xyz')
+    expect(fs.statSync(doorEnvPath).mode & 0o777).toBe(0o600)
+
+    // (c) Door compose written, container started, overlay registered.
+    expect(fs.existsSync(path.join(h.tmpData, 'compose', 'scout', 'docker-compose.yml'))).toBe(true)
     const cmds = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
-    expect(cmds.some((c) => /compose -f .* up -d/.test(c))).toBe(false)
+    expect(cmds.some((c) => /compose -f .* up -d/.test(c))).toBe(true)
+    expect(h.createOverlay).toHaveBeenCalledTimes(1)
+
+    // (d) Merged response: door harness identity + brain identity.
+    expect(data).toMatchObject({
+      ok: true,
+      runtime: 'letta',
+      harnessId: 'h_scout',
+      brainAgentId: 'agent-xyz',
+      brainHarnessId: 'h_letta_agent-xyz',
+      baseUrl: 'http://localhost:8283',
+      port: 8642,
+    })
   })
 
-  it('Letta: 409 when an agent with the same name already exists on the server', async () => {
+  it('Letta: 409 when an agent with the same name already exists on the server (no door left behind)', async () => {
     h.healthCheck.mockReturnValue(true)
     h.listAgents.mockResolvedValue([{ id: 'a1', name: 'scout' }])
+    const { execSync } = await import('child_process')
+    vi.mocked(execSync).mockClear()
     const res = await deploy({
       name: 'scout', runtime: 'letta', lettaModel: 'anthropic/claude-3-5-sonnet', llmKey: 'sk-ant',
     })
     expect(res.status).toBe(409)
     expect(h.createAgent).not.toHaveBeenCalled()
+    // Brain-first ordering: the brain failed, so NO door side effects exist.
+    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-scout'))).toBe(false)
+    expect(fs.existsSync(path.join(h.tmpData, 'compose', 'scout'))).toBe(false)
+    expect(h.createOverlay).not.toHaveBeenCalled()
+    const cmds = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
+    expect(cmds.some((c) => /compose -f .* up -d/.test(c))).toBe(false)
   })
 
-  it('Letta: 502 when the server never becomes reachable', async () => {
+  it('Letta: 502 when the server never becomes reachable (no door left behind)', async () => {
     h.healthCheck.mockReturnValue(false) // never healthy
+    const { execSync } = await import('child_process')
+    vi.mocked(execSync).mockClear()
     const res = await deploy({
       name: 'scout', runtime: 'letta', lettaModel: 'anthropic/claude-3-5-sonnet', llmKey: 'sk-ant',
     })
     expect(res.status).toBe(502)
     expect(h.createAgent).not.toHaveBeenCalled()
+    // Brain-first ordering: unreachable server means no door dir/compose/overlay.
+    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-scout'))).toBe(false)
+    expect(fs.existsSync(path.join(h.tmpData, 'compose', 'scout'))).toBe(false)
+    expect(h.createOverlay).not.toHaveBeenCalled()
+    const cmds = vi.mocked(execSync).mock.calls.map((c) => String(c[0]))
+    expect(cmds.some((c) => /compose -f .* up -d/.test(c))).toBe(false)
   })
 })

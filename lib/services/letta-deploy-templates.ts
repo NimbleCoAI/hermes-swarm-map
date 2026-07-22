@@ -44,8 +44,10 @@ export const LETTA_SERVICE = 'letta'
  * drift-guard test string-matches the compose line against this constant).
  */
 export const LETTA_IMAGE = 'letta/letta:0.16.8'
-/** Default REST base URL — matches the compose-published :8283 and the client default. */
-export const LETTA_DEFAULT_BASE_URL = 'http://localhost:8283'
+/** Default published REST port for the Letta server (the compose default and the client default). */
+export const LETTA_DEFAULT_PORT = 8283
+/** Default REST base URL — matches the compose-published port and the client default. */
+export const LETTA_DEFAULT_BASE_URL = `http://localhost:${LETTA_DEFAULT_PORT}`
 
 /**
  * The modern Letta agent architecture: memory as git-backed context-repo files
