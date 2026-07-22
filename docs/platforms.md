@@ -144,7 +144,7 @@ SLACK_APP_TOKEN=xapp-...
 
 ## Google Workspace (preview)
 
-Requires [NimbleCoAI/google-multiplayer-mcp](https://github.com/NimbleCoAI/google-multiplayer-mcp) installed alongside HSM. Enable via the wizard in Step 3.
+Requires [NimbleCoOrg/google-multiplayer-mcp](https://github.com/NimbleCoOrg/google-multiplayer-mcp) installed alongside HSM. Enable via the wizard in Step 3.
 
 1. Deploy your agent with Google Workspace enabled
 2. Visit the agent's OAuth callback URL to authorize access
