@@ -112,6 +112,42 @@ describe('generateEnvContent', () => {
     expect(env).not.toContain('NOTION_API_KEY')
     expect(env).not.toContain('NOTION_TOKEN')
   })
+
+  // ── B2: Letta-brain "door" env seam ───────────────────────────────────────
+  // A Hermes gateway becomes a Letta-brained door when LETTA_BRAIN_URL +
+  // LETTA_BRAIN_AGENT_ID are set (B1 contract, gateway/letta_brain.py reads
+  // exactly these names, plus optional LETTA_BRAIN_API_KEY).
+  it('writes LETTA_BRAIN_URL + LETTA_BRAIN_AGENT_ID (and no API key line) when lettaBrain is set', () => {
+    const env = generateEnvContent({
+      ...base,
+      lettaBrain: { url: 'http://host.docker.internal:8283', agentId: 'agent-x' },
+    })
+    expect(env).toMatch(/^LETTA_BRAIN_URL=http:\/\/host\.docker\.internal:8283$/m)
+    expect(env).toMatch(/^LETTA_BRAIN_AGENT_ID=agent-x$/m)
+    expect(env).not.toContain('LETTA_BRAIN_API_KEY')
+  })
+
+  it('writes LETTA_BRAIN_API_KEY when the brain apiKey is set', () => {
+    const env = generateEnvContent({
+      ...base,
+      lettaBrain: { url: 'http://host.docker.internal:8283', agentId: 'agent-x', apiKey: 'sk-letta-1' },
+    })
+    expect(env).toMatch(/^LETTA_BRAIN_API_KEY=sk-letta-1$/m)
+  })
+
+  it('rejects a newline in the brain agentId (env-line injection guard)', () => {
+    expect(() =>
+      generateEnvContent({
+        ...base,
+        lettaBrain: { url: 'http://host.docker.internal:8283', agentId: 'agent-x\nEVIL=1' },
+      }),
+    ).toThrow()
+  })
+
+  it('emits no LETTA_BRAIN_* lines without lettaBrain', () => {
+    const env = generateEnvContent({ ...base })
+    expect(env).not.toContain('LETTA_BRAIN_')
+  })
 })
 
 describe('generateAgentCompose', () => {
