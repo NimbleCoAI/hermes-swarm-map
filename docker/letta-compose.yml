@@ -35,9 +35,11 @@ services:
     container_name: letta
     restart: unless-stopped
     ports:
-      # REST API (and the ADE web UI) — matches the :8283 the client defaults to.
-      - published: 8283
-        target: 8283
+      # REST API (and the ADE web UI). The published port is parameterized
+      # (spec §C1): a non-default instance sets LETTA_PORT via its server .env
+      # (--env-file); the default instance publishes :8283, matching the client
+      # default (LETTA_DEFAULT_PORT in lib/services/letta-deploy-templates.ts).
+      - "${LETTA_PORT:-8283}:8283"
     environment:
       # Provider keys are SERVER-WIDE in self-hosted Letta (not per-agent) — a
       # key difference from Hermes, where creds are per-container env. Passed
