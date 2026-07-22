@@ -6,7 +6,7 @@ import { defaultEnabledPlugins } from '@/lib/services/artifacts-manifest'
 import { getUseCaseTemplate, installUseCaseTemplate, templateEnabledPlugins } from '@/lib/services/usecase-templates'
 import { generateDefaultConfig, type McpServerConfig } from '@/lib/templates/config-yaml'
 import { generateEnvContent, generateAgentCompose } from '@/lib/services/agent-deploy-templates'
-import { deployLettaAgent } from '@/lib/services/letta-deploy-templates'
+import { deployLettaAgent, serverKeyVarForModel, LETTA_DEFAULT_PORT } from '@/lib/services/letta-deploy-templates'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -55,12 +55,16 @@ export async function POST(request: Request) {
   let createdAgentDir: string | undefined
   try {
     const body = await request.json()
-    const { name, provider, primaryModel, fallbackModel, persona, tier,
+    const { name, fallbackModel, persona, tier,
       mattermostEnabled, mattermostUrl, mattermostToken,
       telegramEnabled, telegramToken, discordEnabled, discordToken,
       slackEnabled, slackBotToken, slackAppToken, signalEnabled, signalPhone,
       githubToken, braveKey, notionKey, existingKeyId, saveKeyToRegistry } = body
     const bundledOllama = body.bundledOllama === true
+    // Mutable: the Letta branch defaults these from `lettaModel` so the door's
+    // .env / config.yaml generation below stays valid without wizard changes.
+    let provider: string = body.provider
+    let primaryModel: string = body.primaryModel
 
     // Optional use-case template (e.g. Matilde) — installs gated git artifacts +
     // seeds its SOUL. Resolved from the server-side registry; unknown id → 400.
@@ -93,13 +97,16 @@ export async function POST(request: Request) {
       llmKey = resolved
     }
 
-    // ── Letta runtime branch (design §3c) ──────────────────────────────────
-    // A Letta deploy inverts the Hermes layering: bring the server up once,
-    // then create the agent over REST. Everything below (image resolution,
-    // port alloc, .env / config.yaml / SOUL.md scaffolding, per-agent compose,
-    // container start) is Hermes-only and skipped. createdAgentDir stays
-    // undefined, so the catch's cleanup is a no-op for this path. The pasted
+    // ── Letta runtime branch (design §3c + B2 linked pair) ─────────────────
+    // Brain-first: bring the shared Letta server up once and create the BRAIN
+    // agent over REST. Any brain failure returns unchanged, before a single
+    // door byte is written (no dir/compose/overlay to clean up). On success we
+    // FALL THROUGH into the Hermes block below, which deploys a gateway "door"
+    // container whose .env carries the B1-contract LETTA_BRAIN_* vars — the
+    // gateway detects them and forwards each turn to the brain. The pasted
     // `llmKey` is a SERVER-WIDE provider key here, not a per-agent secret.
+    let lettaBrain: { url: string; agentId: string; apiKey?: string } | undefined
+    let lettaBrainResult: { brainAgentId: string; brainHarnessId: string; baseUrl: string } | undefined
     if (body.runtime === 'letta') {
       const lettaSettings = services.config.getSettings()
       const swarmMapDataDir = lettaSettings.dataDir
@@ -114,7 +121,27 @@ export async function POST(request: Request) {
         serverKey: llmKey,
         swarmMapDataDir,
       })
-      return NextResponse.json(result.body, { status: result.status })
+      if (result.status < 200 || result.status >= 300) {
+        return NextResponse.json(result.body, { status: result.status })
+      }
+      const brainAgentId = String(result.body.agentId)
+      // The door runs in a container; the brain server publishes on the host —
+      // so the door reaches it via host.docker.internal on the default port
+      // (same constant ensureLettaServer's compose publishes on).
+      lettaBrain = { url: `http://host.docker.internal:${LETTA_DEFAULT_PORT}`, agentId: brainAgentId }
+      lettaBrainResult = {
+        brainAgentId,
+        brainHarnessId: String(result.body.harnessId),
+        baseUrl: String(result.body.baseUrl),
+      }
+      // Default the Hermes-side config from the Letta model handle so the
+      // door's .env / config.yaml generation stays valid (the wizard sends no
+      // provider/primaryModel for Letta deploys). serverKeyVarForModel knows
+      // which providers the server maps; anything else falls back to anthropic.
+      if (!provider) {
+        provider = serverKeyVarForModel(body.lettaModel) === 'OPENAI_API_KEY' ? 'openai' : 'anthropic'
+      }
+      if (!primaryModel) primaryModel = body.lettaModel
     }
 
     // Check Docker is available
@@ -211,6 +238,7 @@ export async function POST(request: Request) {
       braveKey,
       notionKey,
       browserEnabled: body.browserEnabled === true,
+      lettaBrain,
     })
     fs.writeFileSync(path.join(agentDataDir, '.env'), envContent, { mode: 0o600 })
 
@@ -391,6 +419,9 @@ If this is your very first startup ever, introduce yourself briefly in your home
 
     return NextResponse.json({
       ok: true,
+      // Letta linked pair: door harness identity + brain identity (additive —
+      // the wizard already branches on data.runtime === 'letta').
+      ...(lettaBrainResult ? { runtime: 'letta', ...lettaBrainResult } : {}),
       harnessId: overlay.id,
       port,
       healthy,
