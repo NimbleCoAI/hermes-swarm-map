@@ -4,12 +4,12 @@
 
 export interface ParsedRef {
   registry: string // e.g. ghcr.io
-  repo: string // e.g. nimblecoai/hermes-agent-mt
+  repo: string // e.g. nimblecoorg/hermes-agent-mt
   tag?: string
   digest?: string // sha256:...
 }
 
-/** Parse `ghcr.io/nimblecoai/hermes-agent-mt:tag` or `...@sha256:...`. */
+/** Parse `ghcr.io/nimblecoorg/hermes-agent-mt:tag` or `...@sha256:...`. */
 export function parseImageRef(ref: string): ParsedRef {
   let rest = ref
   let digest: string | undefined

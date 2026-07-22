@@ -19,7 +19,7 @@ import { generateStandaloneCompose, setComposeImage, readComposeImage, readCompo
 import { RegistryService, parseImageRef } from './registry'
 import type { ContainerRuntimeAdapter } from './runtime-adapter'
 
-const DEFAULT_IMAGE_REPO = 'nimblecoai/hermes-agent-mt'
+const DEFAULT_IMAGE_REPO = 'nimblecoorg/hermes-agent-mt'
 import { hsmBaseUrl } from './hsm-url'
 
 const HARNESSES_FILE = 'harnesses.json'

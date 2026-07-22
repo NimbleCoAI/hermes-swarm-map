@@ -17,7 +17,7 @@ storage.write('settings.json', {
   theme: 'light',
   composeFiles: [],
   onboarded: true,
-  defaultImage: 'ghcr.io/nimblecoai/hermes-agent-mt:latest',
+  defaultImage: 'ghcr.io/nimblecoorg/hermes-agent-mt:latest',
   useLocalBuild: false,
 })
 

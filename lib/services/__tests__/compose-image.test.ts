@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from '../harness-compose'
 
-const REF = 'ghcr.io/nimblecoai/hermes-agent-mt:2026-06-12'
+const REF = 'ghcr.io/nimblecoorg/hermes-agent-mt:2026-06-12'
 
 describe('readComposeBuildContext', () => {
   it('reads the long-form build context this generator emits', () => {
