@@ -44,6 +44,13 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
     { id: 'anthropic/claude-opus-4-8', name: 'Claude Opus 4.8 (OR)', tier: 'primary' },
     { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (OR)', tier: 'primary' },
     { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash (OR)', tier: 'fallback' },
+    // Fleet chat primary — GLM-5.2 (753B MoE, 1M ctx) served over OpenRouter.
+    // The GLM-primary fleet flip runs through this entry; the direct Z.ai lane
+    // remains available under the `zai` provider above.
+    { id: 'z-ai/glm-5.2', name: 'GLM-5.2 (OR)', tier: 'primary' },
+    // Premium on-demand tier — Kimi K3 (1M ctx, released 2026-07-16). Not a
+    // fallback rung: operators pull it in explicitly for high-judgment work.
+    { id: 'moonshotai/kimi-k3', name: 'Kimi K3 (OR, premium)', tier: 'primary' },
     // Cheap metered workhorse rung — the missing "cheap-metered" tier the
     // token-spend audit flagged ([intelligent-routing-cost]). Sits above the
     // local-GLM floor so an agent that exhausts its Claude credits fails over
@@ -52,6 +59,9 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
     // capable agentic model. Per-agent cheaper picks (Qwen/DeepSeek-class) are
     // free-text in the cascade editor — verify the exact slug live before use.
     { id: 'moonshotai/kimi-k2.7-code', name: 'Kimi K2.7 Code (OR, cheap)', tier: 'fallback' },
+    // Cheap routing tier ([intelligent-routing-cost]) — the intelligent-routing
+    // plugin in the agent image routes cheap traffic to DeepSeek V3.2.
+    { id: 'deepseek/deepseek-v3.2', name: 'DeepSeek V3.2 (OR, cheap)', tier: 'fallback' },
   ],
   bedrock: [
     { id: 'us.anthropic.claude-sonnet-4-6-20250527-v1:0', name: 'Claude Sonnet 4.6 (Bedrock)', tier: 'primary' },

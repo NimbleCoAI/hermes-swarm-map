@@ -75,6 +75,71 @@ describe('lookupPricing', () => {
   })
 })
 
+describe('lookupPricing — GLM / Kimi / DeepSeek routing tiers', () => {
+  // The GLM-primary fleet flip: every tier of the hierarchy must resolve to a
+  // non-null entry (cost_status "estimated", not "unknown") under both the bare
+  // model name and the provider-prefixed OpenRouter slug state.db may record.
+
+  it('resolves glm-5.2 (bare and z-ai/ prefixed) to Z.ai list price', () => {
+    for (const id of ['glm-5.2', 'z-ai/glm-5.2']) {
+      const p = lookupPricing(id)
+      expect(p, id).not.toBeNull()
+      expect(p!.inputPerMillion).toBe(1.4)
+      expect(p!.outputPerMillion).toBe(4.4)
+    }
+  })
+
+  it('resolves glm-4.6 to Z.ai list price', () => {
+    const p = lookupPricing('glm-4.6')
+    expect(p).not.toBeNull()
+    expect(p!.inputPerMillion).toBe(0.6)
+    expect(p!.outputPerMillion).toBe(2.2)
+  })
+
+  it('resolves glm-4.5-flash to a real $0 entry (free tier, not unknown)', () => {
+    const p = lookupPricing('glm-4.5-flash')
+    expect(p).not.toBeNull()
+    expect(p!.inputPerMillion).toBe(0)
+    expect(p!.outputPerMillion).toBe(0)
+    expect(computeCost({ input: 1_000_000, output: 1_000_000 }, p!)).toBe(0)
+  })
+
+  it('resolves kimi-k3 (bare and moonshotai/ prefixed) with cache-hit pricing', () => {
+    for (const id of ['kimi-k3', 'moonshotai/kimi-k3']) {
+      const p = lookupPricing(id)
+      expect(p, id).not.toBeNull()
+      expect(p!.inputPerMillion).toBe(3.0)
+      expect(p!.outputPerMillion).toBe(15.0)
+      expect(p!.cacheReadPerMillion).toBe(0.3)
+    }
+  })
+
+  it('resolves kimi-k2.7-code (bare and moonshotai/ prefixed)', () => {
+    for (const id of ['kimi-k2.7-code', 'moonshotai/kimi-k2.7-code']) {
+      const p = lookupPricing(id)
+      expect(p, id).not.toBeNull()
+      expect(p!.inputPerMillion).toBe(0.72)
+      expect(p!.outputPerMillion).toBe(3.49)
+    }
+  })
+
+  it('resolves deepseek-v3.2 (bare and deepseek/ prefixed) ahead of the legacy wildcard', () => {
+    for (const id of ['deepseek-v3.2', 'deepseek/deepseek-v3.2']) {
+      const p = lookupPricing(id)
+      expect(p, id).not.toBeNull()
+      expect(p!.inputPerMillion).toBe(0.23)
+      expect(p!.outputPerMillion).toBe(0.34)
+    }
+  })
+
+  it('keeps legacy deepseek models on the old wildcard rates', () => {
+    const p = lookupPricing('deepseek-chat')
+    expect(p).not.toBeNull()
+    expect(p!.inputPerMillion).toBe(0.14)
+    expect(p!.outputPerMillion).toBe(0.28)
+  })
+})
+
 describe('computeCost', () => {
   it('computes basic input/output cost', () => {
     const pricing = lookupPricing('claude-sonnet-4')!

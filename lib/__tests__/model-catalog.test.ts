@@ -234,4 +234,32 @@ describe('MODEL_CATALOG — OpenRouter cheap metered workhorse lane', () => {
       expect(MODEL_CATALOG.anthropic.find((m) => m.id === id)?.tier).toBe('primary')
     }
   })
+
+  it('exposes DeepSeek V3.2 as the cheap routing tier ([intelligent-routing-cost])', () => {
+    // The intelligent-routing plugin in the agent image routes cheap traffic to
+    // DeepSeek V3.2 — the catalog must offer the slug so operators can pin it.
+    const ds = MODEL_CATALOG.openrouter.find((m) => m.id === 'deepseek/deepseek-v3.2')
+    expect(ds, 'deepseek v3.2 cheap routing tier should be in the openrouter catalog').toBeDefined()
+    expect(ds?.tier).toBe('fallback')
+  })
+})
+
+describe('MODEL_CATALOG — GLM-primary fleet hierarchy on OpenRouter', () => {
+  // The fleet flip: GLM-5.2 (via OpenRouter) becomes chat primary, Kimi K3 is
+  // the on-demand premium tier, DeepSeek V3.2 the cheap routing tier (above).
+  it('exposes GLM-5.2 as a primary-capable openrouter entry (fleet chat primary)', () => {
+    const glm = MODEL_CATALOG.openrouter.find((m) => m.id === 'z-ai/glm-5.2')
+    expect(glm, 'z-ai/glm-5.2 should be in the openrouter catalog').toBeDefined()
+    expect(glm?.tier).toBe('primary')
+  })
+
+  it('exposes Kimi K3 as the premium on-demand tier (primary-capable, not a fallback rung)', () => {
+    const kimi = MODEL_CATALOG.openrouter.find((m) => m.id === 'moonshotai/kimi-k3')
+    expect(kimi, 'moonshotai/kimi-k3 should be in the openrouter catalog').toBeDefined()
+    expect(kimi?.tier).toBe('primary')
+  })
+
+  it('keeps the direct Z.ai lane for GLM-5.2 alongside the OpenRouter entry', () => {
+    expect(MODEL_CATALOG.zai.map((m) => m.id)).toContain('glm-5.2')
+  })
 })

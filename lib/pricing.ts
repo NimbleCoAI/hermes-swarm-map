@@ -146,6 +146,16 @@ const PRICING_TABLE: Array<{ pattern: string | RegExp; pricing: PricingEntry }> 
     },
   },
   // ── DeepSeek ──────────────────────────────────────────────────────────
+  // DeepSeek V3.2 — the fleet's cheap routing tier ([intelligent-routing-cost]);
+  // $0.23/$0.34 per DeepSeek platform / OpenRouter listings (2026-07-23). Must
+  // sit ABOVE the legacy /^deepseek/ wildcard, which carries stale V3-era rates.
+  {
+    pattern: /^deepseek-v3\.2/,
+    pricing: {
+      inputPerMillion: 0.23,
+      outputPerMillion: 0.34,
+    },
+  },
   {
     pattern: 'deepseek-reasoner',
     pricing: {
@@ -182,6 +192,53 @@ const PRICING_TABLE: Array<{ pattern: string | RegExp; pricing: PricingEntry }> 
       outputPerMillion: 0.4,
     },
   },
+  // ── Z.ai GLM ([intelligent-routing-cost]) ─────────────────────────────
+  // GLM-5.2 — fleet chat primary. Z.ai LIST price $1.40/$4.40. OpenRouter is
+  // running a 45%-off promo (~$0.7644/$2.402) as of 2026-07-23; we price at
+  // list, so promo-period spend is over-estimated rather than under-tracked.
+  {
+    pattern: /^glm-5\.2/,
+    pricing: {
+      inputPerMillion: 1.4,
+      outputPerMillion: 4.4,
+    },
+  },
+  // GLM-4.6 — still listed in the zai catalog; Z.ai list $0.60/$2.20.
+  {
+    pattern: /^glm-4\.6/,
+    pricing: {
+      inputPerMillion: 0.6,
+      outputPerMillion: 2.2,
+    },
+  },
+  // GLM-4.5 Flash — Z.ai free tier. A real $0 entry (not a missing one) so
+  // usage resolves to cost_status "estimated" instead of "unknown".
+  {
+    pattern: /^glm-4\.5-flash/,
+    pricing: {
+      inputPerMillion: 0,
+      outputPerMillion: 0,
+    },
+  },
+  // ── Moonshot Kimi ─────────────────────────────────────────────────────
+  // Kimi K3 — premium on-demand tier (1M ctx, released 2026-07-16). Moonshot
+  // platform pricing $3.00/$15.00, cache-hit input $0.30 (as of 2026-07-23).
+  {
+    pattern: /^kimi-k3/,
+    pricing: {
+      inputPerMillion: 3.0,
+      outputPerMillion: 15.0,
+      cacheReadPerMillion: 0.3,
+    },
+  },
+  // Kimi K2.7 Code — cheap metered workhorse rung; ~$0.72/$3.49 on OpenRouter.
+  {
+    pattern: /^kimi-k2\.7/,
+    pricing: {
+      inputPerMillion: 0.72,
+      outputPerMillion: 3.49,
+    },
+  },
 ]
 
 /**
@@ -197,6 +254,10 @@ export function lookupPricing(modelName: string): PricingEntry | null {
     .replace(/^google\//, '')
     .replace(/^vertex_ai\//, '')
     .replace(/^deepseek\//, '')
+    .replace(/^openrouter\//, '')
+    .replace(/^z-ai\//, '')
+    .replace(/^zai\//, '')
+    .replace(/^moonshotai\//, '')
 
   for (const entry of PRICING_TABLE) {
     if (typeof entry.pattern === 'string') {
