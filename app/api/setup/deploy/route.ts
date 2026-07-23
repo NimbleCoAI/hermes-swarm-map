@@ -53,6 +53,9 @@ export async function POST(request: Request) {
   // with its .env (which holds the resolved API key). Only set after we create
   // the dir, so we never delete a pre-existing agent on failure.
   let createdAgentDir: string | undefined
+  // Linked-pair deploy state — hoisted so the catch can clean up a brain
+  // agent orphaned by a door-phase failure (see catch below).
+  let lettaBrainResult: { brainAgentId: string; brainHarnessId: string; baseUrl: string } | undefined
   try {
     const body = await request.json()
     const { name, fallbackModel, persona, tier,
@@ -106,7 +109,6 @@ export async function POST(request: Request) {
     // gateway detects them and forwards each turn to the brain. The pasted
     // `llmKey` is a SERVER-WIDE provider key here, not a per-agent secret.
     let lettaBrain: { url: string; agentId: string; apiKey?: string } | undefined
-    let lettaBrainResult: { brainAgentId: string; brainHarnessId: string; baseUrl: string } | undefined
     if (body.runtime === 'letta') {
       const lettaSettings = services.config.getSettings()
       const swarmMapDataDir = lettaSettings.dataDir
@@ -125,14 +127,22 @@ export async function POST(request: Request) {
         return NextResponse.json(result.body, { status: result.status })
       }
       const brainAgentId = String(result.body.agentId)
+      const brainBaseUrl = String(result.body.baseUrl)
       // The door runs in a container; the brain server publishes on the host —
-      // so the door reaches it via host.docker.internal on the default port
-      // (same constant ensureLettaServer's compose publishes on).
-      lettaBrain = { url: `http://host.docker.internal:${LETTA_DEFAULT_PORT}`, agentId: brainAgentId }
+      // so the door reaches it via host.docker.internal, on whatever port the
+      // server actually published (derived from its baseUrl so a non-default
+      // C1 instance is honored; falls back to the default constant).
+      let brainPort = String(LETTA_DEFAULT_PORT)
+      try {
+        brainPort = new URL(brainBaseUrl).port || brainPort
+      } catch {
+        // malformed baseUrl — keep the default
+      }
+      lettaBrain = { url: `http://host.docker.internal:${brainPort}`, agentId: brainAgentId }
       lettaBrainResult = {
         brainAgentId,
         brainHarnessId: String(result.body.harnessId),
-        baseUrl: String(result.body.baseUrl),
+        baseUrl: brainBaseUrl,
       }
       // Default the Hermes-side config from the Letta model handle so the
       // door's .env / config.yaml generation stays valid (the wizard sends no
@@ -420,14 +430,26 @@ If this is your very first startup ever, introduce yourself briefly in your home
     return NextResponse.json({
       ok: true,
       // Letta linked pair: door harness identity + brain identity (additive —
-      // the wizard already branches on data.runtime === 'letta').
-      ...(lettaBrainResult ? { runtime: 'letta', ...lettaBrainResult } : {}),
+      // the wizard already branches on data.runtime === 'letta'). `agentId`
+      // mirrors brainAgentId for compatibility with the wizard's pre-pair
+      // success panel, which renders data.agentId.
+      ...(lettaBrainResult ? { runtime: 'letta', agentId: lettaBrainResult.brainAgentId, ...lettaBrainResult } : {}),
       harnessId: overlay.id,
       port,
       healthy,
     })
   } catch (err) {
     if (createdAgentDir) fs.rmSync(createdAgentDir, { recursive: true, force: true })
+    // Linked-pair deploy: the brain agent was created before the door phase
+    // threw. Delete it (best-effort) so the orphaned name doesn't 409-block
+    // a retry of the same deploy.
+    if (lettaBrainResult) {
+      try {
+        await services.letta.deleteAgent(lettaBrainResult.brainAgentId)
+      } catch (cleanupErr) {
+        console.error('[deploy] failed to clean up orphaned Letta brain agent:', cleanupErr)
+      }
+    }
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }

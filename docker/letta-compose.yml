@@ -32,7 +32,10 @@ services:
     # lib/services/letta-deploy-templates.ts; update both refs together.
     # Digest: sha256:aa66c3eeee13d2dfc40c650d709b550237ee31bfc91942a52fa488a13fa8c102
     image: letta/letta:0.16.8
-    container_name: letta
+    # Parameterized like LETTA_PORT (spec §C1): a named instance sets
+    # LETTA_CONTAINER_NAME=letta-<name> via its server .env so instances can
+    # coexist; the default instance keeps the historical name `letta`.
+    container_name: ${LETTA_CONTAINER_NAME:-letta}
     restart: unless-stopped
     ports:
       # REST API (and the ADE web UI). The published port is parameterized

@@ -193,6 +193,18 @@ export class LettaService {
   }
 
   /**
+   * DELETE /v1/agents/{id} — remove an agent (a Postgres row on the server).
+   * Used by the deploy route to clean up a freshly created brain when the
+   * door phase of a linked-pair deploy fails — otherwise the orphaned name
+   * 409-blocks every retry of the same deploy.
+   */
+  async deleteAgent(id: string): Promise<void> {
+    await this.request<void>(`/v1/agents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
    * POST /v1/agents/{id}/messages — send one user message, get the full turn
    * back (reasoning + assistant + any tool messages).
    *
