@@ -14,8 +14,9 @@ import type { HabitatTier, HarnessStatus } from '@/lib/types'
 
 const KEY_PROVIDERS = [
   // Model/inference providers first. `openrouter` maps to OPENROUTER_API_KEY on
-  // the write path (see KeysService.resolveEnvVar) — the fleet's cheap-metered
-  // rung ([intelligent-routing-cost]) can't be provisioned without it here.
+  // the write path (see KeysService.resolveEnvVar) — the fleet's GLM-5.2 chat
+  // primary AND its cheap-metered rung ([intelligent-routing-cost]) both ride
+  // OpenRouter, so neither can be provisioned without it here.
   'anthropic', 'openai', 'google', 'openrouter', 'aws', 'github', 'brave', 'notion', 'telegram', 'custom',
 ]
 
