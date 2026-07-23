@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   healthCheck: vi.fn(() => false),
   listAgents: vi.fn(async () => [] as Array<{ id: string; name: string }>),
   createAgent: vi.fn(async (cfg: { name: string }) => ({ id: 'agent-xyz', name: cfg.name })),
+  deleteAgent: vi.fn(async () => undefined),
 }))
 
 vi.mock('child_process', () => ({ execSync: vi.fn(() => Buffer.from('')) }))
@@ -51,7 +52,7 @@ vi.mock('@/lib/services', () => ({
     config: { getSettings: () => ({ ...h.settings, dataDir: h.tmpData }) },
     keys: { getDecryptedValue: h.getDecryptedValue, list: h.list, update: h.update, setAssignment: h.setAssignment, add: h.add },
     harness: { createOverlay: h.createOverlay },
-    letta: { listAgents: h.listAgents, createAgent: h.createAgent },
+    letta: { listAgents: h.listAgents, createAgent: h.createAgent, deleteAgent: h.deleteAgent },
   },
 }))
 
@@ -304,17 +305,35 @@ describe('POST /api/setup/deploy — Phase 1 wiring', () => {
     expect(cmds.some((c) => /compose -f .* up -d/.test(c))).toBe(true)
     expect(h.createOverlay).toHaveBeenCalledTimes(1)
 
-    // (d) Merged response: door harness identity + brain identity.
+    // (d) Merged response: door harness identity + brain identity. `agentId`
+    // mirrors brainAgentId for the wizard's pre-pair success panel.
     expect(data).toMatchObject({
       ok: true,
       runtime: 'letta',
       harnessId: 'h_scout',
+      agentId: 'agent-xyz',
       brainAgentId: 'agent-xyz',
       brainHarnessId: 'h_letta_agent-xyz',
       baseUrl: 'http://localhost:8283',
       port: 8642,
     })
   })
+
+  it('Letta: a door-phase failure deletes the freshly created brain (no 409 on retry)', async () => {
+    h.healthCheck.mockReturnValue(true)
+    // Brain phase succeeds; the door phase then dies at overlay registration.
+    h.createOverlay.mockRejectedValueOnce(new Error('overlay store exploded'))
+    const res = await deploy({
+      name: 'scout', runtime: 'letta', lettaModel: 'anthropic/claude-3-5-sonnet',
+      llmKey: 'sk-ant-server-key',
+    })
+    expect(res.status).toBe(500)
+    // The orphaned brain was cleaned up, so retrying the same name won't 409.
+    expect(h.deleteAgent).toHaveBeenCalledWith('agent-xyz')
+    // And the door dir cleanup still ran (pre-existing contract).
+    expect(fs.existsSync(path.join(h.tmpHome, '.hermes-scout'))).toBe(false)
+  })
+
 
   it('Letta: 409 when an agent with the same name already exists on the server (no door left behind)', async () => {
     h.healthCheck.mockReturnValue(true)

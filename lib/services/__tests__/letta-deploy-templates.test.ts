@@ -152,10 +152,25 @@ describe('ensureLettaServer', () => {
     const envFile = path.join(dir, 'letta-acme', '.env')
     expect(call[3]).toBe(envFile) // env-file lives in the instance dir
     // The published port is delivered to the compose via LETTA_PORT.
-    expect(fs.readFileSync(envFile, 'utf-8')).toContain('LETTA_PORT=8300')
+    const envText = fs.readFileSync(envFile, 'utf-8')
+    expect(envText).toContain('LETTA_PORT=8300')
+    // And the container name is instance-scoped so named instances can
+    // coexist with the default (compose pins container_name via this var).
+    expect(envText).toContain('LETTA_CONTAINER_NAME=letta-acme')
     expect(docker.healthCheck).toHaveBeenCalledWith('http://localhost:8300/v1/agents', expect.any(Number))
     expect(info.baseUrl).toBe('http://localhost:8300')
     expect(info.project).toBe('letta-acme')
+  })
+
+  it('C1: the default instance writes no LETTA_CONTAINER_NAME (keeps the historical `letta` name)', async () => {
+    const docker = fakeDocker()
+    await ensureLettaServer(docker as never, {
+      swarmMapDataDir: dir,
+      composeFile: '/c.yml',
+      serverEnv: { ANTHROPIC_API_KEY: 'sk-x' }, // force an env file to exist
+    })
+    const envText = fs.readFileSync(path.join(dir, 'letta', '.env'), 'utf-8')
+    expect(envText).not.toContain('LETTA_CONTAINER_NAME')
   })
 
   it('throws when the server never becomes reachable', async () => {

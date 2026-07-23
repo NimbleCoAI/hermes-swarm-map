@@ -205,6 +205,10 @@ export async function ensureLettaServer(
   // env line, preserving the "no keys → no env-file" behavior.
   const serverEnv: Record<string, string> = { ...(opts.serverEnv ?? {}) }
   if (port !== LETTA_DEFAULT_PORT) serverEnv.LETTA_PORT = String(port)
+  // Same pattern for the container name: named instances must not collide on
+  // the compose file's `container_name: ${LETTA_CONTAINER_NAME:-letta}` — the
+  // default instance keeps the historical `letta` (no env line).
+  if (opts.name) serverEnv.LETTA_CONTAINER_NAME = project
   const envFile = writeServerEnv(serverDir, serverEnv)
 
   // Pull the image first (best-effort): a first-run ~500MB fetch would otherwise
