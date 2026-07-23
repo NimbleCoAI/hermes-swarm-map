@@ -903,7 +903,7 @@ export default function WizardPage() {
                   <p className="text-xs text-muted-foreground">
                     Google Workspace integration uses OAuth for authentication. After deployment,
                     visit the agent&apos;s OAuth callback URL to complete setup.
-                    See <a href="https://github.com/NimbleCoAI/google-multiplayer-mcp" target="_blank" rel="noopener" className="underline">NimbleCoAI/google-multiplayer-mcp</a> for setup.
+                    See <a href="https://github.com/NimbleCoOrg/google-multiplayer-mcp" target="_blank" rel="noopener" className="underline">NimbleCoOrg/google-multiplayer-mcp</a> for setup.
                   </p>
                 </div>
               )}
