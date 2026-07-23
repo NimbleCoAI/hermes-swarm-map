@@ -1,0 +1,49 @@
+name: OSV-Scanner
+
+# Scans lockfiles (package-lock.json, pnpm-lock.yaml) against the OSV
+# vulnerability database. Runs on every PR/push and on a weekly schedule
+# against main.
+#
+# This is detection-only — OSV-Scanner does NOT open PRs or modify pins.
+# It reports known CVEs in currently-pinned dependency versions so we can
+# decide when and how to patch on our own schedule. fail-on-vuln is disabled
+# so the job does not block merges on pre-existing vulnerabilities in pinned
+# deps that we may need to patch deliberately.
+#
+# Complements supply-chain-audit.yml (which scans for malicious code
+# patterns in PR diffs) by covering the orthogonal "currently-pinned dep
+# became known-vulnerable" case. Mirrors the same pattern already in use on
+# hermes-agent-mt.
+#
+# Uses Google's officially-recommended reusable workflow, pinned by SHA.
+# Findings land in the repo's Security tab (Code Scanning > OSV-Scanner).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly scan against main — catches CVEs published after merge for
+    # deps that haven't changed since.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  # Required by the reusable workflow to upload SARIF to the Security tab.
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    name: Scan lockfiles
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    with:
+      # Both lockfiles are scanned — the repo carries both a pnpm-lock.yaml
+      # (the one actually installed from, per pnpm-workspace.yaml) and a
+      # package-lock.json. Scanning both is cheap and avoids a silent gap
+      # if either one is ever the source of truth for a given install path.
+      scan-args: |-
+        --lockfile=pnpm-lock.yaml
+        --lockfile=package-lock.json
+      fail-on-vuln: false

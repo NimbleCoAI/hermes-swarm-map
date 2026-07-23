@@ -1,0 +1,149 @@
+name: Supply Chain Audit
+
+# Narrow, high-signal scanner for the npm/pnpm ecosystem. Only fires on
+# critical indicators of supply chain attacks — the JS/TS equivalent of the
+# litellm-style Python payloads (see hermes-agent-mt's supply-chain-audit.yml,
+# which this mirrors). Deliberately narrow: low-signal heuristics (plain
+# base64, plain eval, dependency/workflow edits, outbound fetch/POST) are
+# left out on purpose — a scanner that fires on nearly every PR trains
+# reviewers to ignore it. If you're tempted to add a WARNING-tier pattern
+# here, make a separate advisory-only workflow instead.
+#
+# What this catches:
+#   - postinstall/preinstall/prepare lifecycle scripts added or changed in
+#     any package.json. This is THE dominant real-world npm supply-chain
+#     vector (colors/faker 2022, ua-parser-js 2021, the 2025 "Shai-Hulud"
+#     worm campaign) — a compromised or malicious package runs arbitrary
+#     code the moment `npm install`/`pnpm install` executes, no import
+#     required. A change here in OUR OWN package.json files is rare in a
+#     normal PR and worth a maintainer's eyes every time.
+#   - base64/hex decode piped directly into eval() or new Function() — the
+#     signature of a hidden payload (same combo-not-solo logic as the
+#     Python base64+exec/eval check).
+#   - decoded/obfuscated strings passed to child_process exec/spawn — the
+#     JS analogue of Python's subprocess-with-encoded-command check.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.js'
+      - '**/*.jsx'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.mjs'
+      - '**/*.cjs'
+      - '**/package.json'
+      - '.github/workflows/supply-chain-audit.yml'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  scan:
+    name: Scan PR for critical supply chain risks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Scan diff for critical patterns
+        id: scan
+        run: |
+          set -euo pipefail
+
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          # Added lines only, excluding lockfiles (those are covered by
+          # OSV-Scanner, not this pattern-matching pass).
+          DIFF=$(git diff "$BASE"..."$HEAD" -- . ':!package-lock.json' ':!pnpm-lock.yaml' ':!yarn.lock' || true)
+
+          FINDINGS=""
+
+          # --- New/changed install-lifecycle scripts in package.json ---
+          # Only flags OUR OWN package.json files changing — a compromised
+          # dependency's postinstall lives in node_modules, invisible to a
+          # source diff; OSV-Scanner + a locked/reviewed lockfile is the
+          # control for that half. This half catches a malicious change
+          # landing directly in a PR against our own manifests.
+          LIFECYCLE_HITS=$(echo "$DIFF" | grep -n '^+' \
+            | grep -E '"(pre|post)?(install|prepare)"[[:space:]]*:' \
+            | grep -v '^+++' || true)
+          if [ -n "$LIFECYCLE_HITS" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: install-lifecycle script added or changed
+          \`postinstall\`/\`preinstall\`/\`prepare\` run automatically on \`npm install\`/\`pnpm install\` — no import or execution required. This is the single most common real-world npm supply-chain attack vector.
+
+          **Matches:**
+          \`\`\`
+          ${LIFECYCLE_HITS}
+          \`\`\`
+          "
+          fi
+
+          # --- base64/hex decode piped into eval / new Function ---
+          B64_EVAL_HITS=$(echo "$DIFF" | grep -n '^+' \
+            | grep -iE 'Buffer\.from\([^)]*,\s*["'"'"']((base)?64|hex)["'"'"']\)|atob\(' \
+            | grep -E 'eval\(|new Function\(' \
+            | head -10 || true)
+          if [ -n "$B64_EVAL_HITS" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: decoded string passed to eval/Function
+          A base64/hex-decoded (or \`atob\`-decoded) string flowing directly into \`eval()\` or \`new Function()\` is the signature of a hidden payload.
+
+          **Matches:**
+          \`\`\`
+          ${B64_EVAL_HITS}
+          \`\`\`
+          "
+          fi
+
+          # --- decoded/obfuscated command into child_process exec/spawn ---
+          PROC_HITS=$(echo "$DIFF" | grep -n '^+' \
+            | grep -E '\b(exec|execSync|spawn|spawnSync)\s*\(' \
+            | grep -iE 'Buffer\.from\(|atob\(|\\x[0-9a-f]{2}|fromCharCode' \
+            | head -10 || true)
+          if [ -n "$PROC_HITS" ]; then
+            FINDINGS="${FINDINGS}
+          ### 🚨 CRITICAL: child_process call with encoded/obfuscated command
+          A child_process exec/spawn call whose command is base64/hex-decoded or built from \`fromCharCode\` is a strong indicator of payload execution.
+
+          **Matches:**
+          \`\`\`
+          ${PROC_HITS}
+          \`\`\`
+          "
+          fi
+
+          if [ -n "$FINDINGS" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "$FINDINGS" > /tmp/findings.md
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post critical finding comment
+        if: steps.scan.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY="## 🚨 CRITICAL Supply Chain Risk Detected
+
+          This PR contains a pattern that has been used in real npm/JS supply chain attacks. A maintainer must review the flagged code carefully before merging.
+
+          $(cat /tmp/findings.md)
+
+          ---
+          *Scanner only fires on high-signal indicators: install-lifecycle script changes, base64/hex+eval combos, or child_process calls with encoded commands. Low-signal warnings were intentionally left out — if you're seeing this comment, the finding is worth inspecting.*"
+
+          gh pr comment "${{ github.event.pull_request.number }}" --body "$BODY" || echo "::warning::Could not post PR comment (expected for fork PRs — GITHUB_TOKEN is read-only)"
+
+      - name: Fail on critical findings
+        if: steps.scan.outputs.found == 'true'
+        run: |
+          echo "::error::CRITICAL supply chain risk patterns detected in this PR. See the PR comment for details."
+          exit 1
