@@ -1044,6 +1044,9 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                             />
                             <p className="text-xs text-muted-foreground">
                               Admins can DM, add bot to groups, approve commands, and access global memory.
+                              {platform === 'telegram' && (
+                                <> Entries may be numeric Telegram user IDs or @usernames — @usernames are resolved to IDs automatically.</>
+                              )}
                             </p>
                           </div>
 

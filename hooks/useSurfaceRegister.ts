@@ -113,6 +113,10 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
   // Slack-specific: a second token (app-level xapp- token for Socket Mode)
   const [appToken, setAppToken] = useState('')
   const [botUsername, setBotUsername] = useState('')
+  // Telegram-specific: true when BotFather Group Privacy is ON (getMe reports
+  // can_read_all_group_messages: false) — the bot won't see regular group
+  // messages. Non-blocking warning in the dialog; null = unknown/not checked.
+  const [privacyModeOn, setPrivacyModeOn] = useState<boolean | null>(null)
 
   // ── Signal: daemon health + deploy ────────────────────────────────────────
 
@@ -314,6 +318,7 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
       const data = await res.json()
       if (data.ok) {
         setBotUsername(data.result.username || data.result.first_name || 'Bot')
+        setPrivacyModeOn(data.result.can_read_all_group_messages === false)
         setStep('verified')
       } else {
         setError(data.description || 'Invalid bot token')
@@ -461,6 +466,7 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     setUrl('')
     setAppToken('')
     setBotUsername('')
+    setPrivacyModeOn(null)
   }, [platform, defaultDisplayName])
 
   /**
@@ -507,6 +513,7 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     appToken,
     setAppToken,
     botUsername,
+    privacyModeOn,
     // signal actions
     checkHealth,
     deploy,

@@ -14,18 +14,20 @@ vi.mock('@/lib/services', () => ({
   services: {
     harness: { restart: vi.fn(), get: vi.fn(() => undefined) },
     config: { getSettings: vi.fn(() => ({})) },
+    surfaceAdmins: { syncFromAllowlist: vi.fn() },
   },
 }))
 vi.mock('@/lib/resolvers', () => ({
   resolveIdentifier: vi.fn(async () => null),
   expandSignalAllowlist: vi.fn(async (_id: string, users: string[]) => users),
+  expandTelegramAllowlist: vi.fn(async (_id: string, users: string[]) => users),
 }))
 vi.mock('@/lib/services/harness-compose', () => ({ generateStandaloneCompose: vi.fn(() => '') }))
 vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
 
 import { GET, PUT } from './route'
 import { services } from '@/lib/services'
-import { expandSignalAllowlist } from '@/lib/resolvers'
+import { expandSignalAllowlist, expandTelegramAllowlist } from '@/lib/resolvers'
 
 function makeParams(id: string) {
   return { params: Promise.resolve({ id }) }
@@ -112,6 +114,7 @@ describe('Settings API — PUT', () => {
     const env = writtenEnv()
     expect(env).toContain('SLACK_CHANNEL_POLICY=approved-only')
     expect(env).toContain('SIGNAL_GROUP_INVITE_POLICY=approved-only')
+    expect(env).toContain('TELEGRAM_GROUP_INVITE_POLICY=approved-only')
   })
 
   it('writes SLACK_CHANNEL_POLICY=allow-all when group invite policy is allow-all', async () => {
@@ -127,6 +130,7 @@ describe('Settings API — PUT', () => {
     const env = writtenEnv()
     expect(env).toContain('SLACK_CHANNEL_POLICY=allow-all')
     expect(env).toContain('SIGNAL_GROUP_INVITE_POLICY=allow-all')
+    expect(env).toContain('TELEGRAM_GROUP_INVITE_POLICY=allow-all')
   })
 
   it('expands Signal allowed users to include resolved UUIDs before writing', async () => {
@@ -149,6 +153,58 @@ describe('Settings API — PUT', () => {
     await PUT(makeRequest(body), makeParams('h_test'))
 
     expect(expandSignalAllowlist).toHaveBeenCalledWith('h_test', ['+15550001234'])
+  })
+
+  it('expands Telegram @usernames and syncs the policy-plane admin overlay', async () => {
+    // Two stores hold Telegram admins: the .env allowlist (bootstrap) and the
+    // SurfaceAdminService overlay (served live to the policy plugin). A settings
+    // write must keep them converged — and expand @handles to numeric IDs, since
+    // the gateway matches numeric sender IDs verbatim.
+    ;(expandTelegramAllowlist as ReturnType<typeof vi.fn>).mockResolvedValueOnce(['@juniper', '424242'])
+    const body = {
+      dmPolicy: 'approved-only',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {
+        telegram: {
+          allowedUsers: ['@juniper'],
+          adminUsers: ['@juniper'],
+          allowedGroups: [],
+          allowAll: false,
+          allowAllGroups: false,
+        },
+      },
+    }
+    await PUT(makeRequest(body), makeParams('h_test'))
+
+    expect(expandTelegramAllowlist).toHaveBeenCalledWith('h_test', ['@juniper'])
+    expect(services.surfaceAdmins.syncFromAllowlist).toHaveBeenCalledWith(
+      'h_test', 'telegram', ['@juniper', '424242'],
+    )
+  })
+
+  it('does NOT sync the overlay on an allow-all/empty telegram allowlist (would wipe an explicit admin roster)', async () => {
+    const body = {
+      dmPolicy: 'allow-all',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {
+        telegram: {
+          allowedUsers: [],
+          adminUsers: [],
+          allowedGroups: [],
+          allowAll: true,
+          allowAllGroups: false,
+        },
+      },
+    }
+    await PUT(makeRequest(body), makeParams('h_test'))
+
+    expect(services.surfaceAdmins.syncFromAllowlist).not.toHaveBeenCalled()
   })
 })
 

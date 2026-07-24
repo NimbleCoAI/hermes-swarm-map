@@ -58,6 +58,19 @@ describe('middleware auth gate — token SET', () => {
     expect(passedThrough(await middleware(req('/api/harnesses', 'GET', good)))).toBe(true)
   })
 
+  // --- agent-callable POST: group-invite approval (the ONLY ungated mutation) ---
+  it('POST agent groups path (group-invite approval) → passes ungated', async () => {
+    expect(passedThrough(await middleware(req(AGENT_GROUPS, 'POST')))).toBe(true)
+  })
+  it('PUT / PATCH / DELETE on the groups path are still gated', async () => {
+    for (const m of ['PUT', 'PATCH', 'DELETE']) {
+      expect((await middleware(req(AGENT_GROUPS, m))).status).toBe(401)
+    }
+  })
+  it('POST on the sibling admins path is still gated (only groups is agent-callable)', async () => {
+    expect((await middleware(req(AGENT_ADMIN, 'POST'))).status).toBe(401)
+  })
+
   // --- mutations always require the session ---
   it('POST with no cookie → 401', async () => {
     const res = await middleware(req('/api/harnesses/create', 'POST'))
@@ -104,5 +117,8 @@ describe('middleware auth gate — token UNSET (fail-closed)', () => {
   it('agent-read allowlist still passes so the fleet keeps working', async () => {
     expect(passedThrough(await middleware(req(AGENT_ADMIN, 'GET')))).toBe(true)
     expect(passedThrough(await middleware(req(AGENT_GROUPS, 'GET')))).toBe(true)
+  })
+  it('agent group-invite approval POST still passes (same fleet-keeps-working rationale)', async () => {
+    expect(passedThrough(await middleware(req(AGENT_GROUPS, 'POST')))).toBe(true)
   })
 })

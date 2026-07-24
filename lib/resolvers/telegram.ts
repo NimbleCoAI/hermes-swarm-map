@@ -20,12 +20,17 @@ function getTelegramToken(harnessId: string): string | null {
 /**
  * Resolve a Telegram @username to numeric user ID via getChat.
  * Only works for public users/channels/groups.
+ *
+ * `botToken` overrides the token read from the agent .env — the connect route
+ * passes the token from the request payload because TELEGRAM_BOT_TOKEN may not
+ * be written to the .env yet at connect time.
  */
 export async function resolveTelegramUsername(
   harnessId: string,
-  username: string
+  username: string,
+  botToken?: string
 ): Promise<ResolvedIdentity | null> {
-  const token = getTelegramToken(harnessId)
+  const token = botToken || getTelegramToken(harnessId)
   if (!token) return null
 
   const handle = username.startsWith('@') ? username : `@${username}`

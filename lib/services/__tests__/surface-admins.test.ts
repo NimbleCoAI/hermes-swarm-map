@@ -191,6 +191,172 @@ describe('SurfaceAdminService.setAdmins — authz + validation', () => {
   })
 })
 
+describe('SurfaceAdminService.syncFromAllowlist — store convergence', () => {
+  it('is a no-op when no explicit list exists (bootstrap default already tracks the env)', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
+    svc.syncFromAllowlist('h_seraph', 'telegram', ['111', '222'])
+    expect(storage.read('harnesses.json', [])).toEqual([])
+    expect(audit.append).not.toHaveBeenCalled()
+  })
+
+  it('replaces a stale explicit list with the new allowlist', () => {
+    storage.write('harnesses.json', [
+      { id: 'h_seraph', surfaceAdmins: { telegram: ['999'] } },
+    ])
+    svc.syncFromAllowlist('h_seraph', 'telegram', ['111', '222'])
+    const stored = storage.read<Array<{ id: string; surfaceAdmins?: Record<string, string[]> }>>('harnesses.json', [])
+    expect(stored.find((h) => h.id === 'h_seraph')?.surfaceAdmins?.telegram).toEqual(['111', '222'])
+    // The policy plane now answers from the converged list.
+    expect(svc.isAdmin('h_seraph', 'telegram', '222')).toBe(true)
+    expect(svc.isAdmin('h_seraph', 'telegram', '999')).toBe(false)
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({ what: 'surface-admins:sync:telegram', target: 'h_seraph' }),
+    )
+  })
+
+  it('drops invalid entries (raw @handles, wildcards) and dedupes — never stores an unresolved handle', () => {
+    storage.write('harnesses.json', [
+      { id: 'h_seraph', surfaceAdmins: { telegram: ['999'] } },
+    ])
+    svc.syncFromAllowlist('h_seraph', 'telegram', ['@juniper', '111', '*', '111'])
+    const stored = storage.read<Array<{ id: string; surfaceAdmins?: Record<string, string[]> }>>('harnesses.json', [])
+    expect(stored.find((h) => h.id === 'h_seraph')?.surfaceAdmins?.telegram).toEqual(['111'])
+  })
+
+  it('does not touch other platforms on the same overlay', () => {
+    storage.write('harnesses.json', [
+      { id: 'h_seraph', surfaceAdmins: { telegram: ['999'], signal: ['+64111'] } },
+    ])
+    svc.syncFromAllowlist('h_seraph', 'telegram', ['111'])
+    const stored = storage.read<Array<{ id: string; surfaceAdmins?: Record<string, string[]> }>>('harnesses.json', [])
+    expect(stored.find((h) => h.id === 'h_seraph')?.surfaceAdmins?.signal).toEqual(['+64111'])
+  })
+
+  it('ignores unsupported platforms', () => {
+    storage.write('harnesses.json', [
+      { id: 'h_seraph', surfaceAdmins: { telegram: ['999'] } },
+    ])
+    svc.syncFromAllowlist('h_seraph', 'whatsapp', ['111'])
+    const stored = storage.read<Array<{ id: string; surfaceAdmins?: Record<string, string[]> }>>('harnesses.json', [])
+    expect(stored.find((h) => h.id === 'h_seraph')?.surfaceAdmins?.telegram).toEqual(['999'])
+  })
+})
+
+describe('SurfaceAdminService.approveGroupInvite — policy × admin matrix', () => {
+  function agentEnvContent(harnessName: string): string {
+    return fs.readFileSync(path.join(home, `.hermes-${harnessName}`, '.env'), 'utf-8')
+  }
+
+  it('approves and appends when policy is unset (approved-only default) and the adder is an admin', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_ALLOWED_CHATS=\n')
+    const res = svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')
+    expect(res).toEqual({ ok: true, approved: true, updated: true })
+    expect(agentEnvContent('seraph')).toContain('TELEGRAM_GROUP_ALLOWED_CHATS=-100777')
+    expect(svc.isGroupAllowed('h_seraph', 'telegram', '-100777')).toBe(true)
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({ who: '111', what: 'surface-groups:approve:telegram', target: 'h_seraph' }),
+    )
+  })
+
+  it('rejects (approved: false, no write) when the adder is not an admin', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_ALLOWED_CHATS=g1\n')
+    const res = svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '222')
+    expect(res).toMatchObject({ ok: true, approved: false })
+    if (res.ok && !res.approved) expect(res.reason).toContain('not an admin')
+    expect(agentEnvContent('seraph')).not.toContain('-100777')
+  })
+
+  it('approves for a non-admin when policy is allow-all, and appends', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_INVITE_POLICY=allow-all\n')
+    const res = svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '222')
+    expect(res).toEqual({ ok: true, approved: true, updated: true })
+    expect(agentEnvContent('seraph')).toContain('TELEGRAM_GROUP_ALLOWED_CHATS=-100777')
+  })
+
+  it('rejects a non-admin under an explicit approved-only policy', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_INVITE_POLICY=approved-only\n')
+    expect(svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '222')).toMatchObject({
+      ok: true,
+      approved: false,
+    })
+  })
+
+  it('honors the explicit admin overlay for the admin check', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
+    storage.write('harnesses.json', [
+      { id: 'h_seraph', surfaceAdmins: { telegram: ['222'] } },
+    ])
+    expect(svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')).toMatchObject({ approved: false })
+    expect(svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '222')).toMatchObject({ approved: true })
+  })
+
+  it('is a no-write approval when the allowlist is the * wildcard', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_ALLOWED_CHATS=*\n')
+    const res = svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')
+    expect(res).toEqual({ ok: true, approved: true, updated: false })
+    expect(agentEnvContent('seraph')).toContain('TELEGRAM_GROUP_ALLOWED_CHATS=*')
+  })
+
+  it('is a no-write approval when the group is already listed', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_ALLOWED_CHATS=-100777\n')
+    const res = svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')
+    expect(res).toEqual({ ok: true, approved: true, updated: false })
+  })
+
+  it('appends without clobbering existing groups', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\nTELEGRAM_GROUP_ALLOWED_CHATS=-100111\n')
+    svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')
+    expect(agentEnvContent('seraph')).toContain('TELEGRAM_GROUP_ALLOWED_CHATS=-100111,-100777')
+  })
+
+  it('rejects structurally invalid group ids with 400 (env injection guard)', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
+    // '$'/backtick: String.replace replacement patterns ("x$`" splices the
+    // preceding file content — incl. the bot token line — into the allowlist).
+    for (const bad of ['*', '', 'g1,g2', 'g1\nKEY=val', 'a b', 'g#1', "g'1", 'x$`', 'x$&', 'g$1', 'g`id`']) {
+      expect(svc.approveGroupInvite('h_seraph', 'telegram', bad, '111')).toMatchObject({ ok: false, status: 400 })
+    }
+  })
+
+  it('inserts the allowlist value literally even if a replacement-pattern char reached the write', () => {
+    // Belt-and-braces for the replacer-function fix: token line must survive
+    // verbatim and the value may not splice file content.
+    writeAgentEnv(
+      'seraph',
+      'TELEGRAM_BOT_TOKEN=secretAAA\nTELEGRAM_GROUP_ALLOWED_CHATS=-100111\nTELEGRAM_ALLOWED_USERS=111\n',
+    )
+    svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')
+    const content = agentEnvContent('seraph')
+    expect(content).toContain('TELEGRAM_BOT_TOKEN=secretAAA\n')
+    expect(content).toContain('TELEGRAM_GROUP_ALLOWED_CHATS=-100111,-100777')
+    expect(content.match(/TELEGRAM_BOT_TOKEN=/g)).toHaveLength(1)
+  })
+
+  it('rejects an oversized addedByUserId with 400 (audit-log spam guard)', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
+    expect(
+      svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '9'.repeat(129)),
+    ).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('rejects a missing addedByUserId and an unsupported platform with 400', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
+    expect(svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '')).toMatchObject({ ok: false, status: 400 })
+    expect(svc.approveGroupInvite('h_seraph', 'whatsapp', '-100777', '111')).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('rejects when the agent .env does not exist', () => {
+    expect(svc.approveGroupInvite('h_ghost', 'telegram', '-100777', '111')).toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('works for signal too (shared invite-policy plumbing)', () => {
+    writeAgentEnv('seraph', 'SIGNAL_ALLOWED_USERS=+64111\nSIGNAL_GROUP_INVITE_POLICY=approved-only\n')
+    const res = svc.approveGroupInvite('h_seraph', 'signal', 'group.abc', '+64111')
+    expect(res).toMatchObject({ ok: true, approved: true, updated: true })
+    expect(agentEnvContent('seraph')).toContain('SIGNAL_GROUP_ALLOWED_USERS=group.abc')
+  })
+})
+
 describe('SurfaceAdminService.isGroupAllowed', () => {
   it('is true for a listed group and for a wildcard', () => {
     writeAgentEnv('seraph', 'SIGNAL_GROUP_ALLOWED_USERS=g1,g2\n')

@@ -407,18 +407,37 @@ function TelegramBody({ s, onClose }: { s: Hook; onClose: () => void }) {
             </div>
           )}
 
+          {/* Non-blocking: with Group Privacy ON the bot still connects, it just
+              won't see unaddressed group messages until privacy is disabled. */}
+          {step !== 'input' && s.privacyModeOn === true && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-[var(--warning)]/10 border border-[var(--warning)]/20">
+              <AlertTriangle className="h-5 w-5 text-[var(--warning)] shrink-0 mt-0.5" />
+              <div className="space-y-1 text-sm">
+                <p className="font-medium">Group Privacy is ON</p>
+                <p className="text-muted-foreground">
+                  The bot will not see regular group messages — only commands and @mentions.
+                  To disable: message <strong>@BotFather</strong> &rarr; <code>/setprivacy</code> &rarr; <strong>Disable</strong>.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  After changing it, the bot must be removed and re-added to any groups it is already in.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1">
-            <label className="text-sm font-medium">Admin (optional)</label>
+            <label className="text-sm font-medium">Admins (optional)</label>
             <input
               type="text"
               value={s.adminUser}
               onChange={(e) => s.setAdminUser(e.target.value)}
-              placeholder="Your Telegram user ID or @username"
+              placeholder="123456789, @username"
               className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm"
               disabled={step === 'verifying' || step === 'connecting'}
             />
             <p className="text-xs text-muted-foreground">
-              Who can manage this bot. Numeric user ID or @username.
+              Who can manage this bot. One or more entries, comma-separated — numeric
+              Telegram user IDs or @usernames; @usernames are resolved to IDs automatically.
             </p>
           </div>
 
