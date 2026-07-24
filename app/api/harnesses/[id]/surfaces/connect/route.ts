@@ -4,7 +4,7 @@ import path from 'path'
 import os from 'os'
 import { buildConnectEnvVars, mergeEnvVars, ensurePolicyDefaults, getSignalDaemonUrl } from '@/lib/env-helpers'
 import { services } from '@/lib/services'
-import { expandSignalAllowlist } from '@/lib/resolvers'
+import { expandSignalAllowlist, resolveTelegramAdmins, type ResolvedIdentity } from '@/lib/resolvers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -65,6 +65,8 @@ export async function POST(
   }
 
   // If adminUser is provided, set the platform's ALLOWED_USERS var
+  // (comma-separated for multiple admins)
+  let telegramAdmins: { ids: string[]; resolved: ResolvedIdentity[] } | undefined
   if (config.adminUser) {
     const allowedUsersKey: Record<string, string> = {
       signal: 'SIGNAL_ALLOWED_USERS',
@@ -80,6 +82,19 @@ export async function POST(
         // only the UUID, so a phone-only allowlist silently rejects the admin.
         const expanded = await expandSignalAllowlist(id, config.adminUser.split(','))
         envVars[key] = expanded.join(',')
+      } else if (platform === 'telegram') {
+        // Resolve @usernames to numeric user IDs — the gateway matches inbound
+        // sender IDs (always numeric) against TELEGRAM_ALLOWED_USERS verbatim,
+        // so a raw @handle silently locks the admin out. STRICT: a handle that
+        // fails to resolve is a 400 (surfaced inline in the connect dialog),
+        // never stored raw. The token comes from the request payload because
+        // TELEGRAM_BOT_TOKEN may not be in the agent .env yet at connect time.
+        const resolution = await resolveTelegramAdmins(id, config.adminUser.split(','), config.token)
+        if (!resolution.ok) {
+          return NextResponse.json({ error: resolution.error }, { status: 400 })
+        }
+        envVars[key] = resolution.ids.join(',')
+        telegramAdmins = resolution
       } else {
         envVars[key] = config.adminUser
       }
@@ -103,6 +118,27 @@ export async function POST(
   content = ensurePolicyDefaults(content, platform)
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  if (telegramAdmins) {
+    // Persist display names the same way the settings path does (merged, not
+    // clobbered — connect only knows about telegram), so the settings UI can
+    // show "@handle (Name)" next to the numeric ID.
+    const resolvedPath = path.join(dataDir, 'resolved-identities.json')
+    let resolvedMap: Record<string, ResolvedIdentity[]> = {}
+    try {
+      resolvedMap = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8'))
+    } catch {}
+    resolvedMap.telegram = telegramAdmins.resolved
+    try {
+      fs.writeFileSync(resolvedPath, JSON.stringify(resolvedMap, null, 2), { mode: 0o600 })
+    } catch {}
+
+    // Keep the policy-plane admin overlay (SurfaceAdminService) converged with
+    // the allowlist we just wrote — the two stores must never diverge.
+    try {
+      services.surfaceAdmins.syncFromAllowlist(id, 'telegram', telegramAdmins.ids)
+    } catch {}
+  }
 
   // Recreate the container so the new env_file actually takes effect. Writing
   // .env alone leaves the running gateway on the OLD environment (a stale

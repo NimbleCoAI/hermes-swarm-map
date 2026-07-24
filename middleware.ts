@@ -46,8 +46,29 @@ const AGENT_READABLE_GET_PATHS: RegExp[] = [
   /^\/api\/harnesses\/[^/]+\/policy$/,                          // agent .env policy read
 ]
 
+// The ONLY POST path agents call at runtime: group-invite approval ("user X
+// just added me to group Y — approved?"). The plugin cannot obtain the operator
+// cookie, so this rides the same exemption as the agent reads above.
+//
+// TRUST MODEL: the caller self-reports addedByUserId — the server cannot verify
+// who really performed the platform-side invite, so any local process could
+// claim an admin's ID. What bounds the blast radius: the handler can ONLY
+// append one structurally-validated groupId to that surface's group allowlist
+// (never admins, tokens, or any other env var), the invite policy + admin check
+// still gate it, and every approval is audit-logged with the claimed actor.
+// This mirrors the trust already extended to the agent's is_admin /
+// is_group_allowed reads, which the same plugin acts on.
+const AGENT_CALLABLE_POST_PATHS: RegExp[] = [
+  /^\/api\/harnesses\/[^/]+\/surfaces\/[^/]+\/groups\/[^/]+$/,  // group-invite approval
+]
+
 function requiresAuth(method: string, pathname: string): boolean {
-  if (MUTATING_METHODS.has(method)) return true
+  if (MUTATING_METHODS.has(method)) {
+    if (method === 'POST' && AGENT_CALLABLE_POST_PATHS.some((re) => re.test(pathname))) {
+      return false
+    }
+    return true
+  }
   if (READ_METHODS.has(method)) {
     return !AGENT_READABLE_GET_PATHS.some((re) => re.test(pathname))
   }

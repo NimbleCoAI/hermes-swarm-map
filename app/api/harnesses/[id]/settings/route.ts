@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
-import { resolveIdentifier, expandSignalAllowlist } from '@/lib/resolvers'
+import { resolveIdentifier, expandSignalAllowlist, expandTelegramAllowlist } from '@/lib/resolvers'
 import { services } from '@/lib/services'
 import { adapterForRuntime } from '@/lib/services/harness'
 
@@ -57,9 +57,12 @@ type SurfaceSettings = {
 // each connected surface honors the same approved-only/allow-all choice. Slack's
 // runtime reads SLACK_CHANNEL_POLICY (approved-only = empty SLACK_ALLOWED_CHANNELS
 // means NO channels approved; allow-all = empty means respond everywhere).
+// Telegram's var is enforced by the group-approval POST endpoint
+// (surfaces/[platform]/groups/[groupId]) that the swarm_map_policy plugin calls.
 const GROUP_INVITE_VARS: Record<string, string> = {
   signal: 'SIGNAL_GROUP_INVITE_POLICY',
   slack: 'SLACK_CHANNEL_POLICY',
+  telegram: 'TELEGRAM_GROUP_INVITE_POLICY',
 }
 
 // Env var names for mention-gating per platform
@@ -235,6 +238,10 @@ export async function PUT(
 
   let content = fs.readFileSync(envPath, 'utf-8')
 
+  // Telegram allowlist as written to the env — captured so the policy-plane
+  // admin overlay (SurfaceAdminService) can be synced after the env write.
+  let telegramAllowlist: string[] | undefined
+
   for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
     const settings = body.surfaces[platform]
     if (!settings) continue
@@ -246,6 +253,15 @@ export async function PUT(
     let allowedUsers = settings.allowedUsers
     if (platform === 'signal' && allowedUsers.length > 0) {
       allowedUsers = await expandSignalAllowlist(id, allowedUsers)
+    }
+    // For Telegram, expand @usernames to also include their resolved numeric
+    // ID — the gateway matches numeric sender IDs verbatim, so an
+    // @username-only entry never matches anyone (see expandTelegramAllowlist).
+    if (platform === 'telegram') {
+      if (allowedUsers.length > 0) {
+        allowedUsers = await expandTelegramAllowlist(id, allowedUsers)
+      }
+      telegramAllowlist = allowedUsers
     }
     const usersValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, allowedUsers)
     const usersRegex = new RegExp(`^${vars.users}=.*$`, 'm')
@@ -362,6 +378,15 @@ export async function PUT(
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  // Keep the policy-plane admin overlay converged with the Telegram allowlist
+  // just written — the two admin stores must never diverge. Non-numeric entries
+  // (raw @handles) are dropped by the sync's validation, never stored.
+  if (telegramAllowlist !== undefined) {
+    try {
+      services.surfaceAdmins.syncFromAllowlist(id, 'telegram', telegramAllowlist)
+    } catch {}
+  }
 
   // Per-harness resource limits (compose deploy.resources.limits — NOT env vars).
   // Persist on the harness overlay and detect a change so the compose is only
