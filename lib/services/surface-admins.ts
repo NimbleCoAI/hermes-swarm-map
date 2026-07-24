@@ -20,6 +20,25 @@ const ALLOWED_USERS_VARS: Record<string, string> = {
   slack: 'SLACK_ALLOWED_USERS',
 }
 
+// Per-platform group/channel allowlist env var (which groups the agent responds
+// in). Shared by isGroupAllowed and approveGroupInvite.
+const GROUP_ALLOWED_VARS: Record<string, string> = {
+  signal: 'SIGNAL_GROUP_ALLOWED_USERS',
+  telegram: 'TELEGRAM_GROUP_ALLOWED_CHATS',
+  mattermost: 'MATTERMOST_ALLOWED_CHANNELS',
+  discord: 'DISCORD_ALLOWED_CHANNELS',
+  slack: 'SLACK_ALLOWED_CHANNELS',
+}
+
+// Per-platform group-invite policy env var (who may add the agent to groups).
+// Must stay in step with GROUP_INVITE_VARS in the settings route, which writes
+// these from the single UI toggle. Unset = approved-only (secure default).
+const GROUP_INVITE_POLICY_VARS: Record<string, string> = {
+  signal: 'SIGNAL_GROUP_INVITE_POLICY',
+  slack: 'SLACK_CHANNEL_POLICY',
+  telegram: 'TELEGRAM_GROUP_INVITE_POLICY',
+}
+
 export const SUPPORTED_SURFACES = Object.keys(ALLOWED_USERS_VARS)
 
 export function isSupportedSurface(platform: string): boolean {
@@ -264,20 +283,64 @@ export class SurfaceAdminService {
   }
 
   /**
+   * Keep the explicit admin overlay converged with the surface's DM allowlist
+   * after an OPERATOR write to the ALLOWED_USERS env var (surface connect or
+   * settings PUT).
+   *
+   * Why: the two admin stores can diverge — the overlay is HSM-side policy
+   * served live, while ALLOWED_USERS is the bootstrap set. If an operator
+   * rewrites the allowlist while a stale explicit overlay exists, the policy
+   * plane keeps answering from the stale list. This replaces the explicit list
+   * with the valid identities from the new allowlist — but ONLY when an
+   * explicit list already exists. With no explicit list, listAdmins already
+   * reads the allowlist live (bootstrap default), so there is nothing to sync
+   * and writing one would change the setAdmins bootstrap-actor semantics.
+   *
+   * No actor check: this is not a surface-identity mutation — it runs inside
+   * operator-transport-gated routes (middleware.ts) as a side effect of the env
+   * write the operator just made. Invalid entries (wildcards, unresolved
+   * @handles) are dropped, never stored.
+   */
+  syncFromAllowlist(harnessId: string, platform: string, allowlist: string[]): void {
+    if (!isSupportedSurface(platform)) return
+    const overlays = this.readOverlays()
+    const idx = overlays.findIndex((h) => h.id === harnessId)
+    const existing = idx !== -1 ? overlays[idx].surfaceAdmins?.[platform] : undefined
+    if (!Array.isArray(existing)) return // no explicit list → bootstrap default already tracks the env
+
+    const cleaned: string[] = []
+    const seen = new Set<string>()
+    for (const entry of allowlist) {
+      if (!isValidIdentity(platform, entry)) continue
+      const id = entry.trim()
+      if (!seen.has(id)) {
+        seen.add(id)
+        cleaned.push(id)
+      }
+    }
+
+    overlays[idx] = {
+      ...overlays[idx],
+      surfaceAdmins: { ...overlays[idx].surfaceAdmins, [platform]: cleaned },
+    }
+    this.storage.write(HARNESSES_FILE, overlays)
+
+    this.audit?.append({
+      who: 'operator',
+      what: `surface-admins:sync:${platform}`,
+      target: harnessId,
+      meta: { count: cleaned.length },
+    })
+  }
+
+  /**
    * Is `groupId` allowed on `platform` for this harness? Mirrors the existing
    * /policy?action=group-check logic, exposed at the REST path the plugin's
    * is_group_allowed() calls. Fail-closed; wildcard '*' means all groups.
    */
   isGroupAllowed(harnessId: string, platform: string, groupId: string): boolean {
     if (!harnessId || !platform || !groupId) return false
-    const groupVars: Record<string, string> = {
-      signal: 'SIGNAL_GROUP_ALLOWED_USERS',
-      telegram: 'TELEGRAM_GROUP_ALLOWED_CHATS',
-      mattermost: 'MATTERMOST_ALLOWED_CHANNELS',
-      discord: 'DISCORD_ALLOWED_CHANNELS',
-      slack: 'SLACK_ALLOWED_CHANNELS',
-    }
-    const varName = groupVars[platform]
+    const varName = GROUP_ALLOWED_VARS[platform]
     if (!varName) return false
     try {
       const env = parseEnvFile(path.join(agentDataDir(harnessId), '.env'))
@@ -287,5 +350,93 @@ export class SurfaceAdminService {
     } catch {
       return false
     }
+  }
+
+  /**
+   * Group-invite enforcement for the swarm_map_policy plugin: the agent was
+   * just added to `groupId` by `addedByUserId` — approve or reject the invite.
+   *
+   * - Policy 'allow-all': anyone may add the agent → approved; the group is
+   *   appended to the allowlist so the agent actually responds there.
+   * - Policy 'approved-only' (or unset — the secure default): approved only
+   *   when `addedByUserId` is an admin (isAdmin, fail-closed), in which case
+   *   the group is appended to the allowlist.
+   * - A '*' allowlist or an already-listed group approves without a write
+   *   (updated: false — no container recreate needed).
+   *
+   * `groupId` is structurally validated before it touches the .env (same
+   * injection guard rationale as isValidIdentity — a comma/newline in the value
+   * would corrupt the allowlist or inject env lines).
+   *
+   * The caller (route) recreates the container when `updated` is true, matching
+   * every other env-writing route.
+   */
+  approveGroupInvite(
+    harnessId: string,
+    platform: string,
+    groupId: string,
+    addedByUserId: string,
+  ):
+    | { ok: true; approved: true; updated: boolean }
+    | { ok: true; approved: false; reason: string }
+    | { ok: false; status: 400; error: string } {
+    const varName = GROUP_ALLOWED_VARS[platform]
+    if (!varName) {
+      return { ok: false, status: 400, error: `Unsupported platform: ${platform}` }
+    }
+    // Structural guard before the value touches the .env: no whitespace/control
+    // chars (line injection), no comma (list separator), no comment/quote chars.
+    // '=' is deliberately allowed — Signal group IDs are base64 ('=' padding),
+    // and only the FIRST '=' on a line splits key from value.
+    const group = typeof groupId === 'string' ? groupId.trim() : ''
+    if (!group || group.length > 128 || group === '*' || /[\s,;#'"]/.test(group)) {
+      return { ok: false, status: 400, error: 'Invalid group id' }
+    }
+    const actor = typeof addedByUserId === 'string' ? addedByUserId.trim() : ''
+    if (!actor) {
+      return { ok: false, status: 400, error: 'addedByUserId is required' }
+    }
+
+    const envPath = path.join(agentDataDir(harnessId), '.env')
+    if (!fs.existsSync(envPath)) {
+      return { ok: false, status: 400, error: 'Agent .env not found' }
+    }
+    const env = parseEnvFile(envPath)
+
+    // Unset defaults to approved-only — the secure default everywhere else.
+    const policyVar = GROUP_INVITE_POLICY_VARS[platform]
+    const policy = policyVar ? env[policyVar] : undefined
+    if (policy !== 'allow-all' && !this.isAdmin(harnessId, platform, actor)) {
+      return {
+        ok: true,
+        approved: false,
+        reason: 'group invite policy is approved-only and the inviting user is not an admin',
+      }
+    }
+
+    const raw = env[varName]
+    if (raw === '*' || parseCommaList(raw).includes(group)) {
+      return { ok: true, approved: true, updated: false }
+    }
+
+    // Append the group to the allowlist line (create it if absent).
+    const value = [...parseCommaList(raw), group].join(',')
+    let content = fs.readFileSync(envPath, 'utf-8')
+    const regex = new RegExp(`^${varName}=.*$`, 'm')
+    if (regex.test(content)) {
+      content = content.replace(regex, `${varName}=${value}`)
+    } else {
+      content = content.trimEnd() + `\n${varName}=${value}\n`
+    }
+    fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+    this.audit?.append({
+      who: actor,
+      what: `surface-groups:approve:${platform}`,
+      target: harnessId,
+      meta: { groupId: group },
+    })
+
+    return { ok: true, approved: true, updated: true }
   }
 }
