@@ -261,12 +261,18 @@ export async function PUT(
       if (allowedUsers.length > 0) {
         allowedUsers = await expandTelegramAllowlist(id, allowedUsers)
       }
-      telegramAllowlist = allowedUsers
+      // Only converge the admin overlay against a concrete allowlist. An
+      // allow-all/empty policy writes '*' or '' here — syncing that would
+      // silently wipe an explicitly-configured admin roster because of an
+      // unrelated DM-policy toggle.
+      if (allowedUsers.length > 0) {
+        telegramAllowlist = allowedUsers
+      }
     }
     const usersValue = buildSettingsEnvValue(body.dmPolicy, settings.allowAll, allowedUsers)
     const usersRegex = new RegExp(`^${vars.users}=.*$`, 'm')
     if (usersRegex.test(content)) {
-      content = content.replace(usersRegex, `${vars.users}=${usersValue}`)
+      content = content.replace(usersRegex, () => `${vars.users}=${usersValue}`)
     } else {
       content = content.trimEnd() + `\n${vars.users}=${usersValue}\n`
     }

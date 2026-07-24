@@ -385,16 +385,17 @@ export class SurfaceAdminService {
       return { ok: false, status: 400, error: `Unsupported platform: ${platform}` }
     }
     // Structural guard before the value touches the .env: no whitespace/control
-    // chars (line injection), no comma (list separator), no comment/quote chars.
+    // chars (line injection), no comma (list separator), no comment/quote chars,
+    // no '$'/backtick (String.replace replacement patterns + shell expansion).
     // '=' is deliberately allowed — Signal group IDs are base64 ('=' padding),
     // and only the FIRST '=' on a line splits key from value.
     const group = typeof groupId === 'string' ? groupId.trim() : ''
-    if (!group || group.length > 128 || group === '*' || /[\s,;#'"]/.test(group)) {
+    if (!group || group.length > 128 || group === '*' || /[\s,;#'"$`]/.test(group)) {
       return { ok: false, status: 400, error: 'Invalid group id' }
     }
     const actor = typeof addedByUserId === 'string' ? addedByUserId.trim() : ''
-    if (!actor) {
-      return { ok: false, status: 400, error: 'addedByUserId is required' }
+    if (!actor || actor.length > 128) {
+      return { ok: false, status: 400, error: 'addedByUserId is required (max 128 chars)' }
     }
 
     const envPath = path.join(agentDataDir(harnessId), '.env')
@@ -424,7 +425,10 @@ export class SurfaceAdminService {
     let content = fs.readFileSync(envPath, 'utf-8')
     const regex = new RegExp(`^${varName}=.*$`, 'm')
     if (regex.test(content)) {
-      content = content.replace(regex, `${varName}=${value}`)
+      // Replacer function: the value must be inserted literally — a bare string
+      // here would expand `$&`/`` $` ``-style replacement patterns and splice
+      // surrounding .env content into the line.
+      content = content.replace(regex, () => `${varName}=${value}`)
     } else {
       content = content.trimEnd() + `\n${varName}=${value}\n`
     }

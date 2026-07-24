@@ -311,9 +311,32 @@ describe('SurfaceAdminService.approveGroupInvite — policy × admin matrix', ()
 
   it('rejects structurally invalid group ids with 400 (env injection guard)', () => {
     writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
-    for (const bad of ['*', '', 'g1,g2', 'g1\nKEY=val', 'a b', 'g#1', "g'1"]) {
+    // '$'/backtick: String.replace replacement patterns ("x$`" splices the
+    // preceding file content — incl. the bot token line — into the allowlist).
+    for (const bad of ['*', '', 'g1,g2', 'g1\nKEY=val', 'a b', 'g#1', "g'1", 'x$`', 'x$&', 'g$1', 'g`id`']) {
       expect(svc.approveGroupInvite('h_seraph', 'telegram', bad, '111')).toMatchObject({ ok: false, status: 400 })
     }
+  })
+
+  it('inserts the allowlist value literally even if a replacement-pattern char reached the write', () => {
+    // Belt-and-braces for the replacer-function fix: token line must survive
+    // verbatim and the value may not splice file content.
+    writeAgentEnv(
+      'seraph',
+      'TELEGRAM_BOT_TOKEN=secretAAA\nTELEGRAM_GROUP_ALLOWED_CHATS=-100111\nTELEGRAM_ALLOWED_USERS=111\n',
+    )
+    svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '111')
+    const content = agentEnvContent('seraph')
+    expect(content).toContain('TELEGRAM_BOT_TOKEN=secretAAA\n')
+    expect(content).toContain('TELEGRAM_GROUP_ALLOWED_CHATS=-100111,-100777')
+    expect(content.match(/TELEGRAM_BOT_TOKEN=/g)).toHaveLength(1)
+  })
+
+  it('rejects an oversized addedByUserId with 400 (audit-log spam guard)', () => {
+    writeAgentEnv('seraph', 'TELEGRAM_ALLOWED_USERS=111\n')
+    expect(
+      svc.approveGroupInvite('h_seraph', 'telegram', '-100777', '9'.repeat(129)),
+    ).toMatchObject({ ok: false, status: 400 })
   })
 
   it('rejects a missing addedByUserId and an unsupported platform with 400', () => {

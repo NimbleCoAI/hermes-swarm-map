@@ -184,6 +184,28 @@ describe('Settings API — PUT', () => {
       'h_test', 'telegram', ['@juniper', '424242'],
     )
   })
+
+  it('does NOT sync the overlay on an allow-all/empty telegram allowlist (would wipe an explicit admin roster)', async () => {
+    const body = {
+      dmPolicy: 'allow-all',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {
+        telegram: {
+          allowedUsers: [],
+          adminUsers: [],
+          allowedGroups: [],
+          allowAll: true,
+          allowAllGroups: false,
+        },
+      },
+    }
+    await PUT(makeRequest(body), makeParams('h_test'))
+
+    expect(services.surfaceAdmins.syncFromAllowlist).not.toHaveBeenCalled()
+  })
 })
 
 describe('Settings API — GET mention-gating reflects the runtime', () => {
