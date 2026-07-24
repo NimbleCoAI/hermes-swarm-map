@@ -200,7 +200,10 @@ describe('useSurfaceRegister — telegram', () => {
         onConnected,
       })
     )
-    act(() => { result.current.setToken('123456:ABCdef') })
+    act(() => {
+      result.current.setToken('123456:ABCdef')
+      result.current.setAdminUser('123456789, @juniper')
+    })
     await act(async () => { await result.current.verify() })
     expect(result.current.step).toBe('verified')
 
@@ -211,8 +214,49 @@ describe('useSurfaceRegister — telegram', () => {
     const connectCall = fetchFn.mock.calls.find((c) => String(c[0]).includes('/surfaces/connect'))
     const body = bodyOf(connectCall!)
     expect(body.platform).toBe('telegram')
-    expect(body.config).toMatchObject({ token: '123456:ABCdef' })
+    // Multiple admins ride as a comma-separated adminUser; the connect route
+    // splits, resolves @handles, and normalizes to numeric IDs server-side.
+    expect(body.config).toMatchObject({ token: '123456:ABCdef', adminUser: '123456789, @juniper' })
     expect(onConnected).toHaveBeenCalled()
+  })
+
+  it('flags privacy mode when getMe reports can_read_all_group_messages: false', async () => {
+    mockFetch((url) => {
+      if (url.includes('api.telegram.org'))
+        return { ok: true, result: { username: 'mybot', can_read_all_group_messages: false } }
+      return {}
+    })
+    const { result } = renderHook(() =>
+      useSurfaceRegister({
+        platform: 'telegram',
+        target: { kind: 'harness', harnessId: 'h_tg' },
+        onConnected: vi.fn(),
+      })
+    )
+    expect(result.current.privacyModeOn).toBeNull() // unknown before verify
+    act(() => { result.current.setToken('123456:ABCdef') })
+    await act(async () => { await result.current.verify() })
+    expect(result.current.step).toBe('verified')
+    // Non-blocking: verified is still reached; the dialog shows a warning.
+    expect(result.current.privacyModeOn).toBe(true)
+  })
+
+  it('does not flag privacy mode when getMe reports can_read_all_group_messages: true', async () => {
+    mockFetch((url) => {
+      if (url.includes('api.telegram.org'))
+        return { ok: true, result: { username: 'mybot', can_read_all_group_messages: true } }
+      return {}
+    })
+    const { result } = renderHook(() =>
+      useSurfaceRegister({
+        platform: 'telegram',
+        target: { kind: 'harness', harnessId: 'h_tg' },
+        onConnected: vi.fn(),
+      })
+    )
+    act(() => { result.current.setToken('123456:ABCdef') })
+    await act(async () => { await result.current.verify() })
+    expect(result.current.privacyModeOn).toBe(false)
   })
 
   it('pending mode: getMe verifies then captures { token } without connect', async () => {
