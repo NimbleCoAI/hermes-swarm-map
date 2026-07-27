@@ -265,6 +265,10 @@ services:
       - ENABLE_VNC=true
       - VNC_BIND=0.0.0.0
       - VNC_RESOLUTION=1280x720
+      # Human-in-the-loop flows (VNC checkout/login handoff) generate no API
+      # activity, and the camofox server's 5-minute default reaps the browser
+      # mid-payment. One hour keeps sessions alive across a human handoff.
+      - BROWSER_IDLE_TIMEOUT_MS=3600000
     volumes:
       - ${agentDataDir}/.camofox:/data
 ${ollamaBlock}
