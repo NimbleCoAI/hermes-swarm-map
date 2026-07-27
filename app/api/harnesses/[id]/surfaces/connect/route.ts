@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { buildConnectEnvVars, mergeEnvVars, ensurePolicyDefaults, getSignalDaemonUrl } from '@/lib/env-helpers'
+import { setPlatformEnabled } from '@/lib/config-yaml-helpers'
 import { services } from '@/lib/services'
 import { expandSignalAllowlist, resolveTelegramAdmins, type ResolvedIdentity } from '@/lib/resolvers'
 
@@ -118,6 +119,20 @@ export async function POST(
   content = ensurePolicyDefaults(content, platform)
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  // Enable the platform in config.yaml — the gateway only starts platforms
+  // with `platforms.<p>.enabled: true` (gateway/run.py), so env vars alone
+  // leave the surface silently dead. Surgical line edit; comments preserved.
+  // Missing config.yaml = agent not yet deployed; the deploy template writes
+  // the block itself, so skip gracefully.
+  const configPath = path.join(dataDir, 'config.yaml')
+  if (fs.existsSync(configPath)) {
+    const configContent = fs.readFileSync(configPath, 'utf-8')
+    const updated = setPlatformEnabled(configContent, platform, true)
+    if (updated !== configContent) {
+      fs.writeFileSync(configPath, updated, 'utf-8')
+    }
+  }
 
   if (telegramAdmins) {
     // Persist display names the same way the settings path does (merged, not

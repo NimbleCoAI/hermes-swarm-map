@@ -277,3 +277,26 @@ describe('generateDefaultConfig plugins.enabled', () => {
     expect(out).not.toMatch(/^plugins:/m)
   })
 })
+
+describe('generateDefaultConfig platforms enablement', () => {
+  const baseParams = { provider: 'anthropic', primaryModel: 'claude-sonnet-4-5' }
+
+  it('emits platforms.<p>.enabled: true for each surface chosen at deploy time', () => {
+    const out = generateDefaultConfig({ ...baseParams, enabledPlatforms: ['discord', 'telegram'] })
+    expect(out).toMatch(/^platforms:$/m)
+    expect(out).toContain('  discord:\n    enabled: true')
+    expect(out).toContain('  telegram:\n    enabled: true')
+  })
+
+  it('omits the platforms block when no surfaces are chosen', () => {
+    const out = generateDefaultConfig(baseParams)
+    expect(out).not.toMatch(/^platforms:/m)
+    // platform_toolsets stays regardless — it is a different key.
+    expect(out).toContain('platform_toolsets:')
+  })
+
+  it('rejects unknown platform slugs (never spliced into the file)', () => {
+    expect(() => generateDefaultConfig({ ...baseParams, enabledPlatforms: ['irc'] })).toThrow(/Unknown platform/)
+    expect(() => generateDefaultConfig({ ...baseParams, enabledPlatforms: ['discord:\n  privileged'] })).toThrow(/Unknown platform/)
+  })
+})

@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { services } from '@/lib/services'
+import { setPlatformEnabled } from '@/lib/config-yaml-helpers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -73,6 +74,20 @@ export async function POST(
   }
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
+
+  // Flip the platform to enabled: false in config.yaml so the gateway stops
+  // starting it (gateway/run.py gates on platforms.<p>.enabled). Surgical
+  // line edit — other keys under the platform entry are preserved so a
+  // reconnect gets its old settings back. Missing config.yaml or missing
+  // entry = already disabled; setPlatformEnabled no-ops.
+  const configPath = path.join(dataDir, 'config.yaml')
+  if (fs.existsSync(configPath)) {
+    const configContent = fs.readFileSync(configPath, 'utf-8')
+    const updated = setPlatformEnabled(configContent, platform, false)
+    if (updated !== configContent) {
+      fs.writeFileSync(configPath, updated, 'utf-8')
+    }
+  }
 
   // Recreate so the gateway actually drops the surface. Stripping vars from
   // .env without recreating leaves the live connection running on stale env.

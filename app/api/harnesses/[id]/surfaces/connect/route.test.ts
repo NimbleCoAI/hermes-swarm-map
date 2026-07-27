@@ -94,7 +94,8 @@ describe('surface connect — applies env by recreating the container', () => {
     const res = await POST(req, makeParams('h_nimbleco'))
     expect(res.status).toBe(200)
 
-    const written = writeSpy.mock.calls.at(-1)?.[1] as string
+    // Target the .env write — connect now also writes config.yaml afterwards.
+    const written = writeSpy.mock.calls.find((c: unknown[]) => String(c[0]).endsWith('.env'))?.[1] as string
     expect(written).toContain(
       'SIGNAL_ALLOWED_USERS=+15550001234,aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
     )
@@ -123,11 +124,11 @@ describe('surface connect — applies env by recreating the container', () => {
     expect(resolveTelegramUsernameMock).toHaveBeenCalledWith('h_seraph', '@juniper', 'new-bot-token')
 
     // Numeric IDs only in the env — never a raw @handle.
-    const envCall = writeSpy.mock.calls.find(c => String(c[0]).endsWith('.env'))
+    const envCall = writeSpy.mock.calls.find((c: unknown[]) => String(c[0]).endsWith('.env'))
     expect(envCall?.[1]).toContain('TELEGRAM_ALLOWED_USERS=123456789,424242')
 
     // Display names persisted the same way the settings path does.
-    const resolvedCall = writeSpy.mock.calls.find(c => String(c[0]).endsWith('resolved-identities.json'))
+    const resolvedCall = writeSpy.mock.calls.find((c: unknown[]) => String(c[0]).endsWith('resolved-identities.json'))
     expect(resolvedCall).toBeTruthy()
     expect(JSON.parse(resolvedCall![1] as string).telegram).toEqual([
       { display: '123456789', nativeId: '123456789' },
@@ -166,5 +167,93 @@ describe('surface connect — applies env by recreating the container', () => {
 
     const res = await POST(req, makeParams('h_seraph'))
     expect(res.status).toBe(200)
+  })
+})
+
+describe('surface connect — enables the platform in config.yaml', () => {
+  // The gateway only starts platforms with `platforms.<p>.enabled: true`
+  // (gateway/run.py), so connect must manage that flag — .env alone is dead.
+
+  function connectDiscord() {
+    return POST(
+      new Request('http://localhost/api/harnesses/h_seraph/surfaces/connect', {
+        method: 'POST',
+        body: JSON.stringify({ platform: 'discord', config: { token: 'bot.token' } }),
+      }),
+      makeParams('h_seraph')
+    )
+  }
+
+  function configWrite() {
+    return writeSpy.mock.calls.find((c: unknown[]) => String(c[0]).endsWith('config.yaml'))
+  }
+
+  it('flips an existing enabled: false entry to true', async () => {
+    readSpy.mockImplementation((p: fs.PathOrFileDescriptor) => {
+      if (String(p).endsWith('config.yaml')) {
+        return 'model:\n  provider: anthropic\n\nplatforms:\n  discord:\n    enabled: false\n    intents: default\n'
+      }
+      return 'DISCORD_BOT_TOKEN=old\n'
+    })
+
+    const res = await connectDiscord()
+    expect(res.status).toBe(200)
+
+    const written = configWrite()?.[1] as string
+    expect(written).toContain('  discord:\n    enabled: true\n    intents: default')
+  })
+
+  it('inserts the platform entry when platforms: exists without it', async () => {
+    readSpy.mockImplementation((p: fs.PathOrFileDescriptor) => {
+      if (String(p).endsWith('config.yaml')) {
+        return 'platforms:\n  telegram:\n    enabled: true\n'
+      }
+      return 'DISCORD_BOT_TOKEN=old\n'
+    })
+
+    const res = await connectDiscord()
+    expect(res.status).toBe(200)
+
+    const written = configWrite()?.[1] as string
+    expect(written).toContain('  discord:\n    enabled: true')
+    expect(written).toContain('  telegram:\n    enabled: true')
+  })
+
+  it('appends a platforms: block when config.yaml has none', async () => {
+    readSpy.mockImplementation((p: fs.PathOrFileDescriptor) => {
+      if (String(p).endsWith('config.yaml')) {
+        return 'model:\n  provider: anthropic\n\nplatform_toolsets:\n  discord: [hermes-discord]\n'
+      }
+      return 'DISCORD_BOT_TOKEN=old\n'
+    })
+
+    const res = await connectDiscord()
+    expect(res.status).toBe(200)
+
+    const written = configWrite()?.[1] as string
+    expect(written).toContain('platforms:\n  discord:\n    enabled: true')
+    // platform_toolsets is NOT the platforms block — untouched.
+    expect(written).toContain('platform_toolsets:\n  discord: [hermes-discord]')
+  })
+
+  it('does not rewrite config.yaml when the platform is already enabled', async () => {
+    readSpy.mockImplementation((p: fs.PathOrFileDescriptor) => {
+      if (String(p).endsWith('config.yaml')) {
+        return 'platforms:\n  discord:\n    enabled: true\n'
+      }
+      return 'DISCORD_BOT_TOKEN=old\n'
+    })
+
+    const res = await connectDiscord()
+    expect(res.status).toBe(200)
+    expect(configWrite()).toBeUndefined()
+  })
+
+  it('skips config.yaml gracefully when it does not exist (agent not deployed)', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => !String(p).endsWith('config.yaml'))
+
+    const res = await connectDiscord()
+    expect(res.status).toBe(200)
+    expect(configWrite()).toBeUndefined()
   })
 })

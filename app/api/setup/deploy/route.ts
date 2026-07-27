@@ -43,9 +43,9 @@ function nextAvailablePort(): number {
   return port
 }
 
-function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string, browserEnabled?: boolean, mcpServers?: Record<string, McpServerConfig>, extraEnabledPlugins: string[] = []): string {
+function generateConfigYaml(provider: string, primaryModel: string, fallbackModel?: string, browserEnabled?: boolean, mcpServers?: Record<string, McpServerConfig>, extraEnabledPlugins: string[] = [], enabledPlatforms: string[] = []): string {
   const enabledPlugins = Array.from(new Set([...defaultEnabledPlugins(), ...extraEnabledPlugins]))
-  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins })
+  return generateDefaultConfig({ provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins, enabledPlatforms })
 }
 
 export async function POST(request: Request) {
@@ -292,9 +292,18 @@ export async function POST(request: Request) {
       }
     }
 
-    // Write config.yaml (enable any plugins the chosen use-case template ships)
+    // Write config.yaml (enable any plugins the chosen use-case template ships,
+    // plus platforms.<p>.enabled for the surfaces chosen in the wizard — the
+    // gateway won't start a surface without that flag, tokens in .env or not)
     const extraEnabledPlugins = useCaseTemplate ? templateEnabledPlugins(useCaseTemplate) : []
-    const configContent = generateConfigYaml(provider, primaryModel, fallbackModel, body.browserEnabled === true, Object.keys(mcpServers).length > 0 ? mcpServers : undefined, extraEnabledPlugins)
+    const enabledPlatforms = [
+      telegramEnabled && 'telegram',
+      discordEnabled && 'discord',
+      slackEnabled && 'slack',
+      mattermostEnabled && 'mattermost',
+      signalEnabled && 'signal',
+    ].filter((p): p is string => typeof p === 'string')
+    const configContent = generateConfigYaml(provider, primaryModel, fallbackModel, body.browserEnabled === true, Object.keys(mcpServers).length > 0 ? mcpServers : undefined, extraEnabledPlugins, enabledPlatforms)
     fs.writeFileSync(path.join(agentDataDir, 'config.yaml'), configContent, 'utf-8')
 
     // Write SOUL.md
