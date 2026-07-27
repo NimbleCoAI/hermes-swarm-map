@@ -63,6 +63,13 @@ export function setPlatformEnabled(
     throw new Error(`Unknown platform: ${platform}`)
   }
 
+  // Normalize CRLF for processing and restore on return — `platforms:\r`
+  // would otherwise fail every anchor and disable would silently no-op
+  // (leaving a disconnected surface enabled with no credentials).
+  const crlf = content.includes('\r\n')
+  if (crlf) content = content.replace(/\r\n/g, '\n')
+  const restore = (s: string) => (crlf ? s.replace(/\n/g, '\r\n') : s)
+
   const lines = content.split('\n')
 
   // ── Locate the top-level platforms: block ────────────────────────────────
@@ -76,16 +83,19 @@ export function setPlatformEnabled(
 
   if (blockStart === -1) {
     // No block at all. Absence means disabled, so disabling is a no-op.
-    if (!enabled) return content
+    if (!enabled) return restore(content)
     const block =
       `\n# --- Platforms (chat surfaces the gateway starts) ---\n` +
       `platforms:\n  ${platform}:\n    enabled: true\n`
-    return content.replace(/\n*$/, '\n') + block
+    return restore(content.replace(/\n*$/, '\n') + block)
   }
 
   // Block spans from blockStart+1 until the next column-0 content line.
-  // Track the last indented content line so a new entry is appended before
-  // any trailing blank/comment gap.
+  // Comments do NOT terminate a YAML mapping — a col-0 `# ...` between
+  // entries must be skipped, not treated as block end (else the entry after
+  // it is invisible and an enable inserts a duplicate key). Track the last
+  // indented content line so a new entry is appended before any trailing
+  // blank/comment gap.
   let blockEnd = lines.length // exclusive
   let lastContentIdx = blockStart
   let childIndent = '  '
@@ -93,11 +103,11 @@ export function setPlatformEnabled(
   for (let i = blockStart + 1; i < lines.length; i++) {
     const line = lines[i]
     if (line.trim() === '') continue
+    if (/^\s*#/.test(line)) continue
     if (/^\S/.test(line)) {
       blockEnd = i
       break
     }
-    if (/^\s*#/.test(line)) continue
     lastContentIdx = i
     if (!childIndentSeen) {
       childIndent = line.match(/^(\s+)/)![1]
@@ -122,13 +132,13 @@ export function setPlatformEnabled(
 
   if (entryIdx === -1) {
     // Entry missing. Missing == disabled, so disabling is a no-op.
-    if (!enabled) return content
+    if (!enabled) return restore(content)
     const insertion = [`${childIndent}${platform}:`, `${childIndent}  enabled: true`]
     lines.splice(lastContentIdx + 1, 0, ...insertion)
-    return lines.join('\n')
+    return restore(lines.join('\n'))
   }
 
-  // ── Entry exists: find its `enabled:` line among its own children ────────
+  // ── Entry exists: find its `enabled:` line among its DIRECT children ─────
   let entryEnd = blockEnd // exclusive
   for (let i = entryIdx + 1; i < blockEnd; i++) {
     const line = lines[i]
@@ -140,16 +150,28 @@ export function setPlatformEnabled(
     }
   }
 
+  // Direct-child indent = indent of the first content line inside the entry
+  // (YAML: a deeper line cannot precede its parent key). Matching on "any
+  // deeper indent" would let a nested key literally named `enabled:` (e.g.
+  // under a voice: sub-map) shadow the real gateway flag.
+  let directChildIndent: string | null = null
+  for (let i = entryIdx + 1; i < entryEnd; i++) {
+    const line = lines[i]
+    if (line.trim() === '' || /^\s*#/.test(line)) continue
+    directChildIndent = line.match(/^(\s*)/)![1]
+    break
+  }
+
   for (let i = entryIdx + 1; i < entryEnd; i++) {
     const m = lines[i].match(/^(\s+)enabled:([ \t]*)(?:[^#\s][^#]*?)?[ \t]*(#.*)?$/)
-    if (m && m[1].length > entryIndent.length) {
+    if (m && m[1] === directChildIndent) {
       const comment = m[3] ? `  ${m[3]}` : ''
       lines[i] = `${m[1]}enabled: ${enabled}${comment}`
-      return lines.join('\n')
+      return restore(lines.join('\n'))
     }
   }
 
-  // Entry exists but has no enabled: line — insert as its first child.
-  lines.splice(entryIdx + 1, 0, `${entryIndent}  enabled: ${enabled}`)
-  return lines.join('\n')
+  // Entry exists but has no direct enabled: line — insert as its first child.
+  lines.splice(entryIdx + 1, 0, `${directChildIndent ?? entryIndent + '  '}enabled: ${enabled}`)
+  return restore(lines.join('\n'))
 }

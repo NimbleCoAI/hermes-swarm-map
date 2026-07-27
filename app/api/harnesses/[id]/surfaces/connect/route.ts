@@ -126,12 +126,21 @@ export async function POST(
   // Missing config.yaml = agent not yet deployed; the deploy template writes
   // the block itself, so skip gracefully.
   const configPath = path.join(dataDir, 'config.yaml')
-  if (fs.existsSync(configPath)) {
-    const configContent = fs.readFileSync(configPath, 'utf-8')
-    const updated = setPlatformEnabled(configContent, platform, true)
-    if (updated !== configContent) {
-      fs.writeFileSync(configPath, updated, 'utf-8')
+  let configUpdated = false
+  let configError: string | undefined
+  try {
+    if (fs.existsSync(configPath)) {
+      const configContent = fs.readFileSync(configPath, 'utf-8')
+      const updated = setPlatformEnabled(configContent, platform, true)
+      if (updated !== configContent) {
+        fs.writeFileSync(configPath, updated, 'utf-8')
+      }
+      configUpdated = true
     }
+  } catch (err) {
+    // Best-effort like the restart below: .env is already written, so don't
+    // fail the connect — but surface the inconsistency instead of hiding it.
+    configError = `config.yaml not updated (${err instanceof Error ? err.message : String(err)}); platform may need manual enabling`
   }
 
   if (telegramAdmins) {
@@ -168,5 +177,5 @@ export async function POST(
     // written, so a later start/restart will pick it up. Don't fail the connect.
   }
 
-  return NextResponse.json({ success: true, envVars: Object.keys(envVars), restarted })
+  return NextResponse.json({ success: true, envVars: Object.keys(envVars), restarted, configUpdated, ...(configError ? { configError } : {}) })
 }

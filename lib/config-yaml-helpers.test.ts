@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { setPlatformEnabled } from './config-yaml-helpers'
+import { SURFACE_PLATFORMS, setPlatformEnabled } from './config-yaml-helpers'
 
 const CONFIG_WITH_BLOCK = `# Hermes Agent config
 model:
@@ -157,5 +157,73 @@ platforms:
     const config = `model:\n  provider: anthropic\n\nplatforms:\n  discord:\n    enabled: false`
     const result = setPlatformEnabled(config, 'discord', true)
     expect(result).toContain('  discord:\n    enabled: true')
+  })
+})
+
+describe('setPlatformEnabled — audit regression cases', () => {
+  it('col-0 comment between entries does not hide the entry after it', () => {
+    const input = [
+      'platforms:',
+      '  discord:',
+      '    enabled: true',
+      '# --- messaging ---',
+      '  telegram:',
+      '    enabled: false',
+      'other:',
+    ].join('\n')
+    const out = setPlatformEnabled(input, 'telegram', true)
+    // The real entry is flipped in place — no duplicate key inserted.
+    expect(out).toContain('  telegram:\n    enabled: true')
+    expect(out.match(/^ {2}telegram:/gm)).toHaveLength(1)
+  })
+
+  it('CRLF file: flips in place and preserves CRLF endings', () => {
+    const input = 'platforms:\r\n  discord:\r\n    enabled: true\r\nother:\r\n'
+    const out = setPlatformEnabled(input, 'discord', false)
+    expect(out).toBe('platforms:\r\n  discord:\r\n    enabled: false\r\nother:\r\n')
+  })
+
+  it('CRLF file: disable is not a silent no-op', () => {
+    const input = 'platforms:\r\n  discord:\r\n    enabled: true\r\n'
+    const out = setPlatformEnabled(input, 'discord', false)
+    expect(out).not.toBe(input)
+    expect(out).toContain('enabled: false')
+  })
+
+  it('nested key named enabled does not shadow the direct gateway flag', () => {
+    const input = [
+      'platforms:',
+      '  discord:',
+      '    voice:',
+      '      enabled: true',
+      '    enabled: false',
+      'other:',
+    ].join('\n')
+    const out = setPlatformEnabled(input, 'discord', true)
+    const lines = out.split('\n')
+    // Nested voice.enabled untouched; direct flag flipped.
+    expect(lines).toContain('      enabled: true')
+    expect(lines).toContain('    enabled: true')
+    expect(lines).not.toContain('    enabled: false')
+  })
+
+  it('nested enabled first + no direct flag: inserts at direct-child depth', () => {
+    const input = [
+      'platforms:',
+      '  discord:',
+      '    voice:',
+      '      enabled: true',
+      'other:',
+    ].join('\n')
+    const out = setPlatformEnabled(input, 'discord', false)
+    // Inserted as a direct child (4 spaces), not deeper.
+    expect(out.split('\n')[2]).toBe('    enabled: false')
+  })
+})
+
+describe('platform allowlist lockstep', () => {
+  it('SURFACE_PLATFORMS matches env-helpers POLICY_VARS platforms', async () => {
+    const { POLICY_VARS } = await import('./env-helpers')
+    expect([...SURFACE_PLATFORMS].sort()).toEqual(Object.keys(POLICY_VARS).sort())
   })
 })
