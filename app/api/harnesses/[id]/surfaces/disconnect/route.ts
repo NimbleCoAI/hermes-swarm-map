@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { services } from '@/lib/services'
+import { setPlatformEnabled } from '@/lib/config-yaml-helpers'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -74,6 +75,30 @@ export async function POST(
 
   fs.writeFileSync(envPath, content, { mode: 0o600 })
 
+  // Flip the platform to enabled: false in config.yaml so the gateway stops
+  // starting it (gateway/run.py gates on platforms.<p>.enabled). Surgical
+  // line edit — other keys under the platform entry are preserved so a
+  // reconnect gets its old settings back. Missing config.yaml or missing
+  // entry = already disabled; setPlatformEnabled no-ops.
+  const configPath = path.join(dataDir, 'config.yaml')
+  let configUpdated = false
+  let configError: string | undefined
+  try {
+    if (fs.existsSync(configPath)) {
+      const configContent = fs.readFileSync(configPath, 'utf-8')
+      const updated = setPlatformEnabled(configContent, platform, false)
+      if (updated !== configContent) {
+        fs.writeFileSync(configPath, updated, 'utf-8')
+      }
+      configUpdated = true
+    }
+  } catch (err) {
+    // .env vars are already stripped; a failed disable here would leave the
+    // platform enabled with no credentials (crash-loop on next boot) — report
+    // it rather than pretending the disconnect was clean.
+    configError = `config.yaml not updated (${err instanceof Error ? err.message : String(err)}); platform may still be enabled`
+  }
+
   // Recreate so the gateway actually drops the surface. Stripping vars from
   // .env without recreating leaves the live connection running on stale env.
   let restarted = false
@@ -84,5 +109,5 @@ export async function POST(
     // No compose file — env is stripped; nothing live to recreate.
   }
 
-  return NextResponse.json({ ok: true, restarted })
+  return NextResponse.json({ ok: true, restarted, configUpdated, ...(configError ? { configError } : {}) })
 }

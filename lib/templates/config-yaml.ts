@@ -4,6 +4,7 @@
  */
 
 import { MODEL_CATALOG } from '../model-catalog'
+import { isSurfacePlatform } from '../config-yaml-helpers'
 
 export interface McpServerConfig {
   command?: string
@@ -19,8 +20,11 @@ export function generateDefaultConfig(params: {
   browserEnabled?: boolean
   mcpServers?: Record<string, McpServerConfig>
   enabledPlugins?: string[]
+  /** Chat surfaces chosen at deploy time — emitted as `platforms.<p>.enabled: true`
+   *  so the gateway actually starts them (it skips platforms without that flag). */
+  enabledPlatforms?: string[]
 }): string {
-  const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins } = params
+  const { provider, primaryModel, fallbackModel, browserEnabled, mcpServers, enabledPlugins, enabledPlatforms } = params
 
   // Compression summary_model must be a VALID id served by THIS agent's provider,
   // emitted in litellm `provider/model` form — never a hardcoded foreign provider.
@@ -64,6 +68,19 @@ export function generateDefaultConfig(params: {
           mcpBlock += `      ${key}: "${value}"\n`
         }
       }
+    }
+  }
+
+  // Only known surface slugs are ever spliced into the file (same posture as
+  // assertNoNewline in env-helpers) — reject anything else loudly.
+  let platformsBlock = ''
+  if (enabledPlatforms && enabledPlatforms.length > 0) {
+    platformsBlock = '\n# --- Platforms (chat surfaces the gateway starts) ---\nplatforms:\n'
+    for (const p of enabledPlatforms) {
+      if (!isSurfacePlatform(p)) {
+        throw new Error(`Unknown platform: ${p}`)
+      }
+      platformsBlock += `  ${p}:\n    enabled: true\n`
     }
   }
 
@@ -166,5 +183,5 @@ platform_toolsets:
   signal: [hermes-signal]
   slack: [hermes-slack]
   mattermost: [hermes-mattermost]
-${pluginsBlock}${mcpBlock}`
+${platformsBlock}${pluginsBlock}${mcpBlock}`
 }
