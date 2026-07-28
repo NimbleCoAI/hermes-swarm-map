@@ -9,16 +9,9 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { filterKeys } from '@/lib/keys-filter'
 import { parseKeyRequestParams } from '@/lib/keys-request'
+import { providerOptions } from '@/lib/key-providers'
 import type { Key, Harness } from '@/lib/types'
 import type { HabitatTier, HarnessStatus } from '@/lib/types'
-
-const KEY_PROVIDERS = [
-  // Model/inference providers first. `openrouter` maps to OPENROUTER_API_KEY on
-  // the write path (see KeysService.resolveEnvVar) — the fleet's GLM-5.2 chat
-  // primary AND its cheap-metered rung ([intelligent-routing-cost]) both ride
-  // OpenRouter, so neither can be provisioned without it here.
-  'anthropic', 'openai', 'google', 'openrouter', 'aws', 'github', 'brave', 'notion', 'telegram', 'custom',
-]
 
 function keyHealthToStatus(health: Key['health']): HarnessStatus {
   if (health === 'good') return 'running'
@@ -256,10 +249,7 @@ function KeysPageContent() {
                 className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
               >
                 <option value="">Select provider...</option>
-                {(newProvider && !KEY_PROVIDERS.includes(newProvider)
-                  ? [...KEY_PROVIDERS, newProvider]
-                  : KEY_PROVIDERS
-                ).map((p) => (
+                {providerOptions(newProvider).map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
