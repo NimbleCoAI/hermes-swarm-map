@@ -741,3 +741,40 @@ describe('Settings API — sentinel is server-derived', () => {
     expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=#announcements,General Voice,123$/m)
   })
 })
+
+describe('Settings API — ignored channels are written trimmed', () => {
+  let written = ''
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('trims entries so a leading space cannot smuggle a value past the \\s# check', async () => {
+    // Validation inspects the TRIMMED value, so ' #b' reads as '#b' and passes. If
+    // the write then joins untrimmed, the file gets 'a, #b' and Docker's env_file
+    // inline-comment rule delivers 'a,' — silently dropping the muted channel.
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: ['456'],
+          ignoredGroups: ['a', ' #b'], allowedRoles: [' 555'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_IGNORED_CHANNELS=a,#b$/m)
+    expect(written).not.toMatch(/DISCORD_IGNORED_CHANNELS=.* #/)
+    expect(written).toMatch(/^DISCORD_ALLOWED_ROLES=555$/m)
+  })
+})

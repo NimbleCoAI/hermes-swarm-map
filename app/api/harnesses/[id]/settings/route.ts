@@ -513,11 +513,18 @@ export async function PUT(
         : content.trimEnd() + `\n${varName}=${value}\n`
     }
 
+    // Trim every entry before joining. Validation inspects `String(c).trim()`, so an
+    // untrimmed write can smuggle past it: ` #b` validates as `#b` (legal) but lands
+    // in the file as `a, #b`, and Docker reads whitespace-then-# as an inline comment
+    // — the container receives `a,` and the muted channel is silently unmuted.
+    const joinTrimmed = (values: string[]) =>
+      values.map(v => String(v).trim()).filter(Boolean).join(',')
+
     if (vars.roles && settings.allowedRoles !== undefined) {
-      writeVar(vars.roles, settings.allowedRoles.join(','))
+      writeVar(vars.roles, joinTrimmed(settings.allowedRoles))
     }
     if (vars.ignoredGroups && settings.ignoredGroups !== undefined) {
-      writeVar(vars.ignoredGroups, settings.ignoredGroups.join(','))
+      writeVar(vars.ignoredGroups, joinTrimmed(settings.ignoredGroups))
     }
     if (vars.allowBots && settings.allowBots !== undefined) {
       writeVar(vars.allowBots, settings.allowBots)
