@@ -152,12 +152,21 @@ export async function callSignalRpc(
  * Build the value for a settings env var (ALLOWED_USERS etc.)
  *
  * Rules:
- * - allow-all policy or per-surface allowAll → '*'
- * - approved-only with specific users → comma-joined
- * - approved-only with no users → '' (empty = no one, secure default)
+ * - per-surface allowAll → '*'
+ * - specific users → comma-joined
+ * - otherwise → '' (empty = no one, secure default)
+ *
+ * `dmPolicy` deliberately does NOT produce '*'. These vars are the *general*
+ * user allowlist, not a DM-only one: `DISCORD_ALLOWED_USERS` gates guild
+ * messages, slash commands and button interactions too (adapter
+ * `_is_allowed_user`), so deriving '*' from a toggle the UI labels "DM Access
+ * Policy" silently granted every member of a Discord server command access to
+ * the agent. Only the explicit per-surface `allowAll` opts into a wildcard.
+ * The parameter is retained so callers keep compiling and so the intent stays
+ * documented at the one place that used to honor it.
  */
 export function buildSettingsEnvValue(
-  dmPolicy: 'approved-only' | 'allow-all',
+  _dmPolicy: 'approved-only' | 'allow-all',
   surfaceAllowAll: boolean,
   users: string[]
 ): string {
@@ -166,7 +175,7 @@ export function buildSettingsEnvValue(
   if (users.length > 0) {
     return users.join(',')
   }
-  if (dmPolicy === 'allow-all' || surfaceAllowAll) {
+  if (surfaceAllowAll) {
     return '*'
   }
   return ''

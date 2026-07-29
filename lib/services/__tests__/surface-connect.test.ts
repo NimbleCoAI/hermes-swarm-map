@@ -218,13 +218,21 @@ describe('settings PUT defaults', () => {
     // approved-only + empty user list = empty string (no one allowed until explicitly added)
     expect(buildSettingsEnvValue('approved-only', false, [])).toBe('')
 
-    // allow-all = *
-    expect(buildSettingsEnvValue('allow-all', false, [])).toBe('*')
-
     // approved-only with specific users = comma-joined
     expect(buildSettingsEnvValue('approved-only', false, ['user1', 'user2'])).toBe('user1,user2')
 
     // per-surface allowAll override
     expect(buildSettingsEnvValue('approved-only', true, [])).toBe('*')
+  })
+
+  it('does NOT derive a wildcard from the DM policy', () => {
+    // Previously `allow-all` + an empty list produced '*'. These vars are the
+    // general user allowlist — DISCORD_ALLOWED_USERS gates guild messages, slash
+    // commands and buttons, not just DMs — so a toggle the UI labels "DM Access
+    // Policy" silently granted every member of a Discord server command access
+    // to the agent. Only the explicit per-surface allowAll opts into a wildcard.
+    expect(buildSettingsEnvValue('allow-all', false, [])).toBe('')
+    expect(buildSettingsEnvValue('allow-all', true, [])).toBe('*')
+    expect(buildSettingsEnvValue('allow-all', false, ['user1'])).toBe('user1')
   })
 })
