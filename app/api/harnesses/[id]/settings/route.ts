@@ -337,9 +337,23 @@ export async function PUT(
   //     the channel.
   //   - an unrecognized DISCORD_ALLOW_BOTS is not 'none': the adapter compares
   //     against 'none' first, so a typo lands in the permissive branch.
+  // Validation applies only to entries the operator is INTRODUCING. Values already
+  // on disk are grandfathered: GET emits them, both clients PUT the whole document
+  // back, and rejecting them would make the settings page permanently unsaveable
+  // for every platform — with no console path to repair the offending value.
+  const existingEnv = parseEnvFile(envPath)
+  const alreadyOnDisk = (varName: string | undefined): Set<string> =>
+    new Set(
+      (varName ? existingEnv[varName] || '' : '')
+        .split(',').map(s => s.trim()).filter(Boolean),
+    )
+
   const discordIn = body.surfaces?.discord
   if (discordIn) {
-    const badRoles = (discordIn.allowedRoles ?? []).filter(r => !/^\d+$/.test(String(r).trim()))
+    const knownRoles = alreadyOnDisk(PLATFORM_VARS.discord.roles)
+    const badRoles = (discordIn.allowedRoles ?? [])
+      .filter(r => !knownRoles.has(String(r).trim()))
+      .filter(r => !/^\d+$/.test(String(r).trim()))
     if (badRoles.length > 0) {
       return NextResponse.json(
         {
@@ -353,20 +367,28 @@ export async function PUT(
     // Channels are NOT numeric-only. `_discord_channel_keys_from_channel` builds the
     // gate key set from the snowflake, the bare name AND '#name', and both gates
     // intersect against it — configuring by name is supported and documented in the
-    // adapter. So validate only what would corrupt the file or the list format:
-    // a comma or newline would inject extra entries or extra KEY=value lines.
+    // adapter. Internal spaces are legal too (voice, stage, forum and category names
+    // allow them, and the adapter matches the name verbatim). So reject only what
+    // would corrupt the file or the list format: a comma splits one entry into two,
+    // a newline injects a whole extra KEY=value line.
+    const knownChannels = new Set([
+      ...alreadyOnDisk(PLATFORM_VARS.discord.groups),
+      ...alreadyOnDisk(PLATFORM_VARS.discord.ignoredGroups),
+    ])
     const badChannels = [
       ...(discordIn.allowedGroups ?? []),
       ...(discordIn.ignoredGroups ?? []),
-    ].filter(c => {
-      const v = String(c).trim()
-      return v === '' || /[,\r\n]/.test(v) || /\s/.test(v)
-    })
+    ]
+      .filter(c => !knownChannels.has(String(c).trim()))
+      .filter(c => {
+        const v = String(c).trim()
+        return v === '' || /[,\r\n]/.test(v)
+      })
     if (badChannels.length > 0) {
       return NextResponse.json(
         {
           error: 'Discord channels must be a snowflake ID, a channel name, or #name — '
-            + `with no commas, whitespace or newlines. Rejected: ${badChannels.join(' | ')}`,
+            + `with no commas or newlines. Rejected: ${badChannels.join(' | ')}`,
         },
         { status: 400 },
       )
@@ -437,12 +459,27 @@ export async function PUT(
     let groupsValue = settings.allowedGroups.length > 0
       ? settings.allowedGroups.join(',')
       : settings.allowAllGroups ? '*' : ''
-    if (platform === 'discord' && groupsValue === '') {
+    // Only turn a CLEARED list into the deny sentinel. `groupsUnscoped` echoed back
+    // means the agent was already unscoped and the operator did not touch the field
+    // — a save of some unrelated setting must not silently take an agent offline in
+    // every channel. It also keeps `config.yaml`'s `discord.allowed_channels`
+    // fallback alive: the adapter applies it only when the env var is FALSY
+    // (`if ac is not None and not os.getenv(...)`), so writing the truthy sentinel
+    // here would suppress a YAML-scoped agent's config and deny it everywhere.
+    // (When the operator really did clear a non-empty list, the env var was already
+    // truthy, so YAML was already inactive and the sentinel changes nothing there.)
+    if (
+      platform === 'discord'
+      && groupsValue === ''
+      && !settings.groupsUnscoped
+    ) {
       groupsValue = DISCORD_DENY_ALL_CHANNELS_SENTINEL
     }
     const groupsRegex = new RegExp(`^${vars.groups}=.*$`, 'm')
     if (groupsRegex.test(content)) {
-      content = content.replace(groupsRegex, `${vars.groups}=${groupsValue}`)
+      // Callback form: a literal '$&' / '$\'' in a channel name would otherwise
+      // splice surrounding file content (including tokens) into the value.
+      content = content.replace(groupsRegex, () => `${vars.groups}=${groupsValue}`)
     } else {
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
