@@ -87,7 +87,7 @@ Platform connections (Mattermost, Telegram, Signal) are managed per-harness in t
 ## Project Structure
 
 ```
-hermes-swarm-map/
+swarm-map/
 ├── app/
 │   ├── (dashboard)/          # Main app pages
 │   │   ├── harnesses/        # Fleet list + per-harness detail (tabbed)
