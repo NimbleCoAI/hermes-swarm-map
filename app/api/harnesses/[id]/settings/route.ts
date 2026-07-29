@@ -382,13 +382,21 @@ export async function PUT(
       .filter(c => !knownChannels.has(String(c).trim()))
       .filter(c => {
         const v = String(c).trim()
-        return v === '' || /[,\r\n]/.test(v)
+        // `\s#` is not cosmetic: this file is consumed as a compose `env_file`, and
+        // Docker treats whitespace-then-# as an inline comment, so `mute #2` reaches
+        // the container as `mute`. Verified against the compose CLI. On
+        // DISCORD_IGNORED_CHANNELS that silently un-mutes the channel the operator
+        // muted — a fail-open on the one deny that binds a bot holding Administrator
+        // — while HSM's own parseEnvFile does no comment handling and would keep
+        // displaying the full value. Bare `#name` and internal spaces stay legal.
+        return v === '' || /[,\r\n]/.test(v) || /\s#/.test(v)
       })
     if (badChannels.length > 0) {
       return NextResponse.json(
         {
           error: 'Discord channels must be a snowflake ID, a channel name, or #name — '
-            + `with no commas or newlines. Rejected: ${badChannels.join(' | ')}`,
+            + 'with no commas, no newlines, and no space before a "#" (Docker reads '
+            + `that as a comment and truncates the value). Rejected: ${badChannels.join(' | ')}`,
         },
         { status: 400 },
       )
@@ -456,22 +464,32 @@ export async function PUT(
     // *_CHANNEL_POLICY var (Slack does), so the only runtime-effective way to
     // express "nowhere" is a value that no channel can match: channel ids are
     // snowflakes, never DISCORD_DENY_ALL_CHANNELS_SENTINEL.
-    let groupsValue = settings.allowedGroups.length > 0
-      ? settings.allowedGroups.join(',')
+    // Trim before joining so the written value matches what validation inspected.
+    const trimmedGroups = settings.allowedGroups.map(g => String(g).trim()).filter(Boolean)
+    let groupsValue = trimmedGroups.length > 0
+      ? trimmedGroups.join(',')
       : settings.allowAllGroups ? '*' : ''
-    // Only turn a CLEARED list into the deny sentinel. `groupsUnscoped` echoed back
-    // means the agent was already unscoped and the operator did not touch the field
-    // — a save of some unrelated setting must not silently take an agent offline in
-    // every channel. It also keeps `config.yaml`'s `discord.allowed_channels`
-    // fallback alive: the adapter applies it only when the env var is FALSY
-    // (`if ac is not None and not os.getenv(...)`), so writing the truthy sentinel
-    // here would suppress a YAML-scoped agent's config and deny it everywhere.
-    // (When the operator really did clear a non-empty list, the env var was already
-    // truthy, so YAML was already inactive and the sentinel changes nothing there.)
+    // Only turn a CLEARED list into the deny sentinel, and decide that from DISK,
+    // never from the request. Two reasons:
+    //
+    //  - An agent that was ALREADY unscoped must not be silently taken offline in
+    //    every channel by a save of some unrelated setting. It also keeps
+    //    `config.yaml`'s `discord.allowed_channels` fallback alive: the adapter
+    //    applies it only when the env var is FALSY (`if ac is not None and not
+    //    os.getenv(...)`), so writing the truthy sentinel would suppress a
+    //    YAML-scoped agent's config and deny it everywhere.
+    //  - The `groupsUnscoped` field GET emits cannot be trusted for this: neither
+    //    client refetches after a save, so an operator who scopes an agent and then
+    //    clears it again in the same page session would still be echoing
+    //    groupsUnscoped:true — suppressing the sentinel and leaving the agent
+    //    answering everywhere while the console shows "no channels approved".
+    //
+    // Reading the previous value off disk makes the invariant structural rather than
+    // a contract with the client.
     if (
       platform === 'discord'
       && groupsValue === ''
-      && !settings.groupsUnscoped
+      && !!existingEnv[vars.groups]
     ) {
       groupsValue = DISCORD_DENY_ALL_CHANNELS_SENTINEL
     }
