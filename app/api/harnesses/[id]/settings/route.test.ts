@@ -391,10 +391,15 @@ describe('Settings API — GET reports the real Discord state', () => {
   it('reports an ABSENT channel allowlist as unscoped, not as a lockdown', async () => {
     // No DISCORD_ALLOWED_CHANNELS at all = responds everywhere. Reporting that as
     // an empty list made "wide open" and "locked down" render identically.
+    //
+    // It is reported on its OWN field, NOT as allowAllGroups: empty and '*' are
+    // different runtime states, and since clients PUT the GET document back,
+    // folding them together would write a literal '*' — see the round-trip suite.
     vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_USERS=123\n' as never)
     const res = await GET(new Request('http://localhost'), makeParams('h_test'))
     const data = await res.json()
-    expect(data.surfaces.discord.allowAllGroups).toBe(true)
+    expect(data.surfaces.discord.groupsUnscoped).toBe(true)
+    expect(data.surfaces.discord.allowAllGroups).toBe(false)
   })
 
   it('maps the deny-all sentinel back to an empty list', async () => {
@@ -418,5 +423,123 @@ describe('Settings API — GET reports the real Discord state', () => {
     const res = await GET(new Request('http://localhost'), makeParams('h_test'))
     const data = await res.json()
     expect(data.surfaces.discord.allowBots).toBe('mentions')
+  })
+})
+
+/**
+ * Round-trip safety.
+ *
+ * Both clients GET the settings document and PUT it back verbatim, so any state
+ * GET invents becomes state PUT writes. These pin the cases where that loop
+ * would otherwise WIDEN access — found by independent review of the first cut of
+ * this change, where reporting an unscoped agent as allowAllGroups round-tripped
+ * into a literal '*'.
+ */
+describe('Settings API — GET→PUT round trip cannot widen access', () => {
+  let written = ''
+
+  function capture() {
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  async function roundTrip(envContent: string) {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(envContent as never)
+    const getRes = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const doc = await getRes.json()
+    capture()
+    const putRes = await PUT(makeRequest(doc), makeParams('h_test'))
+    return { doc, status: putRes.status }
+  }
+
+  it('an EMPTY channel allowlist does not round-trip into a wildcard', async () => {
+    // Empty is NOT '*' at runtime: _discord_channel_ids_allowed returns False on
+    // empty and True on '*', and that function is the channel bypass for agents
+    // with no user allowlist. Echoing empty back as '*' would take a fail-closed
+    // agent to "every guild member can command it".
+    const { doc, status } = await roundTrip('DISCORD_ALLOWED_CHANNELS=\n')
+    expect(status).toBe(200)
+    expect(doc.surfaces.discord.allowAllGroups).toBe(false)
+    expect(doc.surfaces.discord.groupsUnscoped).toBe(true)
+    expect(written).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('an ABSENT channel allowlist does not round-trip into a wildcard', async () => {
+    const { doc } = await roundTrip('DISCORD_ALLOWED_USERS=123\n')
+    expect(doc.surfaces.discord.allowAllGroups).toBe(false)
+    expect(doc.surfaces.discord.groupsUnscoped).toBe(true)
+    expect(written).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('a genuine wildcard survives the round trip unchanged', async () => {
+    const { doc } = await roundTrip('DISCORD_ALLOWED_CHANNELS=*\nDISCORD_ALLOWED_USERS=123\n')
+    expect(doc.surfaces.discord.allowAllGroups).toBe(true)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('a guild-wide DISCORD_IGNORED_CHANNELS mute is not erased', async () => {
+    // '*' here mutes the bot guild-wide and is the only kill switch that binds a
+    // bot holding Administrator. parseCommaList maps '*' to [], which would have
+    // written it back as empty and silently unmuted the agent.
+    const { doc } = await roundTrip('DISCORD_IGNORED_CHANNELS=*\nDISCORD_ALLOWED_USERS=123\n')
+    expect(doc.surfaces.discord.ignoredGroups).toEqual(['*'])
+    expect(written).toMatch(/^DISCORD_IGNORED_CHANNELS=\*$/m)
+  })
+
+  it('reports an unrecognized allowBots as permissive, not as none', async () => {
+    // The adapter compares against 'none' then 'mentions' and lets anything else
+    // fall through to the permissive branch, so a typo is NOT 'none'.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOW_BOTS=nonr\n' as never)
+    const res = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.allowBots).toBe('all')
+  })
+
+  it('accepts channels configured by name or #name — the adapter matches those', async () => {
+    // _discord_channel_keys_from_channel adds the bare name and '#name' to the key
+    // set both gates intersect against, so numeric-only validation would 400 a
+    // legitimate config and block the whole save.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    capture()
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'],
+          allowedGroups: ['the-garden', '#announcements', '456'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=the-garden,#announcements,456$/m)
+  })
+
+  it('still rejects a channel value that would corrupt the env line', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'],
+          allowedGroups: ['ok\nDISCORD_ALLOWED_USERS=*'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(400)
   })
 })

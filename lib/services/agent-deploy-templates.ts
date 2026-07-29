@@ -112,8 +112,15 @@ export function generateEnvContent(params: {
   if (discordToken) {
     lines.push(`DISCORD_BOT_TOKEN=${discordToken}`)
     lines.push(`DISCORD_ALLOWED_USERS=`)
-    lines.push(`DISCORD_ALLOWED_CHANNELS=`)
+    // '0' — not empty. The adapter reads an EMPTY channel allowlist as "no channel
+    // gate at all", so an empty value means the bot answers in every channel the
+    // moment a user is added to the allowlist above. A snowflake is never '0', so
+    // this denies until the operator scopes the agent deliberately.
+    lines.push(`DISCORD_ALLOWED_CHANNELS=0`)
     lines.push(`DISCORD_REQUIRE_MENTION=true`)
+    // Explicit: this check runs BEFORE the user allowlist and skips it entirely
+    // when it permits a bot, so it must not be left to an implicit default.
+    lines.push(`DISCORD_ALLOW_BOTS=none`)
   } else {
     lines.push(`# DISCORD_BOT_TOKEN=`)
     lines.push(`# DISCORD_ALLOWED_USERS=`)

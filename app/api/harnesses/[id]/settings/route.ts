@@ -94,6 +94,10 @@ type SurfaceSettings = {
   allowedRoles?: string[]
   ignoredGroups?: string[]
   allowBots?: AllowBotsValue
+  // Read-only, GET→UI only. True when DISCORD_ALLOWED_CHANNELS is absent/empty,
+  // which the runtime treats as "respond in every channel". PUT must ignore it:
+  // writing it back as '*' would be a genuine widening (see the GET comment).
+  groupsUnscoped?: boolean
 }
 
 // Env var names for group invite policy per platform. The single "group invite
@@ -169,9 +173,16 @@ export async function GET(
     const allowAll = usersRaw === '*'
     const allowAllGroups = groupsRaw === '*'
 
-    // Discord-only: an ABSENT/empty channel allowlist is "respond everywhere" at
-    // runtime, which is not the same state as an explicit deny. Report it so the
-    // UI can say so instead of drawing it identically to a locked-down agent.
+    // Discord-only: an ABSENT/empty channel allowlist is "respond everywhere" in the
+    // on_message and slash gates. Report it as its OWN read-only field —
+    // deliberately NOT folded into allowAllGroups.
+    //
+    // Empty and '*' are NOT the same runtime state, and conflating them is a
+    // fail-open: `_discord_channel_ids_allowed` returns False on empty but True on
+    // '*', and `_is_allowed_user` uses it as the channel bypass for agents with no
+    // user/role allowlist. Since both clients PUT back the document GET returned,
+    // reporting an empty allowlist as allowAllGroups would materialize a literal '*'
+    // and turn a fail-closed agent into one every guild member can command.
     const groupsUnscoped = platform === 'discord' && !groupsRaw
     const groups = platform === 'discord' && groupsRaw === DISCORD_DENY_ALL_CHANNELS_SENTINEL
       ? []
@@ -183,21 +194,36 @@ export async function GET(
       adminUsers: users,  // backward compat — old plugins read this field
       allowedGroups: groups,
       allowAll,
-      allowAllGroups: allowAllGroups || groupsUnscoped,
+      allowAllGroups,
     }
 
+    if (groupsUnscoped) {
+      // Read-only: PUT ignores this. It exists so the UI can say "responds in every
+      // channel" without that state being echoed back as a literal '*'.
+      surfaces[platform].groupsUnscoped = true
+    }
     if (vars.roles) {
       surfaces[platform].allowedRoles = parseCommaList(env[vars.roles])
     }
     if (vars.ignoredGroups) {
-      surfaces[platform].ignoredGroups = parseCommaList(env[vars.ignoredGroups])
+      // NOT parseCommaList: that maps '*' to [], and '*' here is a guild-wide mute
+      // honored by both the on_message and slash gates — the only kill switch that
+      // binds a bot holding Administrator. Dropping it on read would erase it on
+      // the next save.
+      surfaces[platform].ignoredGroups = (env[vars.ignoredGroups] || '')
+        .split(',').map(s => s.trim()).filter(Boolean)
     }
     if (vars.allowBots) {
       const raw = (env[vars.allowBots] || '').trim().toLowerCase()
-      // The adapter's own default when the var is absent is 'none'.
-      surfaces[platform].allowBots = (ALLOW_BOTS_VALUES as readonly string[]).includes(raw)
-        ? (raw as AllowBotsValue)
-        : 'none'
+      // Absent really is 'none' (the adapter's os.getenv default). But an
+      // unrecognized value is NOT: the adapter compares against 'none' then
+      // 'mentions' and lets everything else fall through to the permissive branch,
+      // so report a typo as the permissive state rather than flattering it to 'none'.
+      surfaces[platform].allowBots = raw === ''
+        ? 'none'
+        : (ALLOW_BOTS_VALUES as readonly string[]).includes(raw)
+          ? (raw as AllowBotsValue)
+          : 'all'
     }
   }
 
@@ -324,13 +350,24 @@ export async function PUT(
         { status: 400 },
       )
     }
+    // Channels are NOT numeric-only. `_discord_channel_keys_from_channel` builds the
+    // gate key set from the snowflake, the bare name AND '#name', and both gates
+    // intersect against it — configuring by name is supported and documented in the
+    // adapter. So validate only what would corrupt the file or the list format:
+    // a comma or newline would inject extra entries or extra KEY=value lines.
     const badChannels = [
       ...(discordIn.allowedGroups ?? []),
       ...(discordIn.ignoredGroups ?? []),
-    ].filter(c => String(c).trim() !== '*' && !/^\d+$/.test(String(c).trim()))
+    ].filter(c => {
+      const v = String(c).trim()
+      return v === '' || /[,\r\n]/.test(v) || /\s/.test(v)
+    })
     if (badChannels.length > 0) {
       return NextResponse.json(
-        { error: `Discord channels must be numeric channel IDs. Rejected: ${badChannels.join(', ')}` },
+        {
+          error: 'Discord channels must be a snowflake ID, a channel name, or #name — '
+            + `with no commas, whitespace or newlines. Rejected: ${badChannels.join(' | ')}`,
+        },
         { status: 400 },
       )
     }
