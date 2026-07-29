@@ -85,8 +85,10 @@ files pinned into the prompt and the rest opened on demand. Swarm Map reads that
 (`GET /v1/agents/{id}/files`) and will render it if a server exposes one — but **we do not
 enable it**:
 
-- `git_enabled` has **zero** occurrences in this repository, executable code or otherwise.
-- Agents created by our deploy path come up with `git_enabled: false`.
+- `git_enabled` has **zero** occurrences in this repository, executable code or otherwise —
+  we never request it, so agents get the server default.
+- That default is `false`: freshly created Letta agents come up with `git_enabled: false`
+  (observed against a live server, 2026-07).
 
 Consequence: for every agent Swarm Map creates, the "Context files (memfs)" panel is
 empty. It is labelled **not enabled** in the UI, with core memory identified as the live
