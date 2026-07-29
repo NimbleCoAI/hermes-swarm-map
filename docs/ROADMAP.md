@@ -1,4 +1,4 @@
-# Hermes Swarm Map — Roadmap
+# Swarm Map — Roadmap
 
 HSM is the management plane for multi-tenant Hermes. It configures, deploys, monitors, and controls agent harnesses. This roadmap works backward from what V1 must ship, then forward to V2.
 

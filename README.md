@@ -75,8 +75,8 @@ Full detail, including the route inventory that backs these claims: [docs/runtim
 ## Quick Start
 
 ```bash
-git clone https://github.com/NimbleCoAI/hermes-swarm-map.git
-cd hermes-swarm-map
+git clone https://github.com/NimbleCoOrg/swarm-map.git
+cd swarm-map
 pnpm install
 pnpm seed         # first run: writes settings + tier config
 pnpm dev          # http://localhost:3000

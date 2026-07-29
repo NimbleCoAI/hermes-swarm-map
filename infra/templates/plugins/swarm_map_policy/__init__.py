@@ -1,6 +1,6 @@
 """Swarm Map Policy Plugin — HSM-backed group access control.
 
-Integrates with Hermes Swarm Map (HSM) to enforce:
+Integrates with Swarm Map (formerly HSM) to enforce:
 - Group allowlists: only groups registered in HSM can interact
 - Admin checks: platform admin status from HSM settings
 - Session context caching: platform/chat_id/user_id/is_admin from gateway events

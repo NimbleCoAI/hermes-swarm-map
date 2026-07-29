@@ -1,5 +1,5 @@
 #!/bin/bash
-# Smart dev server launcher for Hermes Swarm Map
+# Smart dev server launcher for Swarm Map
 # - Finds a free port (default 3000, auto-increments)
 # - Kills zombie Swarm Map processes on that port (but not unrelated ones)
 # - Starts Next.js dev server
@@ -9,7 +9,12 @@ set -euo pipefail
 # Ensure Docker and node are in PATH
 export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
 
-PROJECT_NAME="hermes-swarm-map"
+# Identify our own processes by the directory they run FROM, not by their command
+# string. `next dev` execs to the bare title `next-server (vX.Y.Z)` with no path in
+# it, so the old `(next|node).*<project-name>` grep never matched anything and the
+# reaper silently reaped nothing. A cwd comparison matches correctly and survives
+# any future repo/directory rename.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DEFAULT_PORT="${PORT:-3000}"
 MAX_PORT=$((DEFAULT_PORT + 10))
 
@@ -32,11 +37,13 @@ kill_own_zombies() {
   pids=$(lsof -ti :"$port" 2>/dev/null || true)
 
   for pid in $pids; do
-    # Check if this is our process (next-server or node running from this dir)
-    local cmd
-    cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
+    # Ours only if the process's working directory is this checkout. If cwd cannot
+    # be read (permissions, process already gone) we deliberately do NOT kill —
+    # a reaper that guesses is worse than one that misses.
+    local pcwd
+    pcwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1 || true)
 
-    if echo "$cmd" | grep -qE "(next|node).*${PROJECT_NAME}" 2>/dev/null; then
+    if [ -n "$pcwd" ] && [ "$pcwd" = "$REPO_ROOT" ]; then
       echo "Killing zombie Swarm Map process on port $port (PID $pid)"
       kill "$pid" 2>/dev/null || true
       sleep 0.5
