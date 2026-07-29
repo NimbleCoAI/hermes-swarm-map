@@ -279,3 +279,502 @@ describe('Settings API — GET group invite policy read-back', () => {
     expect((await getPolicy(env)).groupInvitePolicy).toBe('approved-only')
   })
 })
+
+/**
+ * Discord authorization surface.
+ *
+ * The Discord adapter decides whether to execute a message using four env vars.
+ * HSM historically managed two of them, so the console could neither show nor
+ * change the settings that actually gate an agent. These tests pin the two
+ * inverted semantics (empty channel list, wildcard) and the write path for the
+ * three newly-managed vars.
+ */
+describe('Settings API — Discord authorization vars', () => {
+  let written = ''
+
+  function envFixture(lines: string) {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(lines as never)
+  }
+
+  function discordBody(discord: Record<string, unknown>) {
+    return {
+      dmPolicy: 'approved-only',
+      groupInvitePolicy: 'approved-only',
+      mentionGating: true,
+      commandApprovalAdminOnly: true,
+      memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'],
+          adminUsers: ['123'],
+          allowedGroups: ['456'],
+          allowAll: false,
+          allowAllGroups: false,
+          ...discord,
+        },
+      },
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    envFixture('GITHUB_TOKEN=x\n')
+    // Capture the .env write specifically — the route also writes
+    // resolved-identities.json, which would otherwise clobber this.
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('clearing a SCOPED agent writes the deny sentinel, not an empty value', async () => {
+    // The adapter gates on `if allowed_channels_raw:`, so an empty value skips the
+    // channel check entirely. Clearing the list in the console must not silently
+    // widen the bot to the whole guild.
+    //
+    // Fixture matters: the decision is made from what is on DISK. An agent with no
+    // channel scope was never scoped, so clearing it is a no-op and preserves the
+    // unscoped state (covered in the server-derived suite). Only an agent that HAD
+    // a scope can have it cleared.
+    envFixture('DISCORD_ALLOWED_CHANNELS=456\n')
+    const res = await PUT(makeRequest(discordBody({ allowedGroups: [], allowAllGroups: false })), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=0$/m)
+    expect(written).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=$/m)
+  })
+
+  it('still honors an explicit allow-all for channels', async () => {
+    await PUT(makeRequest(discordBody({ allowedGroups: [], allowAllGroups: true })), makeParams('h_test'))
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('writes roles, ignored channels and allowBots when supplied', async () => {
+    await PUT(makeRequest(discordBody({
+      allowedRoles: ['999'],
+      ignoredGroups: ['777', '888'],
+      allowBots: 'none',
+    })), makeParams('h_test'))
+    expect(written).toMatch(/^DISCORD_ALLOWED_ROLES=999$/m)
+    expect(written).toMatch(/^DISCORD_IGNORED_CHANNELS=777,888$/m)
+    expect(written).toMatch(/^DISCORD_ALLOW_BOTS=none$/m)
+  })
+
+  it('leaves a hand-configured value alone when the client omits the field', async () => {
+    // An older client PUTs a body with no allowBots/roles. Blanking them would
+    // silently re-open an agent an operator hardened by hand.
+    envFixture('DISCORD_ALLOW_BOTS=none\nDISCORD_ALLOWED_ROLES=555\n')
+    await PUT(makeRequest(discordBody({})), makeParams('h_test'))
+    expect(written).toMatch(/^DISCORD_ALLOW_BOTS=none$/m)
+    expect(written).toMatch(/^DISCORD_ALLOWED_ROLES=555$/m)
+  })
+
+  it('rejects a role NAME — the adapter drops non-numeric entries silently and can fail open', async () => {
+    const res = await PUT(makeRequest(discordBody({ allowedRoles: ['moderators'] })), makeParams('h_test'))
+    expect(res.status).toBe(400)
+    expect(fs.writeFileSync).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unrecognized allowBots value rather than coercing it', async () => {
+    // A typo must not land in the permissive branch: the adapter only compares
+    // against 'none' first, so anything else skips the human allowlist.
+    const res = await PUT(makeRequest(discordBody({ allowBots: 'nonr' as never })), makeParams('h_test'))
+    expect(res.status).toBe(400)
+    expect(fs.writeFileSync).not.toHaveBeenCalled()
+  })
+})
+
+describe('Settings API — GET reports the real Discord state', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('reports an ABSENT channel allowlist as unscoped, not as a lockdown', async () => {
+    // No DISCORD_ALLOWED_CHANNELS at all = responds everywhere. Reporting that as
+    // an empty list made "wide open" and "locked down" render identically.
+    //
+    // It is reported on its OWN field, NOT as allowAllGroups: empty and '*' are
+    // different runtime states, and since clients PUT the GET document back,
+    // folding them together would write a literal '*' — see the round-trip suite.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_USERS=123\n' as never)
+    const res = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.groupsUnscoped).toBe(true)
+    expect(data.surfaces.discord.allowAllGroups).toBe(false)
+  })
+
+  it('maps the deny-all sentinel back to an empty list', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_CHANNELS=0\n' as never)
+    const res = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.allowedGroups).toEqual([])
+    expect(data.surfaces.discord.allowAllGroups).toBe(false)
+  })
+
+  it('surfaces allowBots, defaulting an absent value to none', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_USERS=123\n' as never)
+    const res = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.allowBots).toBe('none')
+    expect(data.surfaces.signal.allowBots).toBeUndefined()
+  })
+
+  it('surfaces a live permissive allowBots so the console stops hiding it', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOW_BOTS=mentions\n' as never)
+    const res = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.allowBots).toBe('mentions')
+  })
+})
+
+/**
+ * Round-trip safety.
+ *
+ * Both clients GET the settings document and PUT it back verbatim, so any state
+ * GET invents becomes state PUT writes. These pin the cases where that loop
+ * would otherwise WIDEN access — found by independent review of the first cut of
+ * this change, where reporting an unscoped agent as allowAllGroups round-tripped
+ * into a literal '*'.
+ */
+describe('Settings API — GET→PUT round trip cannot widen access', () => {
+  let written = ''
+
+  function capture() {
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  async function roundTrip(envContent: string) {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(envContent as never)
+    const getRes = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const doc = await getRes.json()
+    capture()
+    const putRes = await PUT(makeRequest(doc), makeParams('h_test'))
+    return { doc, status: putRes.status }
+  }
+
+  it('an EMPTY channel allowlist does not round-trip into a wildcard', async () => {
+    // Empty is NOT '*' at runtime: _discord_channel_ids_allowed returns False on
+    // empty and True on '*', and that function is the channel bypass for agents
+    // with no user allowlist. Echoing empty back as '*' would take a fail-closed
+    // agent to "every guild member can command it".
+    const { doc, status } = await roundTrip('DISCORD_ALLOWED_CHANNELS=\n')
+    expect(status).toBe(200)
+    expect(doc.surfaces.discord.allowAllGroups).toBe(false)
+    expect(doc.surfaces.discord.groupsUnscoped).toBe(true)
+    expect(written).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('an ABSENT channel allowlist does not round-trip into a wildcard', async () => {
+    const { doc } = await roundTrip('DISCORD_ALLOWED_USERS=123\n')
+    expect(doc.surfaces.discord.allowAllGroups).toBe(false)
+    expect(doc.surfaces.discord.groupsUnscoped).toBe(true)
+    expect(written).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('a genuine wildcard survives the round trip unchanged', async () => {
+    const { doc } = await roundTrip('DISCORD_ALLOWED_CHANNELS=*\nDISCORD_ALLOWED_USERS=123\n')
+    expect(doc.surfaces.discord.allowAllGroups).toBe(true)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=\*$/m)
+  })
+
+  it('a guild-wide DISCORD_IGNORED_CHANNELS mute is not erased', async () => {
+    // '*' here mutes the bot guild-wide and is the only kill switch that binds a
+    // bot holding Administrator. parseCommaList maps '*' to [], which would have
+    // written it back as empty and silently unmuted the agent.
+    const { doc } = await roundTrip('DISCORD_IGNORED_CHANNELS=*\nDISCORD_ALLOWED_USERS=123\n')
+    expect(doc.surfaces.discord.ignoredGroups).toEqual(['*'])
+    expect(written).toMatch(/^DISCORD_IGNORED_CHANNELS=\*$/m)
+  })
+
+  it('reports an unrecognized allowBots as permissive, not as none', async () => {
+    // The adapter compares against 'none' then 'mentions' and lets anything else
+    // fall through to the permissive branch, so a typo is NOT 'none'.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOW_BOTS=nonr\n' as never)
+    const res = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.allowBots).toBe('all')
+  })
+
+  it('accepts channels configured by name or #name — the adapter matches those', async () => {
+    // _discord_channel_keys_from_channel adds the bare name and '#name' to the key
+    // set both gates intersect against, so numeric-only validation would 400 a
+    // legitimate config and block the whole save.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    capture()
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'],
+          allowedGroups: ['the-garden', '#announcements', '456'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=the-garden,#announcements,456$/m)
+  })
+
+  it('still rejects a channel value that would corrupt the env line', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'],
+          allowedGroups: ['ok\nDISCORD_ALLOWED_USERS=*'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(400)
+  })
+})
+
+/**
+ * Second-round review findings: the deny sentinel must not become a silent
+ * guild-wide mute, and validation must not deadlock the settings page.
+ */
+describe('Settings API — the deny sentinel is narrow and recoverable', () => {
+  let written = ''
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  async function roundTrip(envContent: string) {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(envContent as never)
+    const getRes = await GET(new Request('http://localhost'), makeParams('h_test'))
+    const doc = await getRes.json()
+    const putRes = await PUT(makeRequest(doc), makeParams('h_test'))
+    return { doc, status: putRes.status }
+  }
+
+  it('does NOT mute an already-unscoped agent that was merely echoed back', async () => {
+    // Every agent HSM deployed before this change has DISCORD_ALLOWED_CHANNELS=.
+    // Saving an unrelated setting must not silently take them offline in every
+    // channel — and writing the truthy sentinel would also suppress the adapter's
+    // config.yaml `discord.allowed_channels` fallback, which applies only when the
+    // env var is falsy.
+    const { status } = await roundTrip('DISCORD_ALLOWED_CHANNELS=\nDISCORD_ALLOWED_USERS=123\n')
+    expect(status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=$/m)
+    expect(written).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=0$/m)
+  })
+
+  it('DOES write the sentinel when the operator actually clears a scoped agent', async () => {
+    // Here the env var was already truthy, so config.yaml was already inactive and
+    // the sentinel changes nothing about YAML precedence.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_CHANNELS=456\n' as never)
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: [],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=0$/m)
+  })
+
+  it('a hand-configured non-numeric role does not deadlock the settings page', async () => {
+    // GET emits whatever is on disk and both clients PUT the document back. If
+    // validation rejected pre-existing values, the whole save — every platform —
+    // would 400 forever with no console path to fix it.
+    const { status } = await roundTrip('DISCORD_ALLOWED_ROLES=moderators\nDISCORD_ALLOWED_USERS=123\n')
+    expect(status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_ROLES=moderators$/m)
+  })
+
+  it('still rejects a NEWLY introduced non-numeric role', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_ROLES=555\n' as never)
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: ['456'],
+          allowedRoles: ['555', 'moderators'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts a channel name containing spaces — voice and category names allow them', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: ['General Voice'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=General Voice$/m)
+  })
+
+  it('a $-pattern in a channel name cannot splice the file into the value', async () => {
+    // String.replace's string form expands $&, $` and $' — which would inject
+    // surrounding .env content (including the bot token) into the written value.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(
+      'DISCORD_BOT_TOKEN=supersecret\nDISCORD_ALLOWED_CHANNELS=old\n' as never,
+    )
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: ['$`'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=\$`$/m)
+    expect(written).not.toMatch(/DISCORD_ALLOWED_CHANNELS=.*supersecret/)
+  })
+})
+
+/**
+ * Third-round review: the sentinel decision must come from disk, not the client.
+ */
+describe('Settings API — sentinel is server-derived', () => {
+  let written = ''
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  function body(discord: Record<string, unknown>) {
+    return {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: [],
+          allowAll: false, allowAllGroups: false, ...discord,
+        },
+      },
+    }
+  }
+
+  it('ignores a STALE groupsUnscoped:true when the agent is scoped on disk', async () => {
+    // Neither client refetches after a save, so this exact body is what the UI
+    // sends when an operator scopes an agent and then clears it again in one page
+    // session. Trusting the field would leave the agent answering everywhere while
+    // the console claims no channels are approved — the original fail-open.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_CHANNELS=456\n' as never)
+    const res = await PUT(makeRequest(body({ groupsUnscoped: true })), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=0$/m)
+  })
+
+  it('still preserves an unscoped agent even when the client omits groupsUnscoped', async () => {
+    // The mirror case: a script or older client that never sends the field must not
+    // mute an unscoped agent, and must not suppress its config.yaml fallback.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('DISCORD_ALLOWED_CHANNELS=\n' as never)
+    const res = await PUT(makeRequest(body({})), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=$/m)
+  })
+
+  it('rejects a space-then-# channel value — Docker truncates it at the comment', async () => {
+    // Verified against the compose CLI: `A=mute #2` reaches the container as `mute`.
+    // On DISCORD_IGNORED_CHANNELS that un-mutes the channel the operator muted.
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    const res = await PUT(makeRequest(body({ ignoredGroups: ['mute #2'] })), makeParams('h_test'))
+    expect(res.status).toBe(400)
+    expect(fs.writeFileSync).not.toHaveBeenCalled()
+  })
+
+  it('still accepts #name and names with internal spaces', async () => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    const res = await PUT(makeRequest(body({
+      allowedGroups: ['#announcements', 'General Voice', '123'],
+    })), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_ALLOWED_CHANNELS=#announcements,General Voice,123$/m)
+  })
+})
+
+describe('Settings API — ignored channels are written trimmed', () => {
+  let written = ''
+  beforeEach(() => {
+    vi.clearAllMocks()
+    written = ''
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
+      if (typeof data === 'string' && String(p).endsWith('.env')) written = data
+    }) as never)
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('trims entries so a leading space cannot smuggle a value past the \\s# check', async () => {
+    // Validation inspects the TRIMMED value, so ' #b' reads as '#b' and passes. If
+    // the write then joins untrimmed, the file gets 'a, #b' and Docker's env_file
+    // inline-comment rule delivers 'a,' — silently dropping the muted channel.
+    const body = {
+      dmPolicy: 'approved-only', groupInvitePolicy: 'approved-only', mentionGating: true,
+      commandApprovalAdminOnly: true, memoryScope: 'channel',
+      surfaces: {
+        discord: {
+          allowedUsers: ['123'], adminUsers: ['123'], allowedGroups: ['456'],
+          ignoredGroups: ['a', ' #b'], allowedRoles: [' 555'],
+          allowAll: false, allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(written).toMatch(/^DISCORD_IGNORED_CHANNELS=a,#b$/m)
+    expect(written).not.toMatch(/DISCORD_IGNORED_CHANNELS=.* #/)
+    expect(written).toMatch(/^DISCORD_ALLOWED_ROLES=555$/m)
+  })
+})

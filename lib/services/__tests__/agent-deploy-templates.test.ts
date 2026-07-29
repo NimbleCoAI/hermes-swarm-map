@@ -49,9 +49,21 @@ describe('generateEnvContent', () => {
     const env = generateEnvContent({ ...base, discordToken: 'discord.bot.token' })
     expect(env).toContain('DISCORD_BOT_TOKEN=discord.bot.token')
     expect(env).toContain('DISCORD_ALLOWED_USERS=')
-    expect(env).toContain('DISCORD_ALLOWED_CHANNELS=')
     // Mention-gating defaults on (mirrors the adapter's own default).
     expect(env).toContain('DISCORD_REQUIRE_MENTION=true')
+  })
+
+  it('seeds a new discord agent fail-closed rather than unscoped', () => {
+    const env = generateEnvContent({ ...base, discordToken: 'discord.bot.token' })
+    // NOT an empty channel list: the adapter reads empty as "no channel gate at
+    // all", so a new agent would answer in every channel the moment a user is
+    // added to the allowlist. '0' can never be a snowflake, so it denies until the
+    // operator scopes the agent deliberately.
+    expect(env).toMatch(/^DISCORD_ALLOWED_CHANNELS=0$/m)
+    expect(env).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=$/m)
+    // Explicit: this check runs BEFORE the human allowlist and skips it entirely
+    // when it permits a bot, so it must not be left to an implicit default.
+    expect(env).toMatch(/^DISCORD_ALLOW_BOTS=none$/m)
   })
 
   it('leaves discord vars commented out when no token is provided', () => {

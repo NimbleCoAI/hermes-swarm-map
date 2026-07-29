@@ -13,14 +13,53 @@ function agentDataDir(harnessId: string): string {
   return path.join(os.homedir(), `.hermes-${name}`)
 }
 
-// Env var names that map to permission settings, per platform
-const PLATFORM_VARS: Record<string, { users: string; groups: string }> = {
+// Value written to DISCORD_ALLOWED_CHANNELS to mean "no channel is approved".
+// The Discord adapter treats an EMPTY allowlist as "no channel gate at all"
+// (`if allowed_channels_raw:`), so empty cannot express a deny. A snowflake can
+// never be "0", so this matches nothing and fails closed. Mapped back to an
+// empty list on read so the console still shows "no channels approved".
+const DISCORD_DENY_ALL_CHANNELS_SENTINEL = '0'
+
+// Env var names that map to permission settings, per platform.
+//
+// `roles`, `ignoredGroups` and `allowBots` exist only for Discord today. They are
+// not cosmetic extras: the adapter consults all three when deciding whether to
+// execute a message, so a console that manages only `users`/`groups` cannot show
+// — let alone control — who can actually command the agent.
+//   - DISCORD_ALLOWED_ROLES  : OR'd with the user allowlist; the only
+//                              "admin class" primitive the runtime has.
+//   - DISCORD_IGNORED_CHANNELS: deny beats allow; the only channel restriction
+//                              that binds a bot holding Administrator, since
+//                              Administrator bypasses channel View overwrites.
+//   - DISCORD_ALLOW_BOTS     : evaluated BEFORE the human allowlist and skips it
+//                              entirely, so a permissive value is a fourth
+//                              authorization class invisible to this console.
+type PlatformVarNames = {
+  users: string
+  groups: string
+  roles?: string
+  ignoredGroups?: string
+  allowBots?: string
+}
+
+const PLATFORM_VARS: Record<string, PlatformVarNames> = {
   signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS' },
   telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS' },
   mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS' },
-  discord: { users: 'DISCORD_ALLOWED_USERS', groups: 'DISCORD_ALLOWED_CHANNELS' },
+  discord: {
+    users: 'DISCORD_ALLOWED_USERS',
+    groups: 'DISCORD_ALLOWED_CHANNELS',
+    roles: 'DISCORD_ALLOWED_ROLES',
+    ignoredGroups: 'DISCORD_IGNORED_CHANNELS',
+    allowBots: 'DISCORD_ALLOW_BOTS',
+  },
   slack: { users: 'SLACK_ALLOWED_USERS', groups: 'SLACK_ALLOWED_CHANNELS' },
 }
+
+// DISCORD_ALLOW_BOTS is tri-state; anything else is rejected rather than coerced,
+// because both other values skip the human allowlist.
+const ALLOW_BOTS_VALUES = ['none', 'mentions', 'all'] as const
+type AllowBotsValue = (typeof ALLOW_BOTS_VALUES)[number]
 
 function parseEnvFile(envPath: string): Record<string, string> {
   const result: Record<string, string> = {}
@@ -50,6 +89,15 @@ type SurfaceSettings = {
   allowedGroups: string[]
   allowAll: boolean
   allowAllGroups: boolean
+  // Discord-only (see PLATFORM_VARS). Absent for platforms that have no
+  // equivalent, so clients can hide the controls rather than render dead ones.
+  allowedRoles?: string[]
+  ignoredGroups?: string[]
+  allowBots?: AllowBotsValue
+  // Read-only, GET→UI only. True when DISCORD_ALLOWED_CHANNELS is absent/empty,
+  // which the runtime treats as "respond in every channel". PUT must ignore it:
+  // writing it back as '*' would be a genuine widening (see the GET comment).
+  groupsUnscoped?: boolean
 }
 
 // Env var names for group invite policy per platform. The single "group invite
@@ -125,13 +173,57 @@ export async function GET(
     const allowAll = usersRaw === '*'
     const allowAllGroups = groupsRaw === '*'
 
+    // Discord-only: an ABSENT/empty channel allowlist is "respond everywhere" in the
+    // on_message and slash gates. Report it as its OWN read-only field —
+    // deliberately NOT folded into allowAllGroups.
+    //
+    // Empty and '*' are NOT the same runtime state, and conflating them is a
+    // fail-open: `_discord_channel_ids_allowed` returns False on empty but True on
+    // '*', and `_is_allowed_user` uses it as the channel bypass for agents with no
+    // user/role allowlist. Since both clients PUT back the document GET returned,
+    // reporting an empty allowlist as allowAllGroups would materialize a literal '*'
+    // and turn a fail-closed agent into one every guild member can command.
+    const groupsUnscoped = platform === 'discord' && !groupsRaw
+    const groups = platform === 'discord' && groupsRaw === DISCORD_DENY_ALL_CHANNELS_SENTINEL
+      ? []
+      : parseCommaList(groupsRaw)
+
     const users = parseCommaList(usersRaw)
     surfaces[platform] = {
       allowedUsers: users,
       adminUsers: users,  // backward compat — old plugins read this field
-      allowedGroups: parseCommaList(groupsRaw),
+      allowedGroups: groups,
       allowAll,
       allowAllGroups,
+    }
+
+    if (groupsUnscoped) {
+      // Read-only: PUT ignores this. It exists so the UI can say "responds in every
+      // channel" without that state being echoed back as a literal '*'.
+      surfaces[platform].groupsUnscoped = true
+    }
+    if (vars.roles) {
+      surfaces[platform].allowedRoles = parseCommaList(env[vars.roles])
+    }
+    if (vars.ignoredGroups) {
+      // NOT parseCommaList: that maps '*' to [], and '*' here is a guild-wide mute
+      // honored by both the on_message and slash gates — the only kill switch that
+      // binds a bot holding Administrator. Dropping it on read would erase it on
+      // the next save.
+      surfaces[platform].ignoredGroups = (env[vars.ignoredGroups] || '')
+        .split(',').map(s => s.trim()).filter(Boolean)
+    }
+    if (vars.allowBots) {
+      const raw = (env[vars.allowBots] || '').trim().toLowerCase()
+      // Absent really is 'none' (the adapter's os.getenv default). But an
+      // unrecognized value is NOT: the adapter compares against 'none' then
+      // 'mentions' and lets everything else fall through to the permissive branch,
+      // so report a typo as the permissive state rather than flattering it to 'none'.
+      surfaces[platform].allowBots = raw === ''
+        ? 'none'
+        : (ALLOW_BOTS_VALUES as readonly string[]).includes(raw)
+          ? (raw as AllowBotsValue)
+          : 'all'
     }
   }
 
@@ -236,6 +328,90 @@ export async function PUT(
 
   const body = await request.json() as SettingsResponse
 
+  // Validate the Discord authorization fields before touching the .env. Both
+  // failure modes here are silent AND fail-open at runtime, so reject rather
+  // than sanitize:
+  //   - the adapter keeps only `.isdigit()` role entries, so a role NAME is
+  //     dropped with no log; if that empties the role set on an agent with no
+  //     user allowlist, the channel-scope bypass admits everyone who can see
+  //     the channel.
+  //   - an unrecognized DISCORD_ALLOW_BOTS is not 'none': the adapter compares
+  //     against 'none' first, so a typo lands in the permissive branch.
+  // Validation applies only to entries the operator is INTRODUCING. Values already
+  // on disk are grandfathered: GET emits them, both clients PUT the whole document
+  // back, and rejecting them would make the settings page permanently unsaveable
+  // for every platform — with no console path to repair the offending value.
+  const existingEnv = parseEnvFile(envPath)
+  const alreadyOnDisk = (varName: string | undefined): Set<string> =>
+    new Set(
+      (varName ? existingEnv[varName] || '' : '')
+        .split(',').map(s => s.trim()).filter(Boolean),
+    )
+
+  const discordIn = body.surfaces?.discord
+  if (discordIn) {
+    const knownRoles = alreadyOnDisk(PLATFORM_VARS.discord.roles)
+    const badRoles = (discordIn.allowedRoles ?? [])
+      .filter(r => !knownRoles.has(String(r).trim()))
+      .filter(r => !/^\d+$/.test(String(r).trim()))
+    if (badRoles.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'Discord roles must be numeric role IDs, not names. '
+            + 'The agent silently drops non-numeric entries, which can leave the bot ungated. '
+            + `Rejected: ${badRoles.join(', ')}`,
+        },
+        { status: 400 },
+      )
+    }
+    // Channels are NOT numeric-only. `_discord_channel_keys_from_channel` builds the
+    // gate key set from the snowflake, the bare name AND '#name', and both gates
+    // intersect against it — configuring by name is supported and documented in the
+    // adapter. Internal spaces are legal too (voice, stage, forum and category names
+    // allow them, and the adapter matches the name verbatim). So reject only what
+    // would corrupt the file or the list format: a comma splits one entry into two,
+    // a newline injects a whole extra KEY=value line.
+    const knownChannels = new Set([
+      ...alreadyOnDisk(PLATFORM_VARS.discord.groups),
+      ...alreadyOnDisk(PLATFORM_VARS.discord.ignoredGroups),
+    ])
+    const badChannels = [
+      ...(discordIn.allowedGroups ?? []),
+      ...(discordIn.ignoredGroups ?? []),
+    ]
+      .filter(c => !knownChannels.has(String(c).trim()))
+      .filter(c => {
+        const v = String(c).trim()
+        // `\s#` is not cosmetic: this file is consumed as a compose `env_file`, and
+        // Docker treats whitespace-then-# as an inline comment, so `mute #2` reaches
+        // the container as `mute`. Verified against the compose CLI. On
+        // DISCORD_IGNORED_CHANNELS that silently un-mutes the channel the operator
+        // muted — a fail-open on the one deny that binds a bot holding Administrator
+        // — while HSM's own parseEnvFile does no comment handling and would keep
+        // displaying the full value. Bare `#name` and internal spaces stay legal.
+        return v === '' || /[,\r\n]/.test(v) || /\s#/.test(v)
+      })
+    if (badChannels.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'Discord channels must be a snowflake ID, a channel name, or #name — '
+            + 'with no commas, no newlines, and no space before a "#" (Docker reads '
+            + `that as a comment and truncates the value). Rejected: ${badChannels.join(' | ')}`,
+        },
+        { status: 400 },
+      )
+    }
+    if (
+      discordIn.allowBots !== undefined
+      && !(ALLOW_BOTS_VALUES as readonly string[]).includes(discordIn.allowBots)
+    ) {
+      return NextResponse.json(
+        { error: `allowBots must be one of: ${ALLOW_BOTS_VALUES.join(', ')}` },
+        { status: 400 },
+      )
+    }
+  }
+
   let content = fs.readFileSync(envPath, 'utf-8')
 
   // Telegram allowlist as written to the env — captured so the policy-plane
@@ -277,17 +453,82 @@ export async function PUT(
       content = content.trimEnd() + `\n${vars.users}=${usersValue}\n`
     }
 
-    // Groups — explicit list takes priority, then allowAllGroups → *, else empty
-    const groupsValue = settings.allowedGroups.length > 0
-      ? settings.allowedGroups.join(',')
+    // Groups — explicit list takes priority, then allowAllGroups → *, else empty.
+    //
+    // Discord inverts the meaning of empty: the adapter gates on
+    // `if allowed_channels_raw:` and an empty DISCORD_ALLOWED_CHANNELS skips the
+    // channel check entirely, so "no channels approved" in this console meant
+    // "respond in EVERY channel" at runtime — the exact opposite of what an
+    // operator clearing the list intends, and the opposite of what
+    // env-helpers' "empty = no one allowed" comment promises. Discord has no
+    // *_CHANNEL_POLICY var (Slack does), so the only runtime-effective way to
+    // express "nowhere" is a value that no channel can match: channel ids are
+    // snowflakes, never DISCORD_DENY_ALL_CHANNELS_SENTINEL.
+    // Trim before joining so the written value matches what validation inspected.
+    const trimmedGroups = settings.allowedGroups.map(g => String(g).trim()).filter(Boolean)
+    let groupsValue = trimmedGroups.length > 0
+      ? trimmedGroups.join(',')
       : settings.allowAllGroups ? '*' : ''
+    // Only turn a CLEARED list into the deny sentinel, and decide that from DISK,
+    // never from the request. Two reasons:
+    //
+    //  - An agent that was ALREADY unscoped must not be silently taken offline in
+    //    every channel by a save of some unrelated setting. It also keeps
+    //    `config.yaml`'s `discord.allowed_channels` fallback alive: the adapter
+    //    applies it only when the env var is FALSY (`if ac is not None and not
+    //    os.getenv(...)`), so writing the truthy sentinel would suppress a
+    //    YAML-scoped agent's config and deny it everywhere.
+    //  - The `groupsUnscoped` field GET emits cannot be trusted for this: neither
+    //    client refetches after a save, so an operator who scopes an agent and then
+    //    clears it again in the same page session would still be echoing
+    //    groupsUnscoped:true — suppressing the sentinel and leaving the agent
+    //    answering everywhere while the console shows "no channels approved".
+    //
+    // Reading the previous value off disk makes the invariant structural rather than
+    // a contract with the client.
+    if (
+      platform === 'discord'
+      && groupsValue === ''
+      && !!existingEnv[vars.groups]
+    ) {
+      groupsValue = DISCORD_DENY_ALL_CHANNELS_SENTINEL
+    }
     const groupsRegex = new RegExp(`^${vars.groups}=.*$`, 'm')
     if (groupsRegex.test(content)) {
-      content = content.replace(groupsRegex, `${vars.groups}=${groupsValue}`)
+      // Callback form: a literal '$&' / '$\'' in a channel name would otherwise
+      // splice surrounding file content (including tokens) into the value.
+      content = content.replace(groupsRegex, () => `${vars.groups}=${groupsValue}`)
     } else {
       content = content.trimEnd() + `\n${vars.groups}=${groupsValue}\n`
     }
 
+    // Discord authorization vars. Each is written ONLY when the client sent the
+    // field, so an older client that doesn't know about them leaves a
+    // hand-configured value intact instead of blanking it — these are exactly the
+    // settings an operator sets by hand today.
+    const writeVar = (varName: string, value: string) => {
+      const regex = new RegExp(`^${varName}=.*$`, 'm')
+      content = regex.test(content)
+        ? content.replace(regex, () => `${varName}=${value}`)
+        : content.trimEnd() + `\n${varName}=${value}\n`
+    }
+
+    // Trim every entry before joining. Validation inspects `String(c).trim()`, so an
+    // untrimmed write can smuggle past it: ` #b` validates as `#b` (legal) but lands
+    // in the file as `a, #b`, and Docker reads whitespace-then-# as an inline comment
+    // — the container receives `a,` and the muted channel is silently unmuted.
+    const joinTrimmed = (values: string[]) =>
+      values.map(v => String(v).trim()).filter(Boolean).join(',')
+
+    if (vars.roles && settings.allowedRoles !== undefined) {
+      writeVar(vars.roles, joinTrimmed(settings.allowedRoles))
+    }
+    if (vars.ignoredGroups && settings.ignoredGroups !== undefined) {
+      writeVar(vars.ignoredGroups, joinTrimmed(settings.ignoredGroups))
+    }
+    if (vars.allowBots && settings.allowBots !== undefined) {
+      writeVar(vars.allowBots, settings.allowBots)
+    }
   }
 
   // Group invite policy — write per-platform env vars
@@ -351,6 +592,15 @@ export async function PUT(
     content = content.trimEnd() + `\nHERMES_MEMORY_SCOPE=${memoryScopeValue}\n`
   }
 
+  // Did the VPN toggle actually CHANGE? GET always emits vpnEnabled and both
+  // clients PUT the whole document back, so `vpnEnabled !== undefined` is true on
+  // every save — including a permissions-only edit — which made compose
+  // regeneration below unconditional. Compare against the .env instead, mirroring
+  // how `resourcesChanged` is derived.
+  const vpnWasEnabled = /^VPN_ENABLED=true$/m.test(content)
+  const vpnChanged = (body as any).vpnEnabled !== undefined
+    && !!(body as any).vpnEnabled !== vpnWasEnabled
+
   // VPN toggle + externally-reachable VNC URL for human CAPTCHA escalation
   if ((body as any).vpnEnabled !== undefined) {
     const vpnEnabled = !!(body as any).vpnEnabled
@@ -409,7 +659,7 @@ export async function PUT(
 
   // Regenerate the compose file when the VPN toggle OR the resource limits change.
   // Both are compose-level (not env), so the .env rewrite above doesn't cover them.
-  if ((body as any).vpnEnabled !== undefined || resourcesChanged) {
+  if (vpnChanged || resourcesChanged) {
     const harness = services.harness.get(id)
     if (harness?.composeFile && fs.existsSync(harness.composeFile)) {
       // Read current port from existing compose file
