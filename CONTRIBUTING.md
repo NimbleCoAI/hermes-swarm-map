@@ -35,7 +35,7 @@ Tests use [Vitest](https://vitest.dev/) with `happy-dom` and `@testing-library/r
 ## Project Structure
 
 ```
-hermes-swarm-map/
+swarm-map/
 ├── app/                    # Next.js App Router
 │   ├── (dashboard)/            # Dashboard pages (agent list, detail views)
 │   ├── (setup)/                # Setup wizard flow
