@@ -449,7 +449,7 @@ export default function WizardPage() {
                     />
                     <span className="font-medium text-sm">Letta swarm</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">A stateful agent on the shared Letta server (memfs memory). No container of its own; messaging comes later via a Hermes front.</span>
+                  <span className="text-xs text-muted-foreground">A memory-first agent on the shared Letta server — a row, not a container of its own. Read-only in Swarm Map after deploy, plus sending a message; messaging surfaces come later via a Hermes front.</span>
                 </label>
               </div>
             </div>
@@ -587,7 +587,7 @@ export default function WizardPage() {
             </div>
             <div className="rounded-lg bg-muted/30 border border-[var(--border)] p-3">
               <p className="text-xs text-muted-foreground">
-                Letta agents use <span className="font-medium">memfs</span> memory (git-backed context files) and have no per-agent fallback model or bundled Ollama — those are Hermes-only.
+                Letta agents keep their memory in <span className="font-medium">core-memory blocks</span> on the shared server. Letta&apos;s git-backed memory files (<span className="font-medium">memfs</span>) are <span className="font-medium">not enabled</span> on this deploy path yet, so the context-files view will be empty. Letta agents also have no per-agent fallback model and no bundled Ollama — those are Hermes-only.
               </p>
             </div>
           </Section>
@@ -688,6 +688,9 @@ export default function WizardPage() {
               <p className="font-medium text-sm">No messaging surface for Letta agents (yet)</p>
               <p className="text-sm text-muted-foreground">
                 A Letta agent is a stateful brain on the shared server — it&apos;s reached over REST, not Signal/Telegram/Slack directly. Multiplayer messaging arrives via a separate <span className="font-medium">Hermes front</span> that proxies a group conversation to this agent (v1 bridge). Nothing to configure here.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Through that front, group approval and the audit trail carry over — they gate the turn before it runs. <span className="font-medium">Budget enforcement does not</span> on the default path: streaming is on by default and a streamed turn reports zero tokens to the enforcement hook, so proxied spend goes uncounted. Budget caps are only meaningful for these turns on the blocking, non-streaming path.
               </p>
             </div>
           </Section>
