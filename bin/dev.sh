@@ -1,5 +1,5 @@
 #!/bin/bash
-# Smart dev server launcher for Hermes Swarm Map
+# Smart dev server launcher for Swarm Map
 # - Finds a free port (default 3000, auto-increments)
 # - Kills zombie Swarm Map processes on that port (but not unrelated ones)
 # - Starts Next.js dev server

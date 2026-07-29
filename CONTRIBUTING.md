@@ -14,8 +14,8 @@ Thanks for your interest in contributing. This guide covers setup, project struc
 ### Install and run
 
 ```bash
-git clone https://github.com/NimbleCoAI/hermes-swarm-map.git
-cd hermes-swarm-map
+git clone https://github.com/NimbleCoOrg/swarm-map.git
+cd swarm-map
 npm install
 npm run dev
 ```
@@ -113,7 +113,7 @@ chore: bump dependencies
 
 ## Reporting Issues
 
-Use [GitHub Issues](https://github.com/NimbleCoAI/hermes-swarm-map/issues). Include:
+Use [GitHub Issues](https://github.com/NimbleCoOrg/swarm-map/issues). Include:
 - Browser and OS
 - Steps to reproduce
 - Expected vs. actual behavior

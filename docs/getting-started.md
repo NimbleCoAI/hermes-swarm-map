@@ -11,8 +11,8 @@ Deploy your first AI agent in under 5 minutes.
 ## Install
 
 ```bash
-git clone https://github.com/NimbleCoAI/hermes-swarm-map.git
-cd hermes-swarm-map
+git clone https://github.com/NimbleCoOrg/swarm-map.git
+cd swarm-map
 npm install
 npm run seed    # first run only
 npm run dev     # opens http://localhost:3000
