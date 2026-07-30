@@ -88,6 +88,72 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: 'Invalid name — could not slugify' }, { status: 400 })
     }
 
+    // ── Google MCP preflight ───────────────────────────────────────────────
+    // Validated HERE, before any side effect, per the same rule the Letta
+    // branch below states: return before a single door byte is written. An
+    // earlier revision of this check sat after mkdirSync + the .env write, so
+    // rejecting a deploy left a half-created agent dir containing the resolved
+    // plaintext LLM key AND permanently 409'd every retry of that name.
+    //
+    // Probe both checkout names: the repo is NimbleCoOrg/google-multiplayer-mcp
+    // but it is commonly cloned as `google-mcp`. Only checking the long name
+    // meant googleMcpDir silently became undefined — the operator ticked Google
+    // in the wizard and got no Google, with nothing reported anywhere.
+    const googleEnabled = body.googleEnabled === true
+    const googleIdentityRaw =
+      typeof body.googleIdentity === 'string' ? body.googleIdentity.trim() : ''
+    // Interpolated into YAML below; a colon or newline would either break the
+    // parse (MCP exits 1 — the very failure this fixes) or inject permission
+    // entries past the deny-by-default this is built around.
+    if (googleIdentityRaw && !/^[A-Za-z0-9._-]+$/.test(googleIdentityRaw)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Invalid googleIdentity — only letters, digits, dot, underscore and hyphen are allowed.',
+        },
+        { status: 400 },
+      )
+    }
+    const googleIdentity = googleIdentityRaw || slug
+
+    const googleMcpCandidateDirs = (
+      process.env.GOOGLE_MCP_DIR
+        ? [expandPath(process.env.GOOGLE_MCP_DIR)]
+        : [
+            expandPath('~/Documents/GitHub/google-multiplayer-mcp'),
+            expandPath('~/Documents/GitHub/google-mcp'),
+          ]
+      // A relative path passes existsSync (resolved against the server cwd) but
+      // Docker reads a non-absolute volume source as a NAMED VOLUME, silently
+      // mounting an empty dir over the bundle.
+    ).filter((d) => path.isAbsolute(d))
+    const googleMcpFoundDir = googleEnabled
+      ? googleMcpCandidateDirs.find(
+          (d) =>
+            fs.existsSync(path.join(d, 'dist', 'index.js')) &&
+            // The bundle is plain ESM importing bare `googleapis` / `js-yaml`,
+            // which resolve only via the checkout's own node_modules. Without
+            // this a pruned checkout passes the probe and exits 1 at runtime.
+            fs.existsSync(path.join(d, 'node_modules')),
+        )
+      : undefined
+    if (googleEnabled && !googleMcpFoundDir) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Google was enabled but no usable google-multiplayer-mcp checkout was found. ' +
+            `Needs both dist/index.js and node_modules in one of: ${googleMcpCandidateDirs.join(', ') || '(no absolute path configured)'}. ` +
+            'Clone it, run `npm install && npm run build`, or set GOOGLE_MCP_DIR to an absolute path.',
+        },
+        { status: 400 },
+      )
+    }
+    // Declared with the preflight so it cannot be referenced above its own
+    // initialisation — a TDZ throw here would 500 the entire deploy.
+    const googleMcpDir = googleMcpFoundDir
+
     // Resolve the LLM credential. An `existingKeyId` selects a key already in the
     // registry — its value is resolved server-side so the secret never crosses the
     // API boundary. Otherwise the pasted `llmKey` (if any) is used verbatim.
@@ -246,6 +312,15 @@ export async function POST(request: Request) {
       signalPhone: signalEnabled ? signalPhone : undefined,
       githubToken,
       braveKey,
+      // Operator-level OAuth client, shared across agents. Taken from the
+      // request when supplied, else inherited from HSM's own environment —
+      // without it google-multiplayer-mcp's auth tools cannot run at all.
+      googleClientId: googleMcpDir
+        ? (typeof body.googleClientId === 'string' && body.googleClientId) || process.env.GOOGLE_CLIENT_ID || undefined
+        : undefined,
+      googleClientSecret: googleMcpDir
+        ? (typeof body.googleClientSecret === 'string' && body.googleClientSecret) || process.env.GOOGLE_CLIENT_SECRET || undefined
+        : undefined,
       notionKey,
       browserEnabled: body.browserEnabled === true,
       lettaBrain,
@@ -256,37 +331,6 @@ export async function POST(request: Request) {
     // cont-init hook reads this .env). HSM no longer writes the credential
     // files — single source of truth in the runtime.
 
-    // Resolve Google MCP dir early (needed for both config.yaml and compose).
-    // Probe both checkout names: the repo is NimbleCoOrg/google-multiplayer-mcp
-    // but it is commonly cloned as `google-mcp`, and only checking the long
-    // name meant googleMcpDir silently became undefined — the operator ticked
-    // Google in the wizard and got no Google, with nothing reported.
-    const googleEnabled = body.googleEnabled === true
-    const googleMcpCandidateDirs = process.env.GOOGLE_MCP_DIR
-      ? [expandPath(process.env.GOOGLE_MCP_DIR)]
-      : [
-          expandPath('~/Documents/GitHub/google-multiplayer-mcp'),
-          expandPath('~/Documents/GitHub/google-mcp'),
-        ]
-    const googleMcpFoundDir = googleMcpCandidateDirs.find((d) =>
-      fs.existsSync(path.join(d, 'dist', 'index.js')),
-    )
-    if (googleEnabled && !googleMcpFoundDir) {
-      // Fail loudly rather than deploying an agent whose Google integration
-      // silently does not exist. Checking for dist/index.js (not just the
-      // directory) also catches an un-built checkout, which would mount fine
-      // and then exit 1 at runtime.
-      return NextResponse.json(
-        {
-          error:
-            'Google was enabled but no built google-multiplayer-mcp checkout was found. ' +
-            `Looked for dist/index.js in: ${googleMcpCandidateDirs.join(', ')}. ` +
-            'Clone and `npm run build` it, or set GOOGLE_MCP_DIR to its path.',
-        },
-        { status: 400 },
-      )
-    }
-    const googleMcpDir = googleEnabled ? googleMcpFoundDir : undefined
 
     // Build MCP servers config based on enabled integrations
     const githubMcpEnabled = body.githubMcpEnabled === true && !!githubToken
@@ -324,6 +368,21 @@ export async function POST(request: Request) {
           '--config',
           '/opt/data/google-permissions.yaml',
         ],
+        env: {
+          // Without this the server falls back to $HOME/.nimbleco-google/tokens
+          // (auth.ts), and since the gateway exports HOME=/opt/data the tokens
+          // land somewhere the compose file never mounts on purpose — making
+          // the /opt/google/tokens mount dead weight. Pointing the server at
+          // the mounted path is what makes token persistence intentional
+          // rather than incidental.
+          GOOGLE_TOKEN_DIR: '/opt/google/tokens',
+          // OAuth client credentials. auth.ts reads these from the process env
+          // before falling back to ~/.nimbleco-google/config.json, which HSM
+          // never writes — so without them every auth tool fails and the agent
+          // can never complete the flow, no matter how it is scoped.
+          GOOGLE_CLIENT_ID: '${GOOGLE_CLIENT_ID}',
+          GOOGLE_CLIENT_SECRET: '${GOOGLE_CLIENT_SECRET}',
+        },
       }
     }
 
@@ -370,8 +429,14 @@ export async function POST(request: Request) {
 #     folders:
 #       - <drive-folder-id>
 #
-# Then restart the agent. Run the OAuth flow once before first use:
-#   docker exec -it hermes-${slug} node \\
+# Then restart the agent. Run the OAuth flow once before first use. Both env
+# vars are required: the container is read_only, so GOOGLE_TOKEN_DIR must point
+# at the mounted (writable) tokens dir, and the client credentials are not in
+# the exec environment by default.
+#   docker exec -it \\
+#     -e GOOGLE_TOKEN_DIR=/opt/google/tokens \\
+#     -e GOOGLE_CLIENT_ID -e GOOGLE_CLIENT_SECRET \\
+#     hermes-${slug} node \\
 #     /opt/google-multiplayer-mcp/dist/index.js auth-headless ${googleIdentity}
 google:
   identity: ${googleIdentity}

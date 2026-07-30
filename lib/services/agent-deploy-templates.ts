@@ -26,6 +26,8 @@ export function generateEnvContent(params: {
   githubToken?: string
   braveKey?: string
   notionKey?: string
+  googleClientId?: string
+  googleClientSecret?: string
   browserEnabled?: boolean
   /**
    * Letta-brain "door" wiring (B1 contract): when set, the gateway forwards
@@ -35,7 +37,8 @@ export function generateEnvContent(params: {
    */
   lettaBrain?: { url: string; agentId: string; apiKey?: string }
 }): string {
-  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, notionKey, browserEnabled, lettaBrain } = params
+  const { name, port, provider, llmKey, bundledOllama, mattermostUrl, mattermostToken, telegramToken, discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, notionKey,
+    googleClientId, googleClientSecret, browserEnabled, lettaBrain } = params
 
   // Every user-supplied string below is spliced onto its own `.env` line. A
   // newline in any of them would inject extra env lines — including overriding
@@ -43,6 +46,7 @@ export function generateEnvContent(params: {
   for (const [field, value] of Object.entries({
     name, provider, llmKey, mattermostUrl, mattermostToken, telegramToken,
     discordToken, slackBotToken, slackAppToken, signalPhone, githubToken, braveKey, notionKey,
+    googleClientId, googleClientSecret,
   })) {
     if (typeof value === 'string') assertNoNewline(value, field)
   }
@@ -201,6 +205,12 @@ export function generateEnvContent(params: {
     lines.push(`LETTA_BRAIN_AGENT_ID=${lettaBrain.agentId}`)
     if (lettaBrain.apiKey) lines.push(`LETTA_BRAIN_API_KEY=${lettaBrain.apiKey}`)
   }
+  if (googleClientId || googleClientSecret) {
+    lines.push('')
+    lines.push('# Google OAuth client (read by google-multiplayer-mcp via the mcp_servers env block)')
+    if (googleClientId) lines.push(`GOOGLE_CLIENT_ID=${googleClientId}`)
+    if (googleClientSecret) lines.push(`GOOGLE_CLIENT_SECRET=${googleClientSecret}`)
+  }
   if (githubToken || braveKey || notionKey) {
     lines.push('')
     lines.push('# Optional integrations')
@@ -212,7 +222,18 @@ export function generateEnvContent(params: {
       // higher precedence than env_file, would blank it. Literal mirrors the llm key.
       lines.push(`GITHUB_PERSONAL_ACCESS_TOKEN=${githubToken}`)
     }
-    if (braveKey) lines.push(`BRAVE_API_KEY=${braveKey}`)
+    if (braveKey) {
+      // BRAVE_SEARCH_API_KEY is the var the runtime actually reads —
+      // plugins/web/brave_free/provider.py probes only that name, and so does
+      // the auto-detect table in tools/web_tools.py. Writing BRAVE_API_KEY
+      // alone (the historic name) meant a wizard-supplied Brave key was
+      // invisible to the agent: brave-free reported itself unavailable, and a
+      // config pinned to it fell through to whatever else happened to have a
+      // key. Both names are written — the canonical one for the runtime, the
+      // legacy one for anything outside it that may still read it.
+      lines.push(`BRAVE_SEARCH_API_KEY=${braveKey}`)
+      lines.push(`BRAVE_API_KEY=${braveKey}`)
+    }
     if (notionKey) {
       // Write ONLY the canonical NOTION_API_KEY (the var the keys registry
       // manages for rotation/revocation). The notion MCP server reads

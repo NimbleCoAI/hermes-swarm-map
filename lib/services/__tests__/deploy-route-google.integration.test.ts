@@ -98,11 +98,16 @@ function readPermissions(file: string): { identity: string; access: Record<strin
   return { identity, access }
 }
 
-/** Create a fake *built* google-mcp checkout under the mocked home. */
+/** Create a fake *usable* google-mcp checkout: built AND with deps installed.
+ *
+ * Both are required by the preflight — the bundle imports bare `googleapis` /
+ * `js-yaml`, which resolve only via the checkout's own node_modules.
+ */
 function makeGoogleCheckout(dirName: string) {
   const dir = path.join(h.tmpHome, 'Documents', 'GitHub', dirName)
   fs.mkdirSync(path.join(dir, 'dist'), { recursive: true })
   fs.writeFileSync(path.join(dir, 'dist', 'index.js'), '// built bundle\n')
+  fs.mkdirSync(path.join(dir, 'node_modules'), { recursive: true })
   return dir
 }
 
@@ -166,10 +171,88 @@ describe('POST /api/setup/deploy — Google MCP wiring', () => {
     expect(res.status).toBe(400)
   })
 
+  it('treats a dependency-pruned checkout as missing (no node_modules)', async () => {
+    const dir = path.join(h.tmpHome, 'Documents', 'GitHub', 'google-mcp')
+    fs.mkdirSync(path.join(dir, 'dist'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'dist', 'index.js'), '//\n')
+    // No node_modules: the bundle imports bare `googleapis`/`js-yaml`, so it
+    // would mount fine and then exit 1 at runtime.
+    const res = await deploy({ ...BASE, name: 'gpruned', googleEnabled: true })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects a googleIdentity that would break or inject into the YAML', async () => {
+    makeGoogleCheckout('google-mcp')
+    for (const bad of ['a: b', 'x\ny: z', 'has space', '']) {
+      const res = await deploy({
+        ...BASE, name: `gbad${bad.length}`, googleEnabled: true, googleIdentity: bad,
+      })
+      if (bad === '') {
+        // Empty is not invalid — it just falls back to the slug.
+        expect((await res.json()).ok).toBe(true)
+      } else {
+        expect(res.status, `googleIdentity=${JSON.stringify(bad)}`).toBe(400)
+      }
+    }
+  })
+
+  // --- the rejection must not leave anything behind ----------------------
+
+  it('leaves NO side effects when the preflight rejects', async () => {
+    // This is the regression that matters most: an earlier revision ran this
+    // check AFTER mkdirSync + the .env write, so a rejected deploy left a
+    // half-created agent dir containing the resolved plaintext LLM key and
+    // then 409'd every retry of the same name forever.
+    const res = await deploy({ ...BASE, name: 'gclean', googleEnabled: true })
+    expect(res.status).toBe(400)
+
+    const dir = agentDir('gclean')
+    expect(fs.existsSync(dir), 'no agent data dir may be created').toBe(false)
+    expect(h.dockerStart).not.toHaveBeenCalled()
+    // Nothing may have been written to the key registry either.
+    expect(h.update).not.toHaveBeenCalled()
+    expect(h.setAssignment).not.toHaveBeenCalled()
+    expect(h.add).not.toHaveBeenCalled()
+
+    // And the same name must still be deployable once the checkout is fixed.
+    makeGoogleCheckout('google-mcp')
+    const retry = await deploy({ ...BASE, name: 'gclean', googleEnabled: true })
+    expect((await retry.json()).ok, 'retry must not 409 on a leftover dir').toBe(true)
+  })
+
+  // --- the credentials and token path the server actually reads ----------
+
+  it('wires GOOGLE_TOKEN_DIR at the mounted path, not the default HOME path', async () => {
+    makeGoogleCheckout('google-mcp')
+    await deploy({ ...BASE, name: 'gtokdir', googleEnabled: true })
+
+    const cfg = fs.readFileSync(path.join(agentDir('gtokdir'), 'config.yaml'), 'utf-8')
+    // Without this the server falls back to $HOME/.nimbleco-google/tokens and
+    // the compose mount at /opt/google/tokens is dead weight.
+    expect(cfg).toContain('GOOGLE_TOKEN_DIR')
+    expect(cfg).toContain('/opt/google/tokens')
+  })
+
+  it('provisions the OAuth client credentials the auth flow needs', async () => {
+    makeGoogleCheckout('google-mcp')
+    await deploy({
+      ...BASE, name: 'gcreds', googleEnabled: true,
+      googleClientId: 'cid-123.apps.googleusercontent.com',
+      googleClientSecret: 'csecret-abc',
+    })
+
+    const env = fs.readFileSync(path.join(agentDir('gcreds'), '.env'), 'utf-8')
+    expect(env).toContain('GOOGLE_CLIENT_ID=cid-123.apps.googleusercontent.com')
+    expect(env).toContain('GOOGLE_CLIENT_SECRET=csecret-abc')
+    const cfg = fs.readFileSync(path.join(agentDir('gcreds'), 'config.yaml'), 'utf-8')
+    expect(cfg).toContain('GOOGLE_CLIENT_ID')
+  })
+
   it('honours an explicit GOOGLE_MCP_DIR override', async () => {
     const custom = fs.mkdtempSync(path.join(os.tmpdir(), 'gcustom-'))
     fs.mkdirSync(path.join(custom, 'dist'), { recursive: true })
     fs.writeFileSync(path.join(custom, 'dist', 'index.js'), '//\n')
+    fs.mkdirSync(path.join(custom, 'node_modules'), { recursive: true })
     process.env.GOOGLE_MCP_DIR = custom
 
     const res = await deploy({ ...BASE, name: 'gover', googleEnabled: true })
@@ -253,6 +336,16 @@ describe('POST /api/setup/deploy — Google MCP wiring', () => {
   })
 
   // --- the web backend the searches actually use --------------------------
+
+  it('writes the Brave key under the name the runtime actually reads', async () => {
+    await deploy({ ...BASE, name: 'gbrave', braveKey: 'brave-key-xyz' })
+
+    const env = fs.readFileSync(path.join(agentDir('gbrave'), '.env'), 'utf-8')
+    // brave_free/provider.py probes ONLY BRAVE_SEARCH_API_KEY. Writing just
+    // BRAVE_API_KEY made a wizard-supplied key invisible, so brave-free
+    // reported itself unavailable and the pinned search_backend fell through.
+    expect(env).toContain('BRAVE_SEARCH_API_KEY=brave-key-xyz')
+  })
 
   it('pins search_backend so it is not auto-detected from .env ordering', async () => {
     await deploy({ ...BASE, name: 'gweb' })
