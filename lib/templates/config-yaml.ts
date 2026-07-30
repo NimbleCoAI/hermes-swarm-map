@@ -146,8 +146,14 @@ tts:
   edge:
     voice: "en-US-AriaNeural"
 
-# --- Web tools (Firecrawl for safe content extraction) ---
+# --- Web tools ---
+# Both keys are set explicitly. Leaving search_backend unset makes the runtime
+# auto-detect from whichever API key happens to be present, so the provider an
+# agent actually searches with becomes a side effect of .env ordering rather
+# than a decision - and it changes silently when a key is added. Names must
+# match the runtime's provider registry exactly: brave-free, NOT brave.
 web:
+  search_backend: brave-free
   extract_backend: firecrawl
 
 # --- Terminal access ---
