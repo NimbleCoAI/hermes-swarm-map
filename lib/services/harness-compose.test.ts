@@ -98,6 +98,7 @@ describe('generateStandaloneCompose', () => {
       expect(result).toContain('ENABLE_VNC=true')
       expect(result).toContain('VNC_BIND=0.0.0.0')
       expect(result).toContain('VNC_RESOLUTION=1280x720')
+      expect(result).toContain('BROWSER_IDLE_TIMEOUT_MS=3600000')
       expect(result).toContain('CAMOFOX_PORT=9377')
     })
 
