@@ -62,11 +62,11 @@ Swarm Map manages two agent runtimes. They are **not** at parity, and the docs s
 | Send a message from the UI | yes | yes |
 | Edit memory, reconfigure, delete agent | yes | **not shipped** — the Letta REST surface in Swarm Map is read-only plus send-message |
 | Messaging surfaces (Signal / Telegram / Mattermost / Discord) | yes, direct | only via a Hermes front that proxies a group conversation to the agent |
-| Git-backed memory files (memfs) | n/a | **not enabled** — agents are created with `git_enabled` false |
+| Git-backed memory files (memfs) | n/a | **not enabled** — we never request `git_enabled`, so agents take the server default (`false`) |
 | Group approval + audit | yes | inherited when reached through a Hermes front |
-| Budget enforcement | yes | inherited **only on the non-streaming path** — see below |
+| Budget enforcement | yes | **does not cover proxied Letta turns** — see below |
 
-**Budget caveat, stated plainly.** Group approval and the audit trail inherit cleanly through a Hermes front, because they gate the turn before it runs. Budget accounting does not inherit on the default path: streaming is on by default and a streamed turn reports zero tokens back to the enforcement hook, so spend is not counted. Budget enforcement for proxied Letta turns is only meaningful on the blocking / non-streaming path.
+**Budget caveat, stated plainly.** Group approval and the audit trail inherit cleanly through a Hermes front, because they gate the turn before it runs. Budget does **not** inherit — on any path. Swarm Map's monthly-spend check sums `input_tokens` / `output_tokens` from each agent's `state.db` `sessions` table, and the Letta bridge never writes those columns: it records only `last_prompt_tokens` (context size). So proxied Letta spend is not counted and a soft cap is never approached. Do not deploy a Letta agent behind a Hermes front expecting the front's budget cap to bound it.
 
 Full detail, including the route inventory that backs these claims: [docs/runtimes.md](docs/runtimes.md).
 

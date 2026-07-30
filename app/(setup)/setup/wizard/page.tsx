@@ -690,7 +690,7 @@ export default function WizardPage() {
                 A Letta agent is a stateful brain on the shared server — it&apos;s reached over REST, not Signal/Telegram/Slack directly. Multiplayer messaging arrives via a separate <span className="font-medium">Hermes front</span> that proxies a group conversation to this agent (v1 bridge). Nothing to configure here.
               </p>
               <p className="text-sm text-muted-foreground">
-                Through that front, group approval and the audit trail carry over — they gate the turn before it runs. <span className="font-medium">Budget enforcement does not</span> on the default path: streaming is on by default and a streamed turn reports zero tokens to the enforcement hook, so proxied spend goes uncounted. Budget caps are only meaningful for these turns on the blocking, non-streaming path.
+                Through that front, group approval and the audit trail carry over — they gate the turn before it runs. <span className="font-medium">Budget enforcement does not carry over at all.</span> The spend check sums the token columns an agent writes to its own state DB, and the Letta bridge never writes them, so proxied turns count as zero spend on every path. Do not rely on the front&apos;s budget cap to bound a Letta agent.
               </p>
             </div>
           </Section>

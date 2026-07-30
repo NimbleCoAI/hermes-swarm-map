@@ -16,9 +16,10 @@
  * MEMFS IS NOT ENABLED — DO NOT WRITE COPY THAT PROMISES IT.
  * The 2026-07-21 research (memory/specs/2026-07-21-letta-memfs-api-and-a3.md)
  * describes memfs as a git-backed memory file tree with `system/` files pinned
- * into the prompt. That is Letta's capability, not ours yet: `git_enabled` has
- * zero occurrences anywhere in this codebase, and agents created by our deploy
- * path come up with `git_enabled: false`. So the `/files` view below is
+ * into the prompt. That is Letta's capability, not ours yet: we never send
+ * `git_enabled` (zero occurrences in executable code — only doc comments like
+ * this one), so agents created by our deploy path take the server default,
+ * observed as `git_enabled: false`. So the `/files` view below is
  * normally EMPTY, and its empty state must say "not enabled" rather than imply
  * the feature is there and the agent simply has no files.
  *

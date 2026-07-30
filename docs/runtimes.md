@@ -40,7 +40,7 @@ threading `runtime === 'letta'` branches through the Hermes page.
 | Messaging surfaces | yes, direct | only via a Hermes front that proxies a group conversation |
 | Group approval policy | yes | inherited through a Hermes front |
 | Audit log | yes | inherited through a Hermes front |
-| Budget enforcement | yes | **partial** — non-streaming path only (see below) |
+| Budget enforcement | yes | **no** — proxied turns are never counted (see below) |
 | Model cascade / fallback provider | yes | no — single model handle, no per-agent fallback |
 | Bundled Ollama | yes | no |
 
@@ -85,8 +85,9 @@ files pinned into the prompt and the rest opened on demand. Swarm Map reads that
 (`GET /v1/agents/{id}/files`) and will render it if a server exposes one — but **we do not
 enable it**:
 
-- `git_enabled` has **zero** occurrences in this repository, executable code or otherwise —
-  we never request it, so agents get the server default.
+- `git_enabled` has **zero** occurrences in this repository's executable code — we never
+  request it, so agents get the server default. (`grep -rn git_enabled --include='*.ts'
+  --include='*.tsx' .` hits only doc comments and this page.)
 - That default is `false`: freshly created Letta agents come up with `git_enabled: false`
   (observed against a live server, 2026-07).
 
@@ -98,22 +99,40 @@ memfs↔REST write/live-sync semantics, are unshipped.
 If you are writing copy about Letta memory in this product, say **core-memory blocks**.
 Say memfs only with "not enabled yet" attached.
 
-### 3. Budget does not inherit on the default path
+### 3. Budget does not inherit at all
 
 A Hermes front can proxy a group conversation to a Letta agent. Two of the door's three
-guarantees carry over cleanly, and one does not:
+guarantees carry over cleanly, and one does not carry over on *any* path:
 
 - **Group approval — inherits.** The policy check gates the turn *before* it runs, so a
   proxied turn passes through the same approval gate as any other.
 - **Audit — inherits.** The turn is recorded on the same audit path.
-- **Budget — does not inherit on the default path.** Streaming is on by default, and a
-  streamed turn reports **zero tokens** back to the enforcement hook. Zero tokens means
-  zero recorded spend, which means the soft budget cap is never approached, let alone
-  tripped. Budget enforcement for proxied turns is only meaningful on the blocking /
-  non-streaming path.
+- **Budget — does not inherit.** Swarm Map's spend check
+  (`handleBudgetCheck` in `app/api/harnesses/[id]/policy/route.ts`) compares key budgets
+  against a monthly cost derived in `lib/services/usage.ts`, which sums
+  `input_tokens` / `output_tokens` from the agent's `state.db` `sessions` table. The Letta
+  bridge in hermes-agent-mt (`gateway/run.py`, `_run_agent_via_letta`) never writes those
+  columns — the only usage it records is `last_prompt_tokens`, which tracks context size,
+  not billable spend. So proxied Letta turns contribute **zero** to the monthly total and
+  the soft cap is never approached, let alone tripped.
 
-Do not write "the bridge inherits the door's approval, audit and budget". Write the first
-two, then qualify the third.
+Two things this is **not**:
+
+- It is **not** a streaming artefact. Gateway token streaming is **off** unless an operator
+  turns it on: it follows the top-level `streaming` config
+  (`StreamingConfig.enabled` defaults to `false` in `gateway/config.py`), and the
+  `display.streaming: true` that Swarm Map writes into `config.yaml` is **CLI-only** —
+  `gateway/display_config.py` explicitly skips `display.streaming` when resolving gateway
+  streaming. The default proxied turn therefore takes the *blocking* client.
+- It is **not** fixed by forcing the blocking path. The blocking client does extract real
+  `prompt_tokens` / `completion_tokens` from the Letta payload, but it lands them in
+  `last_prompt_tokens`, which the budget query does not read. (Enabling streaming makes it
+  strictly worse — a streamed turn reports zero tokens even there — but that is a second
+  problem, not the cause.)
+
+Do not write "the bridge inherits the door's approval, audit and budget", and do not write
+"budget inherits on the non-streaming path". Write: approval and audit inherit, budget does
+not.
 
 ## Related
 
