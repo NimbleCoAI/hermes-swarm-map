@@ -4,12 +4,14 @@
 
 A commons, public goods project of [NimbleCo](https://www.nimbleco.ai/). 
 
-**Multiplayer admin and orchestrator platform for Hermes.** Deploy, manage, and monitor multiple [Hermes Agent](https://github.com/NimbleCoAI/hermes-agent) instances from one dashboard — with built-in multi-tenant security, model cascades, and platform connections.
+**Multiplayer admin and orchestrator platform for heterogeneous agent runtimes.** One dashboard for two shapes of agent: [Hermes](https://github.com/NimbleCoOrg/hermes-agent-mt) agents, where each agent is its own container, and [Letta](https://github.com/letta-ai/letta) agents, where memory-first agents live as rows on one shared server. Multi-tenant security, model cascades, and platform connections come from the same control plane either way.
 
-*First of its kind, a point and click GUI for not just managing Hermes runtimes, but also who can do what and where. Solves the multi-tenant Hermes problem. View the godhead of complexity without derealizing. Share compute.*
+*First of its kind, a point and click GUI for not just managing agent runtimes, but also who can do what and where. Solves the multi-tenant agent problem. View the godhead of complexity without derealizing. Share compute.*
+
+**Runtime support is not symmetrical yet.** Hermes is the mature path; Letta support is read-only plus send-a-message. See [Runtimes](docs/runtimes.md) for the exact shipped/not-shipped line — we would rather you read a boring matrix than discover the gap after deploying.
 
 <img width="1352" height="763" alt="Screenshot 2026-05-26 at 5 01 19 pm" src="https://github.com/user-attachments/assets/4b94f0d1-d9b8-4a81-8b47-b2dae1940741" />
-*Calm UX showing a variety of config settings for different hermes harness runtimes*
+*Calm UX showing a variety of config settings across agent harness runtimes*
 
 ---
 
@@ -17,7 +19,9 @@ A commons, public goods project of [NimbleCo](https://www.nimbleco.ai/).
 
 AI agents are most useful when they're always on — running on a server, reachable from your phone, remembering context across conversations. But running *multiple* agents across *multiple* platforms for *multiple* users? That's where it gets hard.
 
-Swarm Map is the control plane. One UI to deploy, configure, and manage a fleet of Hermes agents — each with its own personality, memory, platform connections, and budget. Everything a single agent can do, but multiplied and multiplayer.
+Swarm Map is the control plane. One UI to deploy, configure, and manage a fleet of agents — each with its own personality, memory, platform connections, and budget. Everything a single agent can do, but multiplied and multiplayer.
+
+It also gets harder when your agents aren't all the same *shape*. A Hermes agent is a container you can start, stop, rebuild, and attach messaging surfaces to. A Letta agent is a row in a shared server's database with a memory-first architecture — no container of its own, nothing to `docker restart`. Swarm Map models both behind one runtime seam (`ContainerRuntimeAdapter` for container runtimes, a separate REST provider for Letta) instead of pretending everything is a container.
 
 ## What People Build With It
 
@@ -41,6 +45,31 @@ Swarm Map is the control plane. One UI to deploy, configure, and manage a fleet 
 
 💰 **Budget Enforcement** — Set monthly spend limits per API key. Agents self-throttle when budget is exceeded.
 
+🧩 **Two Runtimes, One Seam** — Hermes (container-per-agent) and Letta (memory-first agents as rows on one shared server) in the same fleet view. Feature parity is partial and documented in [Runtimes](docs/runtimes.md); the six bullets above describe the Hermes path.
+
+---
+
+## Runtimes
+
+Swarm Map manages two agent runtimes. They are **not** at parity, and the docs say so on purpose.
+
+| | **Hermes** | **Letta** |
+|---|---|---|
+| Agent is | a container | a row on a shared server |
+| Deploy from the wizard | yes | yes (brings the shared server up, creates the agent) |
+| Start / stop / restart / rebuild | yes | n/a — no container to control (the *server* is a container and does have these) |
+| Read agent state | yes | yes — fleet list, core-memory blocks, model handle |
+| Send a message from the UI | yes | yes |
+| Edit memory, reconfigure, delete agent | yes | **not shipped** — the Letta REST surface in Swarm Map is read-only plus send-message |
+| Messaging surfaces (Signal / Telegram / Mattermost / Discord) | yes, direct | only via a Hermes front that proxies a group conversation to the agent |
+| Git-backed memory files (memfs) | n/a | **not enabled** — we never request `git_enabled`, so agents take the server default (`false`) |
+| Group approval + audit | yes | inherited when reached through a Hermes front |
+| Budget enforcement | yes | **does not cover proxied Letta turns** — see below |
+
+**Budget caveat, stated plainly.** Group approval and the audit trail inherit cleanly through a Hermes front, because they gate the turn before it runs. Budget does **not** inherit — on any path. Swarm Map's monthly-spend check sums `input_tokens` / `output_tokens` from each agent's `state.db` `sessions` table, and the Letta bridge never writes those columns: it records only `last_prompt_tokens` (context size). So proxied Letta spend is not counted and a soft cap is never approached. Do not deploy a Letta agent behind a Hermes front expecting the front's budget cap to bound it.
+
+Full detail, including the route inventory that backs these claims: [docs/runtimes.md](docs/runtimes.md).
+
 ---
 
 ## Quick Start
@@ -53,7 +82,7 @@ pnpm seed         # first run: writes settings + tier config
 pnpm dev          # http://localhost:3000
 ```
 
-On first launch, the setup wizard detects your Hermes compose directories automatically. Point it at your agent directory and go.
+On first launch, the setup wizard detects your Hermes compose directories automatically. Point it at your agent directory and go. Choosing the Letta runtime in the wizard instead brings up the shared Letta server and creates the agent on it.
 
 **New here?** Read the [Getting Started guide](docs/getting-started.md) for a full walkthrough.
 
@@ -61,13 +90,15 @@ On first launch, the setup wizard detects your Hermes compose directories automa
 
 - **Node.js 18+**
 - **Docker** running locally (used for container management)
-- **Hermes Agent** instances — see [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- For the Hermes runtime: **Hermes Agent** instances — Swarm Map deploys the multi-tenant fork [NimbleCoOrg/hermes-agent-mt](https://github.com/NimbleCoOrg/hermes-agent-mt), a fork of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- For the Letta runtime: a **Letta server** — the wizard brings one up for you via `docker/letta-compose.yml`
 
 ---
 
 ## Features
 
 - **Discovery** — auto-detect Hermes agent containers and compose files
+- **Letta fleet view** — list agents on a configured Letta server, read their core memory, send a message (read-only otherwise)
 - **Per-agent configuration** — edit env vars, SOUL.md personas, surface connections
 - **Model cascade** — ordered fallback chains across providers (Anthropic, OpenAI, Bedrock, etc.)
 - **Surface management** — connect agents to Telegram, Signal, Mattermost
@@ -155,6 +186,18 @@ Any AI agent (Claude Code, Hermes, etc.) can orchestrate your fleet via the REST
 | `GET` | `/api/audit` | Audit log (`?who=&what=&since=`) |
 | `GET/PUT` | `/api/settings` | App settings |
 
+Letta runtime — **read-only plus send-message.** This is the complete surface; there is no `PATCH`, `PUT`, or `DELETE` for Letta agents:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/letta/harnesses` | Letta server + its hosted agents, as harness rows |
+| `GET` | `/api/letta/agents` | List agents on the Letta server |
+| `GET` | `/api/letta/agents/:id/blocks` | Core-memory blocks (read-only) |
+| `GET` | `/api/letta/agents/:id/files` | Context-file view, when the server exposes one |
+| `POST` | `/api/letta/agents/:id/messages` | Send a message, get the turn back |
+
+Creating a Letta agent goes through `POST /api/setup/deploy` with the Letta runtime selected. Editing memory, reconfiguring, and deleting Letta agents are not shipped.
+
 ```bash
 # Examples
 curl http://localhost:3000/api/harnesses
@@ -183,6 +226,7 @@ Settings are stored at `~/.hermes-swarm-map/settings.json`. API keys are encrypt
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) — deploy your first agent in 5 minutes
+- [Runtimes](docs/runtimes.md) — Hermes vs Letta: what's shipped, what isn't, and the evidence
 - [Migrating Existing Agents](docs/migrating.md) — upgrade path for existing Hermes users
 - [Platform Setup](docs/platforms.md) — Signal, Telegram, Mattermost, Google Workspace guides
 - [Image vs HSM Boundary](docs/architecture/image-vs-hsm-boundary.md) — what belongs in the Docker image vs HSM scaffolding
@@ -194,4 +238,6 @@ Settings are stored at `~/.hermes-swarm-map/settings.json`. API keys are encrypt
 
 ## License
 
-[AGPL v3](LICENSE). You can use, modify, and deploy this software freely. If you modify it and expose it over a network (e.g., as a hosted service), you must make your modified source code available under the same license. Self-hosting for your own agents requires no source disclosure.
+Swarm Map — Copyright (C) 2025-2026 Juniper Bevensee and contributors. See [NOTICE](NOTICE).
+
+Licensed under [AGPL v3](LICENSE). You can use, modify, and deploy this software freely. If you modify it and expose it over a network (e.g., as a hosted service), you must make your modified source code available under the same license. Self-hosting for your own agents requires no source disclosure.

@@ -8,7 +8,7 @@ Already running Hermes agents? HSM can manage them — and optionally upgrade th
 
 HSM's wizard deploys Docker containers, but if you're running Hermes bare-metal (via `hermes gateway` or `pip install`), you can still use HSM for fleet management. HSM discovers agents by scanning data directories — Docker is optional for monitoring. For the full multi-tenant upgrade, you have two paths:
 
-1. **Stay bare-metal:** Apply the Tier 2 changes manually (env vars + plugins). Install the MT fork via `pip install -e ".[all]"` from the [hermes-agent-mt repo](https://github.com/NimbleCoAI/hermes-agent). Memory scoping works the same way regardless of deployment method.
+1. **Stay bare-metal:** Apply the Tier 2 changes manually (env vars + plugins). Install the MT fork via `pip install -e ".[all]"` from the [hermes-agent-mt repo](https://github.com/NimbleCoOrg/hermes-agent-mt). Memory scoping works the same way regardless of deployment method.
 2. **Move to Docker:** The wizard containerizes your agent with security hardening. Your data directory is mounted as a volume — same files, just managed by Docker now.
 
 ## Tier 1: Fleet Management (No Changes)
@@ -67,6 +67,11 @@ Restart your agent. It will now check with HSM before responding in new groups.
 ## Tier 3: Full Multi-Tenant (Image Switch)
 
 Switch to the MT fork image for per-context memory isolation — the core feature.
+
+> **Canonical image path:** `ghcr.io/nimblecoorg/hermes-agent-mt:latest`. Use this one.
+> It is what the wizard deploys, what `lib/seed.ts` defaults to, and the only path we
+> publish to. If you have a compose file, script, or runbook pinning the image under any
+> other namespace, repoint it here.
 
 ### What changes
 
@@ -200,10 +205,10 @@ Yes. Switch the image back to `nousresearch/hermes-agent:latest`. Context-scoped
 No. If you're using the Docker image, it's a simple image swap. Your data directory is the same. No code merges needed.
 
 **What if I'm not using Docker?**
-Install the MT fork via pip: `pip install -e ".[all]"` from the [hermes-agent-mt repo](https://github.com/NimbleCoAI/hermes-agent). Your data directory works the same way — the fork reads the same config.yaml, SOUL.md, and memories. HSM can still manage your agent for monitoring and config, even without Docker.
+Install the MT fork via pip: `pip install -e ".[all]"` from the [hermes-agent-mt repo](https://github.com/NimbleCoOrg/hermes-agent-mt). Your data directory works the same way — the fork reads the same config.yaml, SOUL.md, and memories. HSM can still manage your agent for monitoring and config, even without Docker.
 
 **What if I customized the Hermes source code?**
-If you built from source with custom modifications, you'd need to rebase your changes onto the MT fork. The MT fork has 27 patches — mostly adapter improvements. Conflicts are typically minimal. See the [rebase journal](https://github.com/NimbleCoAI/hermes-agent) for guidance.
+If you built from source with custom modifications, you'd need to rebase your changes onto the MT fork. The MT fork has 27 patches — mostly adapter improvements. Conflicts are typically minimal. See the [rebase journal](https://github.com/NimbleCoOrg/hermes-agent-mt) for guidance.
 
 **Will the import wizard modify my original files?**
 No. It copies your data directory to a new location and applies changes to the copy. Your original is never touched.

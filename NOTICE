@@ -1,0 +1,19 @@
+Swarm Map
+Copyright (C) 2025-2026 Juniper Bevensee and contributors
+
+A commons, public goods project of NimbleCo (https://www.nimbleco.ai/).
+Formerly Hermes Swarm Map / HSM.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See the LICENSE file for the full license text.
+
+Why this file exists
+--------------------
+The project name and copyright line used to sit at the top of LICENSE. GitHub
+classifies a repository's license by matching LICENSE against known license
+texts, and the prepended header was enough to make it report "Other /
+NOASSERTION" — which contradicted the AGPL v3 claim in the README and on the
+website. LICENSE is now the verbatim GNU AGPL v3 text so the classifier can
+recognise it, and the project's own attribution lives here instead.

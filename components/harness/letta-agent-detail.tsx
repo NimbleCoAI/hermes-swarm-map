@@ -11,14 +11,20 @@
  *   Lifecycle buttons  → Send message (Reset/Delete deferred to a later phase)
  *   Overview CPU/mem    → model handle + agent identity
  *   Logs tab            → message / turn viewer (send + rendered reply)
- *   Memory rows         → core-memory blocks + memfs context-file view (A3)
+ *   Memory rows         → core-memory blocks (+ a context-file view, if enabled)
  *
- * MEMFS (2026-07-21 research, memory/specs/2026-07-21-letta-memfs-api-and-a3.md):
- * a modern Letta agent's memory is a git-backed file tree; `system/` files are
- * pinned into the prompt, the rest open on demand. We surface BOTH the
- * core-memory blocks (`/core-memory/blocks`) and the live file view (`/files`).
- * Everything here is read-only except "send a message". Block/file WRITES and
- * the memfs↔REST live-sync semantics need a live server (Phase 4).
+ * MEMFS IS NOT ENABLED — DO NOT WRITE COPY THAT PROMISES IT.
+ * The 2026-07-21 research (memory/specs/2026-07-21-letta-memfs-api-and-a3.md)
+ * describes memfs as a git-backed memory file tree with `system/` files pinned
+ * into the prompt. That is Letta's capability, not ours yet: we never send
+ * `git_enabled` (zero occurrences in executable code — only doc comments like
+ * this one), so agents created by our deploy path take the server default,
+ * observed as `git_enabled: false`. So the `/files` view below is
+ * normally EMPTY, and its empty state must say "not enabled" rather than imply
+ * the feature is there and the agent simply has no files.
+ *
+ * Everything here is read-only except "send a message". Block/file WRITES,
+ * enabling memfs, and the memfs↔REST live-sync semantics are all unshipped.
  */
 
 import { useState } from 'react'
@@ -77,8 +83,8 @@ export function LettaAgentDetail({ harness }: { harness: Harness }) {
 
       <p className="text-xs text-muted-foreground">
         {isServer
-          ? 'Letta server (a real container). Hosts N agents as Postgres rows — start/stop/logs via Docker are available on the server, agents are managed over REST.'
-          : 'Letta agent — a row in the Letta server’s Postgres, not a container. No CPU/memory, no lifecycle buttons; managed over REST.'}
+          ? 'Letta server (a real container). Hosts N agents as Postgres rows — start/stop/logs via Docker are available on the server; the agents themselves are reached over REST.'
+          : 'Letta agent — a row in the Letta server’s Postgres, not a container. No CPU/memory, no lifecycle buttons. Read-only over REST, plus sending a message: editing memory, reconfiguring and deleting are not shipped.'}
       </p>
 
       {/* Overview: model handle + identity, not CPU/mem (design §4a) */}
@@ -131,14 +137,18 @@ function ServerAgentsList() {
   )
 }
 
-/** Core-memory block viewer — the seed layer that projects into memfs system/ files (design §4a). */
+/**
+ * Core-memory block viewer. This is the agent's actual live memory surface on
+ * our deploy path, because memfs is not enabled — the "blocks project into
+ * system/ files" story only applies once git-backed memory is turned on.
+ */
 function MemoryBlocks({ agentId }: { agentId: string }) {
   const { data: blocks, loading, error } = useApi<LettaBlock[]>(`/api/letta/agents/${agentId}/blocks`)
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <h3 className="text-sm font-semibold mb-2">Core memory (blocks)</h3>
       <p className="text-xs text-muted-foreground mb-3">
-        Read-only. Under memfs these blocks project into <code>system/</code> files (e.g. <code>persona.md</code>). Editing lands with the live server (Phase 4).
+        Read-only — editing memory blocks from Swarm Map is not shipped. These blocks <em>are</em> this agent&apos;s memory: git-backed memory files (memfs) are not enabled, so nothing is projected into <code>system/</code> files yet.
       </p>
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {error && <p className="text-sm text-destructive">Couldn&apos;t read memory: {error}</p>}
@@ -170,25 +180,44 @@ function MemoryBlocks({ agentId }: { agentId: string }) {
 }
 
 /**
- * memfs context-file view — the "what's in this agent's memory right now"
- * surface (GET /v1/agents/{id}/files). `system/` files are pinned into the
- * prompt every turn; others open on demand. The open/pinned marker is a
- * CONTEXT-LOADING indicator, NOT an access-control boundary (memfs has no
- * per-file ACL — see the airlock note in the spec).
+ * Context-file view (GET /v1/agents/{id}/files) — Letta's memfs surface.
+ *
+ * HONESTY: memfs is NOT enabled on our deploy path (`git_enabled: false`), so
+ * this list is empty for every agent we create. The panel therefore leads with
+ * an explicit "not enabled" state instead of an empty box under a heading that
+ * promises git-backed memory. The file list still renders if a server does
+ * expose one, so this stays useful for externally-created agents.
+ *
+ * When files ARE present: `system/` files are pinned into the prompt every
+ * turn; others open on demand. The open/pinned marker is a CONTEXT-LOADING
+ * indicator, NOT an access-control boundary (memfs has no per-file ACL — see
+ * the airlock note in the spec).
  */
 function ContextFiles({ agentId }: { agentId: string }) {
   const { data: files, loading, error } = useApi<LettaFile[]>(`/api/letta/agents/${agentId}/files`)
   const isSystem = (name?: string) => !!name && (name.startsWith('system/') || name.includes('/system/'))
+  const hasFiles = !!files && files.length > 0
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <h3 className="text-sm font-semibold mb-2">Context files (memfs)</h3>
-      <p className="text-xs text-muted-foreground mb-3">
-        The agent&apos;s git-backed memory file tree. <span className="font-medium">Pinned</span> = a <code>system/</code> file loaded into the prompt every turn; <span className="font-medium">open</span> = currently in context. This is a loading indicator, not a permission boundary.
-      </p>
+      <div className="flex items-center gap-2 mb-2">
+        <h3 className="text-sm font-semibold">Context files (memfs)</h3>
+        {!hasFiles && !loading && (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+            not enabled
+          </span>
+        )}
+      </div>
+      {hasFiles && (
+        <p className="text-xs text-muted-foreground mb-3">
+          The agent&apos;s git-backed memory file tree. <span className="font-medium">Pinned</span> = a <code>system/</code> file loaded into the prompt every turn; <span className="font-medium">open</span> = currently in context. This is a loading indicator, not a permission boundary.
+        </p>
+      )}
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {error && <p className="text-sm text-destructive">Couldn&apos;t read context files: {error}</p>}
       {files && files.length === 0 && (
-        <p className="text-sm text-muted-foreground">No context files (agent may predate memfs, or files aren&apos;t exposed on this server).</p>
+        <p className="text-sm text-muted-foreground">
+          Git-backed memory files are not enabled for agents Swarm Map deploys, so there is nothing to show here. <span className="font-medium">Core memory (blocks)</span> above is this agent&apos;s live memory. Enabling memfs is not shipped yet.
+        </p>
       )}
       {files && files.length > 0 && (
         <div className="space-y-2">
