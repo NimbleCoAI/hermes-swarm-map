@@ -13,6 +13,7 @@ import { RiskBar } from '@/components/shared/risk-bar'
 import { TierMix } from '@/components/shared/tier-mix'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Harness, HabitatTier, Tool, Key, MemoryScope, Surface } from '@/lib/types'
+import { providerOptions } from '@/lib/key-providers'
 import { SignalSetupDialog } from '@/components/surfaces/signal-setup-dialog'
 import { TelegramSetupDialog } from '@/components/surfaces/telegram-setup-dialog'
 import { MattermostSetupDialog } from '@/components/surfaces/mattermost-setup-dialog'
@@ -72,13 +73,6 @@ const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
 }
 
 const MODEL_PROVIDERS = ['anthropic', 'openrouter', 'ollama', 'custom', 'gemini', 'nous', 'bedrock', 'zai'] as const
-
-const KEY_PROVIDERS = [
-  'anthropic', 'openai', 'openrouter', 'zai', 'notion', 'github', 'telegram', 'signal',
-  'mattermost', 'aws', 'aws-bedrock', 'google-cloud', 'brave',
-  'helius', 'coingecko', 'dehashed', 'opencorporates', 'capsolver',
-  'open-measures', 'pexels',
-]
 
 type FallbackProviderEntry = { provider: string; model: string; base_url?: string }
 
@@ -193,6 +187,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyValue, setNewKeyValue] = useState('')
   const [newKeyBudget, setNewKeyBudget] = useState('')
+  const [newKeyEnvVar, setNewKeyEnvVar] = useState('')
   const [keySaving, setKeySaving] = useState(false)
   const [showAssignKey, setShowAssignKey] = useState(false)
 
@@ -238,6 +233,9 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
           value: newKeyValue,
           assignedTo: [harness.id],
           ...(newKeyName ? { name: newKeyName } : {}),
+          // Only meaningful for custom/unknown providers — resolveEnvVar ignores
+          // the hint for mapped ones, but don't send a stale value regardless.
+          ...(newKeyEnvVar && newKeyProvider === 'custom' ? { envVar: newKeyEnvVar } : {}),
           ...(newKeyBudget ? { budgetUsd: parseFloat(newKeyBudget) } : {}),
         }),
       })
@@ -252,6 +250,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
       setNewKeyName('')
       setNewKeyValue('')
       setNewKeyBudget('')
+      setNewKeyEnvVar('')
       // Recreate (not 'quick') so the new env_file value actually loads — a plain
       // restart keeps the old creation-time env. (POST /api/keys also recreates
       // server-side; this is the belt-and-suspenders client trigger.)
@@ -1285,11 +1284,14 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                     <label className="text-xs text-muted-foreground">Provider</label>
                     <select
                       value={newKeyProvider}
-                      onChange={(e) => setNewKeyProvider(e.target.value)}
+                      onChange={(e) => {
+                        setNewKeyProvider(e.target.value)
+                        if (e.target.value !== 'custom') setNewKeyEnvVar('')
+                      }}
                       className="w-full mt-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
                     >
                       <option value="">Select provider...</option>
-                      {KEY_PROVIDERS.map((p) => (
+                      {providerOptions(newKeyProvider).map((p) => (
                         <option key={p} value={p}>{p}</option>
                       ))}
                     </select>
@@ -1315,6 +1317,18 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                     className="w-full mt-1 text-sm border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
                   />
                 </div>
+                {newKeyProvider === 'custom' && (
+                  <div>
+                    <label className="text-xs text-muted-foreground">Env var (optional)</label>
+                    <input
+                      type="text"
+                      value={newKeyEnvVar}
+                      onChange={(e) => setNewKeyEnvVar(e.target.value)}
+                      placeholder="e.g. SANTIMENT_API_KEY — else derived from name"
+                      className="w-full mt-1 text-sm font-mono border border-[var(--border)] rounded-md px-2 py-1.5 bg-[var(--surface)]"
+                    />
+                  </div>
+                )}
                 <div>
                   <label className="text-xs text-muted-foreground">API Key</label>
                   <input
@@ -1337,7 +1351,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { setShowAddKey(false); setNewKeyProvider(''); setNewKeyName(''); setNewKeyValue(''); setNewKeyBudget('') }}
+                    onClick={() => { setShowAddKey(false); setNewKeyProvider(''); setNewKeyName(''); setNewKeyValue(''); setNewKeyBudget(''); setNewKeyEnvVar('') }}
                   >
                     Cancel
                   </Button>
