@@ -75,6 +75,52 @@ export const POLICY_VARS: Record<string, string[]> = Object.fromEntries(
   }),
 )
 
+// ── Connect wire protocol ─────────────────────────────────────────────────────
+//
+// The connect route's config payload uses short keys ('token', 'url', ...);
+// these tables map them to registry env vars. This is protocol, not UI copy —
+// the wizard/dialog field metadata (components/surfaces/platform-ui.ts) reads
+// configKey from here so the form payload and the env writer cannot disagree.
+
+// { env var: wire key (+ default applied when the config value is falsy) }.
+export const CONNECT_CONFIG_KEYS: Record<string, { configKey: string; default?: string }> = {
+  SIGNAL_ACCOUNT: { configKey: 'phone' },
+  SIGNAL_HTTP_URL: { configKey: 'url', default: 'http://host.docker.internal:8080' },
+  TELEGRAM_BOT_TOKEN: { configKey: 'token' },
+  MATTERMOST_URL: { configKey: 'url' },
+  MATTERMOST_TOKEN: { configKey: 'token' },
+  DISCORD_BOT_TOKEN: { configKey: 'token' },
+  SLACK_BOT_TOKEN: { configKey: 'botToken' },
+  SLACK_APP_TOKEN: { configKey: 'appToken' },
+}
+
+export type ConnectEnvEntry = {
+  envVar: string
+  configKey: string
+  default?: string
+  /** Written only when the config value is truthy (behavior vars, not credentials). */
+  optional?: boolean
+}
+
+// { platform: connect env entries } — every credential var (throws at module
+// load if one lacks a wire key), plus Signal's optional profileName, the one
+// behavior var connect writes (a display preference re-applied on connect —
+// see registry.ts). Replaces the hand-maintained buildConnectEnvVars switch.
+export const CONNECT_ENV_MAP: Record<SurfaceSlug, ConnectEnvEntry[]> = Object.fromEntries(
+  SURFACE_SLUGS.map((p) => {
+    const s = SURFACES[p]
+    const entries: ConnectEnvEntry[] = s.credentials.map((envVar) => {
+      const wire = CONNECT_CONFIG_KEYS[envVar]
+      if (!wire) throw new Error(`No connect config key for ${envVar} (${p})`)
+      return { envVar, ...wire }
+    })
+    if (s.behavior.profileName) {
+      entries.push({ envVar: s.behavior.profileName, configKey: 'profileName', optional: true })
+    }
+    return [p, entries]
+  }),
+) as Record<SurfaceSlug, ConnectEnvEntry[]>
+
 // The disconnect/duplicate strip list: credentials + every admission var. NOT
 // behavior vars — those are kept (see registry.ts). Single classification, so
 // the disconnect route and the harness duplicate path can no longer disagree

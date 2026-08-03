@@ -17,6 +17,7 @@
 import { Hash, MessageSquare, Radio, Send } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { SURFACES, SURFACE_SLUGS, type SurfaceSlug } from '@/lib/surfaces/registry'
+import { CONNECT_CONFIG_KEYS } from '@/lib/surfaces/derive'
 
 // ── Labels ────────────────────────────────────────────────────────────────────
 
@@ -93,17 +94,19 @@ export type CredentialField = {
  * per-platform field lists below are derived by walking spec.credentials, so a
  * credential var added to the registry without an entry here fails the
  * invariant test (and throws at module load) instead of silently rendering no
- * input for it.
+ * input for it. configKey is NOT here — it is wire protocol, sourced from
+ * CONNECT_CONFIG_KEYS (lib/surfaces/derive) so the form payload and
+ * buildConnectEnvVars cannot disagree.
  */
-export const CREDENTIAL_FIELD_META: Record<string, Omit<CredentialField, 'key'>> = {
-  SIGNAL_ACCOUNT: { label: 'Phone Number (SIGNAL_ACCOUNT)', configKey: 'phone', placeholder: '+1234567890' },
-  SIGNAL_HTTP_URL: { label: 'Signal HTTP URL', configKey: 'url', placeholder: 'http://host.docker.internal:8080' },
-  TELEGRAM_BOT_TOKEN: { label: 'Bot Token (TELEGRAM_BOT_TOKEN)', configKey: 'token', placeholder: '123456789:ABCdefGHIjklMNOpqrsTUVwxyz' },
-  MATTERMOST_URL: { label: 'Mattermost URL', configKey: 'url', placeholder: 'https://mattermost.example.com' },
-  MATTERMOST_TOKEN: { label: 'Bot Token (MATTERMOST_TOKEN)', configKey: 'token', placeholder: 'your-bot-token' },
-  DISCORD_BOT_TOKEN: { label: 'Bot Token (DISCORD_BOT_TOKEN)', configKey: 'token', placeholder: 'MTAx...xxxx.xxxxxx.xxxx' },
-  SLACK_BOT_TOKEN: { label: 'Bot Token (SLACK_BOT_TOKEN)', configKey: 'botToken', placeholder: 'xoxb-...' },
-  SLACK_APP_TOKEN: { label: 'App Token (SLACK_APP_TOKEN)', configKey: 'appToken', placeholder: 'xapp-...' },
+export const CREDENTIAL_FIELD_META: Record<string, Omit<CredentialField, 'key' | 'configKey'>> = {
+  SIGNAL_ACCOUNT: { label: 'Phone Number (SIGNAL_ACCOUNT)', placeholder: '+1234567890' },
+  SIGNAL_HTTP_URL: { label: 'Signal HTTP URL', placeholder: 'http://host.docker.internal:8080' },
+  TELEGRAM_BOT_TOKEN: { label: 'Bot Token (TELEGRAM_BOT_TOKEN)', placeholder: '123456789:ABCdefGHIjklMNOpqrsTUVwxyz' },
+  MATTERMOST_URL: { label: 'Mattermost URL', placeholder: 'https://mattermost.example.com' },
+  MATTERMOST_TOKEN: { label: 'Bot Token (MATTERMOST_TOKEN)', placeholder: 'your-bot-token' },
+  DISCORD_BOT_TOKEN: { label: 'Bot Token (DISCORD_BOT_TOKEN)', placeholder: 'MTAx...xxxx.xxxxxx.xxxx' },
+  SLACK_BOT_TOKEN: { label: 'Bot Token (SLACK_BOT_TOKEN)', placeholder: 'xoxb-...' },
+  SLACK_APP_TOKEN: { label: 'App Token (SLACK_APP_TOKEN)', placeholder: 'xapp-...' },
 }
 
 /**
@@ -117,8 +120,10 @@ export const PLATFORM_CREDENTIAL_FIELDS: Record<SurfaceSlug, CredentialField[]> 
       p,
       SURFACES[p].credentials.map((envVar): CredentialField => {
         const meta = CREDENTIAL_FIELD_META[envVar]
+        const wire = CONNECT_CONFIG_KEYS[envVar]
         if (!meta) throw new Error(`No credential field metadata for ${envVar} (${p})`)
-        return { key: meta.configKey, ...meta }
+        if (!wire) throw new Error(`No connect config key for ${envVar} (${p})`)
+        return { key: wire.configKey, configKey: wire.configKey, ...meta }
       }),
     ]),
   ) as Record<SurfaceSlug, CredentialField[]>

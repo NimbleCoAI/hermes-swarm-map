@@ -10,6 +10,8 @@ import { isValidIdentity } from '../services/surface-admins'
 import {
   USERS_VARS,
   GROUPS_VARS,
+  CONNECT_CONFIG_KEYS,
+  CONNECT_ENV_MAP,
   MENTION_GATING_VARS,
   OBSERVE_UNMENTIONED_VARS,
   GROUP_INVITE_POLICY_VARS,
@@ -254,5 +256,61 @@ describe('identity-regex unification (D8): isValidIdentity == canonical pattern'
     for (const p of SURFACE_SLUGS) {
       expect(SURFACES[p].identity.nativePattern.flags, `${p} pattern flags`).toBe('')
     }
+  })
+})
+
+// ── Connect wire protocol (CONNECT_ENV_MAP) ──────────────────────────────────
+describe('connect wire map derives every credential var', () => {
+  it('golden: wire map == the buildConnectEnvVars switch it replaced', () => {
+    expect(CONNECT_ENV_MAP).toEqual({
+      signal: [
+        { envVar: 'SIGNAL_ACCOUNT', configKey: 'phone' },
+        { envVar: 'SIGNAL_HTTP_URL', configKey: 'url', default: 'http://host.docker.internal:8080' },
+        { envVar: 'SIGNAL_PROFILE_NAME', configKey: 'profileName', optional: true },
+      ],
+      telegram: [{ envVar: 'TELEGRAM_BOT_TOKEN', configKey: 'token' }],
+      mattermost: [
+        { envVar: 'MATTERMOST_URL', configKey: 'url' },
+        { envVar: 'MATTERMOST_TOKEN', configKey: 'token' },
+      ],
+      discord: [{ envVar: 'DISCORD_BOT_TOKEN', configKey: 'token' }],
+      slack: [
+        { envVar: 'SLACK_BOT_TOKEN', configKey: 'botToken' },
+        { envVar: 'SLACK_APP_TOKEN', configKey: 'appToken' },
+      ],
+    })
+  })
+
+  it('every credential var appears exactly once, as a non-optional entry', () => {
+    for (const p of SURFACE_SLUGS) {
+      const credentialEntries = CONNECT_ENV_MAP[p].filter((e) => !e.optional)
+      expect(
+        credentialEntries.map((e) => e.envVar),
+        `${p} credential coverage`,
+      ).toEqual(SURFACES[p].credentials)
+    }
+  })
+
+  it('optional entries are behavior vars, never credentials or admission', () => {
+    for (const p of SURFACE_SLUGS) {
+      const s = SURFACES[p]
+      const behaviorVars = Object.values(s.behavior)
+      for (const e of CONNECT_ENV_MAP[p].filter((e) => e.optional)) {
+        expect(behaviorVars, `${p} optional entry ${e.envVar}`).toContain(e.envVar)
+        expect(ALL_SURFACE_VARS.has(e.envVar)).toBe(true)
+      }
+    }
+  })
+
+  it('wire keys are unique within each platform (payload keys cannot collide)', () => {
+    for (const p of SURFACE_SLUGS) {
+      const keys = CONNECT_ENV_MAP[p].map((e) => e.configKey)
+      expect(new Set(keys).size, `${p} configKey collision`).toBe(keys.length)
+    }
+  })
+
+  it('CONNECT_CONFIG_KEYS covers exactly the credential universe (no orphans)', () => {
+    const allCredentials = SURFACE_SLUGS.flatMap((p) => SURFACES[p].credentials).sort()
+    expect(Object.keys(CONNECT_CONFIG_KEYS).sort()).toEqual(allCredentials)
   })
 })
