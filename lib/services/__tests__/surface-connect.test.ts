@@ -294,4 +294,12 @@ describe('buildConnectEnvVars parity with the replaced switch', () => {
     })
     expect(buildConnectEnvVars('whatsapp', { token: 't' })).toEqual({})
   })
+
+  it('missing non-optional credentials stay present-with-undefined (route empty-check unchanged)', () => {
+    // A future `if (!value) continue` applied to non-optional entries would
+    // silently flip the connect route's Object.keys().length check.
+    const vars = buildConnectEnvVars('telegram', {})
+    expect(Object.keys(vars)).toEqual(['TELEGRAM_BOT_TOKEN'])
+    expect(vars.TELEGRAM_BOT_TOKEN).toBeUndefined()
+  })
 })
