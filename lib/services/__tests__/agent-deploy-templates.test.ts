@@ -66,6 +66,15 @@ describe('generateEnvContent', () => {
     expect(env).toMatch(/^DISCORD_ALLOW_BOTS=none$/m)
   })
 
+  it('seeds channel-scoped access on (inert until channels are approved)', () => {
+    const env = generateEnvContent({ ...base, discordToken: 'discord.bot.token' })
+    // Org policy: anyone in an admin-approved channel may talk to the bot.
+    // Safe as a seed: the '0' sentinel parses to no explicit channel ids and
+    // '*' is never honored as a grant, so the flag grants nothing until an
+    // operator approves concrete channels.
+    expect(env).toMatch(/^DISCORD_CHANNEL_SCOPED_ACCESS=true$/m)
+  })
+
   it('leaves discord vars commented out when no token is provided', () => {
     const env = generateEnvContent({ ...base })
     expect(env).toContain('# DISCORD_BOT_TOKEN=')

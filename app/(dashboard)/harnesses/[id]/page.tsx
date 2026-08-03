@@ -46,6 +46,9 @@ type SurfaceSettings = {
 type Settings = {
   dmPolicy: 'approved-only' | 'allow-all'
   surfaces: Record<string, SurfaceSettings>
+  // Optimistic-concurrency token from GET; round-tripped in PUT, refreshed
+  // from the PUT response. A stale token gets a 409 instead of a lost update.
+  version?: string
 }
 
 const PLATFORM_LABELS: Record<string, { users: string; groups: string }> = {
@@ -395,8 +398,22 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
         body: JSON.stringify(surfaceSettings),
       })
       const data = await res.json()
-      if (data.success) {
+      if (res.status === 409) {
+        // Someone else saved since this snapshot was loaded (another tab, the
+        // Settings tab, a policy write). Re-fetch rather than overwrite them.
+        toast.error(data.error || 'Settings changed since you loaded them — reloaded, re-apply your edit.')
+        const fresh = await fetch(`/api/harnesses/${id}/settings`).then(r => r.json()).catch(() => null)
+        if (fresh && !fresh.error) {
+          setSurfaceSettings(fresh)
+          setSettingsDirty(false)
+        }
+      } else if (data.success) {
         setSettingsDirty(false)
+        // Carry the fresh version token so the next save doesn't 409 against
+        // our own write.
+        if (data.version) {
+          setSurfaceSettings(prev => (prev ? { ...prev, version: data.version } : prev))
+        }
         if (data.restarted) {
           // The PUT handler already recreated the container — no second restart needed.
           // A second POST /restart would hit the recreate's lock and return 409,
@@ -405,7 +422,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
           setSettingsSaved(false)
           refetch()
         } else {
-          toast.success('Settings saved')
+          toast.success(data.unchanged ? 'No changes — agent left running.' : 'Settings saved')
           setSettingsSaved(true)
         }
       } else {
@@ -1027,7 +1044,13 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                             </div>
                           )}
                           <div className="space-y-1">
-                            <label className="text-xs font-medium text-muted-foreground">Admins ({labels.users})</label>
+                            <label className="text-xs font-medium text-muted-foreground">
+                              {/* "Admins" undersold what this list does on Discord: it is the
+                                  user ALLOWLIST — the only people the bot answers unless
+                                  channel-scoped access is enabled. The mislabel caused a real
+                                  incident (approved channel, silent bot). */}
+                              {platform === 'discord' ? `Allowed users (${labels.users})` : `Admins (${labels.users})`}
+                            </label>
                             <TagInput
                               values={surf.allowedUsers}
                               onChange={(v) => updateSurfaceSetting(platform, 'allowedUsers', v)}
@@ -1042,7 +1065,9 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                               }}
                             />
                             <p className="text-xs text-muted-foreground">
-                              Admins can DM, add bot to groups, approve commands, and access global memory.
+                              {platform === 'discord'
+                                ? 'The user allowlist: these users can DM the bot and message it anywhere it listens. Everyone else is only answered in Approved Channels, and only when channel-scoped access (DISCORD_CHANNEL_SCOPED_ACCESS) is enabled on the agent.'
+                                : 'Admins can DM, add bot to groups, approve commands, and access global memory.'}
                               {platform === 'telegram' && (
                                 <> Entries may be numeric Telegram user IDs or @usernames — @usernames are resolved to IDs automatically.</>
                               )}

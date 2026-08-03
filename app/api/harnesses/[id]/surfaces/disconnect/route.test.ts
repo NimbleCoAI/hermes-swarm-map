@@ -50,6 +50,19 @@ describe('surface disconnect — applies removal by recreating the container', (
   })
 
   it('recreates the container after stripping the discord env', async () => {
+    // A .env carrying the full Discord policy surface — the strip assertions
+    // below are only meaningful if every key is actually present beforehand.
+    vi.mocked(fs.readFileSync).mockReturnValue([
+      'GITHUB_TOKEN=x',
+      'DISCORD_BOT_TOKEN=tok',
+      'DISCORD_ALLOWED_USERS=111',
+      'DISCORD_ALLOWED_CHANNELS=555',
+      'DISCORD_ALLOWED_ROLES=777',
+      'DISCORD_IGNORED_CHANNELS=888',
+      'DISCORD_ALLOW_BOTS=none',
+      'DISCORD_REQUIRE_MENTION=true',
+      'DISCORD_CHANNEL_SCOPED_ACCESS=true',
+    ].join('\n') + '\n' as never)
     const req = new Request('http://localhost/api/harnesses/h_seraph/surfaces/disconnect', {
       method: 'POST',
       body: JSON.stringify({ platform: 'discord' }),
@@ -61,6 +74,20 @@ describe('surface disconnect — applies removal by recreating the container', (
     expect(res.status).toBe(200)
     expect(body.ok).toBe(true)
     expect(restartMock).toHaveBeenCalledWith('h_seraph', 'recreate')
+
+    // The full Discord policy surface is stripped — including the vars added
+    // by hsm#186 and DISCORD_CHANNEL_SCOPED_ACCESS. Leaving any behind means a
+    // future reconnect inherits stale policy the operator believed was gone.
+    const envWrite = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .find(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
+    const written = (envWrite?.[1] as string) ?? ''
+    for (const key of [
+      'DISCORD_BOT_TOKEN', 'DISCORD_ALLOWED_USERS', 'DISCORD_ALLOWED_CHANNELS',
+      'DISCORD_ALLOWED_ROLES', 'DISCORD_IGNORED_CHANNELS', 'DISCORD_ALLOW_BOTS',
+      'DISCORD_REQUIRE_MENTION', 'DISCORD_CHANNEL_SCOPED_ACCESS',
+    ]) {
+      expect(written).not.toContain(`${key}=`)
+    }
   })
 
   it('recreates the container after stripping the slack env', async () => {

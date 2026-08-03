@@ -28,6 +28,7 @@ vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
 import { GET, PUT } from './route'
 import { services } from '@/lib/services'
 import { expandSignalAllowlist, expandTelegramAllowlist } from '@/lib/resolvers'
+import { buildSettingsEnvValue } from '@/lib/env-helpers'
 
 function makeParams(id: string) {
   return { params: Promise.resolve({ id }) }
@@ -46,6 +47,7 @@ describe('Settings API — PUT', () => {
     vi.clearAllMocks()
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
     vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
   })
@@ -213,6 +215,7 @@ describe('Settings API — GET mention-gating reflects the runtime', () => {
     vi.clearAllMocks()
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
   })
   afterEach(() => vi.restoreAllMocks())
@@ -250,6 +253,7 @@ describe('Settings API — GET group invite policy read-back', () => {
     vi.clearAllMocks()
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
   })
   afterEach(() => vi.restoreAllMocks())
@@ -321,6 +325,7 @@ describe('Settings API — Discord authorization vars', () => {
     written = ''
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     envFixture('GITHUB_TOKEN=x\n')
     // Capture the .env write specifically — the route also writes
     // resolved-identities.json, which would otherwise clobber this.
@@ -391,6 +396,7 @@ describe('Settings API — GET reports the real Discord state', () => {
     vi.clearAllMocks()
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -455,6 +461,7 @@ describe('Settings API — GET→PUT round trip cannot widen access', () => {
     written = ''
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -562,6 +569,7 @@ describe('Settings API — the deny sentinel is narrow and recoverable', () => {
     written = ''
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
       if (typeof data === 'string' && String(p).endsWith('.env')) written = data
     }) as never)
@@ -684,6 +692,7 @@ describe('Settings API — sentinel is server-derived', () => {
     written = ''
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
       if (typeof data === 'string' && String(p).endsWith('.env')) written = data
     }) as never)
@@ -749,6 +758,7 @@ describe('Settings API — ignored channels are written trimmed', () => {
     written = ''
     vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
     vi.spyOn(fs, 'existsSync').mockImplementation(((p: string) => !String(p).endsWith('resolved-identities.json')) as never)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
     vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
     vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, data: unknown) => {
       if (typeof data === 'string' && String(p).endsWith('.env')) written = data
@@ -776,5 +786,148 @@ describe('Settings API — ignored channels are written trimmed', () => {
     expect(written).toMatch(/^DISCORD_IGNORED_CHANNELS=a,#b$/m)
     expect(written).not.toMatch(/DISCORD_IGNORED_CHANNELS=.* #/)
     expect(written).toMatch(/^DISCORD_ALLOWED_ROLES=555$/m)
+  })
+})
+
+describe('Settings API — optimistic concurrency (409) + no-op detection', () => {
+  // A realistic deployed .env: the PUT handler materializes secure defaults for
+  // every policy var it owns, so a fixture missing them would always "change".
+  const ENV = [
+    'GITHUB_TOKEN=x',
+    'DISCORD_ALLOWED_USERS=111',
+    'DISCORD_ALLOWED_CHANNELS=555',
+    'HERMES_DM_POLICY=approved-only',
+    'SIGNAL_GROUP_INVITE_POLICY=approved-only',
+    'SLACK_CHANNEL_POLICY=approved-only',
+    'TELEGRAM_GROUP_INVITE_POLICY=approved-only',
+    'SIGNAL_REQUIRE_MENTION=true',
+    'TELEGRAM_REQUIRE_MENTION=true',
+    'MATTERMOST_REQUIRE_MENTION=true',
+    'DISCORD_REQUIRE_MENTION=true',
+    'SLACK_REQUIRE_MENTION=true',
+    'SIGNAL_OBSERVE_UNMENTIONED=true',
+    'MATTERMOST_OBSERVE_UNMENTIONED=true',
+    'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true',
+    'HERMES_APPROVAL_ADMIN_ONLY=true',
+    'HERMES_MEMORY_SCOPE=channel',
+  ].join('\n') + '\n'
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // The file-level mock stubs this to '' — the no-op detection tests need the
+    // real rendering semantics (list -> join, else allowAll -> '*', else '').
+    vi.mocked(buildSettingsEnvValue).mockImplementation(
+      ((_dm: unknown, allowAll: boolean, users: string[]) =>
+        users.length > 0 ? users.join(',') : allowAll ? '*' : '') as never,
+    )
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(ENV as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  const policyBody = {
+    dmPolicy: 'approved-only',
+    groupInvitePolicy: 'approved-only',
+    mentionGating: false,
+    commandApprovalAdminOnly: true,
+    memoryScope: 'channel',
+    surfaces: {},
+  }
+
+  it('GET includes the env mtime as version', async () => {
+    const res = await GET(makeRequest({}) as Request, makeParams('h_test'))
+    const data = await res.json()
+    expect(data.version).toBe('1111')
+  })
+
+  it('PUT with a stale version is rejected 409 with no write and no restart', async () => {
+    const res = await PUT(makeRequest({ ...policyBody, version: '999' }), makeParams('h_test'))
+    expect(res.status).toBe(409)
+    const data = await res.json()
+    expect(data.currentVersion).toBe('1111')
+    expect(fs.writeFileSync).not.toHaveBeenCalled()
+    expect(services.harness.restart).not.toHaveBeenCalled()
+  })
+
+  it('PUT with the current version proceeds', async () => {
+    const res = await PUT(makeRequest({ ...policyBody, version: '1111' }), makeParams('h_test'))
+    expect(res.status).toBe(200)
+  })
+
+  it('PUT without a version still works (scripted callers)', async () => {
+    const res = await PUT(makeRequest(policyBody), makeParams('h_test'))
+    expect(res.status).toBe(200)
+  })
+
+  it('a byte-identical PUT neither rewrites .env nor recreates the container', async () => {
+    // Round-trip the exact on-disk state: same users, same channels, same
+    // policies as the defaults derived from ENV. The rendered content must be
+    // byte-identical, and a recreate here would kill in-flight work for nothing.
+    const body = {
+      dmPolicy: 'approved-only',
+      surfaces: {
+        discord: {
+          allowedUsers: ['111'],
+          allowedGroups: ['555'],
+          allowAll: false,
+          allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.unchanged).toBe(true)
+    expect(data.restarted).toBe(false)
+    const envWrites = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
+    expect(envWrites).toHaveLength(0)
+    expect(services.harness.restart).not.toHaveBeenCalled()
+  })
+
+  it('a changed PUT still writes and restarts', async () => {
+    const body = {
+      dmPolicy: 'approved-only',
+      surfaces: {
+        discord: {
+          allowedUsers: ['111', '222'],
+          allowedGroups: ['555'],
+          allowAll: false,
+          allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.unchanged).toBe(false)
+    expect(data.restarted).toBe(true)
+    expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
+  })
+
+  it('GET no longer merges resolved nativeIds into allowedUsers (read is not laundered)', async () => {
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((p: string) => {
+      if (String(p).endsWith('resolved-identities.json')) {
+        return JSON.stringify({ discord: [{ display: 'someone', nativeId: '424242' }] })
+      }
+      return ENV
+    }) as never)
+    const res = await GET(makeRequest({}) as Request, makeParams('h_test'))
+    const data = await res.json()
+    expect(data.surfaces.discord.allowedUsers).toEqual(['111'])
+    expect(data.surfaces.discord.allowedUsers).not.toContain('424242')
+    // Display data still flows through the dedicated field.
+    expect(data.surfaces.discord.resolvedUsers).toEqual([{ display: 'someone', nativeId: '424242' }])
+  })
+
+  it('a policy-only PUT (no surfaces key) does not wipe resolved-identities.json', async () => {
+    const { surfaces: _s, ...noSurfaces } = policyBody
+    const res = await PUT(makeRequest(noSurfaces), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    const resolvedWrites = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(c => typeof c[0] === 'string' && (c[0] as string).endsWith('resolved-identities.json'))
+    expect(resolvedWrites).toHaveLength(0)
   })
 })

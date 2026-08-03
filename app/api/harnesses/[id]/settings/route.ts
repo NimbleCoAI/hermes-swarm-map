@@ -149,6 +149,23 @@ type SettingsResponse = {
   // (harnesses.json) and regenerate the compose, not the .env.
   resources?: { memory?: string; cpus?: string }
   surfaces: Record<string, SurfaceSettings>
+  // Optimistic-concurrency token: the .env mtime as GET observed it. Clients
+  // round-trip it in PUT; a mismatch means someone else wrote settings since
+  // this snapshot was loaded and the PUT is rejected with 409 instead of
+  // silently reverting their change (the lost-update bug — see
+  // docs/audits/hsm-settings-lost-update.md in nimbleco-egregore). Optional on
+  // PUT so hand-built callers keep working; both UI clients send it.
+  version?: string
+  // Read-only in GET: whether DISCORD_CHANNEL_SCOPED_ACCESS is enabled on the
+  // agent. Env-managed; the PUT loop never writes it.
+  discordChannelScopedAccess?: boolean
+}
+
+// The .env file is the single source of truth these routes read and write, so
+// its mtime is a serviceable version token. String-typed because mtimeMs is a
+// float and JSON round-trips of floats invite precision surprises.
+function envVersion(envPath: string): string {
+  return String(fs.statSync(envPath).mtimeMs)
 }
 
 export async function GET(
@@ -282,13 +299,13 @@ export async function GET(
   for (const [platform, surf] of Object.entries(surfaces)) {
     const resolved = resolvedIdentities[platform]
     if (resolved?.length) {
+      // Display data only — carried in the separate resolvedUsers field. The
+      // native IDs are deliberately NOT merged into allowedUsers anymore: both
+      // UI clients PUT the whole document back, so a merged read meant every
+      // GET→PUT round-trip rewrote the on-disk allowlist with values the
+      // operator never typed (the read-side half of the lost-update bug).
+      // GET must return the .env values as they are.
       (surf as any).resolvedUsers = resolved
-      // Merge native IDs into allowedUsers so is_platform_admin matches
-      const nativeIds = resolved.map(r => r.nativeId).filter(Boolean)
-      if (nativeIds.length > 0) {
-        (surf as any).allowedUsers = [...new Set([...(surf as any).allowedUsers, ...nativeIds])]
-        ;(surf as any).adminUsers = (surf as any).allowedUsers
-      }
     }
   }
 
@@ -309,6 +326,14 @@ export async function GET(
     capsolverConfigured,
     resources,
     surfaces,
+    version: envVersion(envPath),
+  }
+
+  // Read-only surfacing of the channel-scoped access posture (set via env, not
+  // managed by this route — the PUT loop must never rewrite it).
+  if (env['DISCORD_CHANNEL_SCOPED_ACCESS'] !== undefined) {
+    response.discordChannelScopedAccess =
+      ['true', '1', 'yes'].includes((env['DISCORD_CHANNEL_SCOPED_ACCESS'] || '').trim().toLowerCase())
   }
 
   return NextResponse.json(response)
@@ -327,6 +352,24 @@ export async function PUT(
   }
 
   const body = await request.json() as SettingsResponse
+
+  // Optimistic concurrency: reject a write based on a stale snapshot. Without
+  // this, PUT is a whole-document replace and the last writer silently reverts
+  // everyone else's changes — including security policy (who may talk to an
+  // agent). The token is optional so scripted callers without one keep
+  // working; both UI clients send it and re-fetch on 409.
+  if (body.version !== undefined) {
+    const currentVersion = envVersion(envPath)
+    if (body.version !== currentVersion) {
+      return NextResponse.json(
+        {
+          error: 'Settings changed since you loaded them — reload and re-apply your edit.',
+          currentVersion,
+        },
+        { status: 409 },
+      )
+    }
+  }
 
   // Validate the Discord authorization fields before touching the .env. Both
   // failure modes here are silent AND fail-open at runtime, so reject rather
@@ -413,13 +456,21 @@ export async function PUT(
   }
 
   let content = fs.readFileSync(envPath, 'utf-8')
+  // Kept for the no-op detection at the end: a PUT whose rendered .env is
+  // byte-identical must not rewrite the file (bumping the version token for
+  // nothing) and must not recreate the container (which kills in-flight work).
+  const originalContent = content
 
   // Telegram allowlist as written to the env — captured so the policy-plane
   // admin overlay (SurfaceAdminService) can be synced after the env write.
   let telegramAllowlist: string[] | undefined
 
   for (const [platform, vars] of Object.entries(PLATFORM_VARS)) {
-    const settings = body.surfaces[platform]
+    // Optional-chained: a policy-only body legitimately has no `surfaces` key
+    // at all. Bare indexing here was the crash in the 2026-07-28 error log
+    // ("Cannot read properties of undefined (reading 'signal')") — and that
+    // hand-built PUT had already mutated state before dying.
+    const settings = body.surfaces?.[platform]
     if (!settings) continue
 
     // Users — empty string = no one allowed (secure default), * = allow all.
@@ -633,7 +684,10 @@ export async function PUT(
     }
   }
 
-  fs.writeFileSync(envPath, content, { mode: 0o600 })
+  const envUnchanged = content === originalContent
+  if (!envUnchanged) {
+    fs.writeFileSync(envPath, content, { mode: 0o600 })
+  }
 
   // Keep the policy-plane admin overlay converged with the Telegram allowlist
   // just written — the two admin stores must never diverge. Non-numeric entries
@@ -703,25 +757,30 @@ export async function PUT(
     }
   }
 
-  // Resolve identifiers to native IDs (best-effort)
-  const resolvedMap: Record<string, Array<{ display: string; nativeId: string; profileName?: string }>> = {}
-  for (const [platform, settings] of Object.entries(body.surfaces || {})) {
-    if (!settings?.allowedUsers?.length) continue
-    const resolved: Array<{ display: string; nativeId: string; profileName?: string }> = []
-    for (const identifier of settings.allowedUsers) {
-      const result = await resolveIdentifier(id, platform, identifier)
-      if (result) {
-        resolved.push(result)
-      } else {
-        resolved.push({ display: identifier, nativeId: identifier })
+  // Resolve identifiers to native IDs (best-effort). Only when the body
+  // actually carried surfaces: a policy-only PUT (e.g. the Settings tab, which
+  // has no surface controls and omits `surfaces` entirely) must not regenerate
+  // the file from nothing — that would wipe every platform's display data.
+  if (body.surfaces !== undefined) {
+    const resolvedMap: Record<string, Array<{ display: string; nativeId: string; profileName?: string }>> = {}
+    for (const [platform, settings] of Object.entries(body.surfaces || {})) {
+      if (!settings?.allowedUsers?.length) continue
+      const resolved: Array<{ display: string; nativeId: string; profileName?: string }> = []
+      for (const identifier of settings.allowedUsers) {
+        const result = await resolveIdentifier(id, platform, identifier)
+        if (result) {
+          resolved.push(result)
+        } else {
+          resolved.push({ display: identifier, nativeId: identifier })
+        }
       }
+      resolvedMap[platform] = resolved
     }
-    resolvedMap[platform] = resolved
+    const resolvedPath = path.join(dataDir, 'resolved-identities.json')
+    try {
+      fs.writeFileSync(resolvedPath, JSON.stringify(resolvedMap, null, 2), { mode: 0o600 })
+    } catch {}
   }
-  const resolvedPath = path.join(dataDir, 'resolved-identities.json')
-  try {
-    fs.writeFileSync(resolvedPath, JSON.stringify(resolvedMap, null, 2), { mode: 0o600 })
-  } catch {}
 
   // Recreate the container so the updated .env (and, for VPN changes, the
   // regenerated compose) actually loads. env_file is read at container creation,
@@ -732,8 +791,21 @@ export async function PUT(
   // this flag instead of firing a second POST /restart. A second restart hits the
   // recreate's restart-lock and returns 409 "restart already in progress", which
   // the old UI surfaced as "restart failed — restart manually".
+  // …but skip the recreate entirely when nothing that requires one changed:
+  // identical .env and no VPN/resource change means the running container is
+  // already in the desired state, and a recreate would only destroy in-flight
+  // work. (This alone would have prevented the destroyed-run incidents — see
+  // docs/audits/hsm-settings-lost-update.md in nimbleco-egregore.)
   let restarted = false
-  try { services.harness.restart(id, 'recreate'); restarted = true } catch {}
+  if (!envUnchanged || vpnChanged || resourcesChanged) {
+    try { services.harness.restart(id, 'recreate'); restarted = true } catch {}
+  }
 
-  return NextResponse.json({ success: true, restarted })
+  return NextResponse.json({
+    success: true,
+    restarted,
+    unchanged: envUnchanged && !vpnChanged && !resourcesChanged,
+    // Fresh token so clients can keep editing without a refetch.
+    version: envVersion(envPath),
+  })
 }
