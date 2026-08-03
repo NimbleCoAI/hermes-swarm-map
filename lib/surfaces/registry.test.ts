@@ -6,6 +6,7 @@
 // new var, that violates a class rule fails here instead of shipping as drift.
 import { describe, it, expect } from 'vitest'
 import { SURFACES, SURFACE_SLUGS, isSurfaceSlug, surfaceSpec } from './registry'
+import { isValidIdentity } from '../services/surface-admins'
 import {
   USERS_VARS,
   GROUPS_VARS,
@@ -193,19 +194,65 @@ describe('registry structural invariants', () => {
   })
 })
 
-// ── Known, deliberately-unresolved divergences (drift D8) ────────────────────
-// Two legacy sites validate the "same" native id with different bounds. Phase 1
-// does NOT unify them (that would change validation behavior); this test DOCUMENTS
-// the divergence so it is visible and tracked, and fails loudly if either side
-// moves unexpectedly. Unifying onto registry.identity.nativePattern is a
-// follow-up (needs its own behavior review).
+// ── Identity-regex unification (drift D8 — resolved) ─────────────────────────
+// The legacy sites that validated the "same" native id with their own bounds
+// (surface-admins.isValidIdentity's per-platform switch, the resolvers' skip
+// checks) now SOURCE registry.identity.nativePattern. These assertions pin the
+// agreement: isValidIdentity must accept exactly what the canonical pattern
+// accepts (modulo its structural guards), for every platform, so a registry
+// edit is the only way to change what counts as a native id.
 
-describe('known identity-regex divergence (tracked, not yet unified)', () => {
-  it('discord: canonical is 15–21 digits; isValidIdentity still accepts 5–25', () => {
-    const canonical = SURFACES.discord.identity.nativePattern
-    expect(canonical.test('123456789012345678')).toBe(true) // 18-digit snowflake
-    expect(canonical.test('12345')).toBe(false) // canonical rejects 5-digit
-    // The follow-up is to make surface-admins.isValidIdentity derive from
-    // canonical; until then a 5-digit value is accepted there and refused here.
+describe('identity-regex unification (D8): isValidIdentity == canonical pattern', () => {
+  const samples: Record<string, { valid: string[]; invalid: string[] }> = {
+    signal: {
+      valid: ['+6421234567', '6421234567', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE'],
+      invalid: ['+123', 'aaaaaaaa-bbbb-cccc', '@handle'],
+    },
+    telegram: {
+      valid: ['123456789', '-1001234567'],
+      invalid: ['1'.repeat(21), '@juniper', '--1'],
+    },
+    mattermost: {
+      valid: ['abcdefghijklmnopqrstuvwxyz'],
+      invalid: ['abcdefghijklmnopqrstuvwxy', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+    },
+    discord: {
+      valid: ['123456789012345', '123456789012345678', '123456789012345678901'],
+      // '12345' is the load-bearing case: the old hand-rolled switch bound
+      // (5–25) accepted it; the canonical 15–21 rejects it.
+      invalid: ['12345', '1234567890123456789012', 'vincent'],
+    },
+    slack: {
+      valid: ['U012ABCDEF', 'W012ABCDEF'],
+      invalid: ['X012ABCDEF', 'u012abcdef'],
+    },
+  }
+
+  it('accepts and rejects identically across every platform', () => {
+    for (const p of SURFACE_SLUGS) {
+      const pattern = SURFACES[p].identity.nativePattern
+      for (const id of samples[p].valid) {
+        expect(pattern.test(id), `${p} canonical should accept ${id}`).toBe(true)
+        expect(isValidIdentity(p, id), `isValidIdentity(${p}) should accept ${id}`).toBe(true)
+      }
+      for (const id of samples[p].invalid) {
+        expect(pattern.test(id), `${p} canonical should reject ${id}`).toBe(false)
+        expect(isValidIdentity(p, id), `isValidIdentity(${p}) should reject ${id}`).toBe(false)
+      }
+    }
+  })
+
+  it('every platform has samples (a new surface must extend this table)', () => {
+    expect(Object.keys(samples).sort()).toEqual([...SURFACE_SLUGS].sort())
+  })
+
+  it('unknown platform stays fail-closed (no spec → invalid)', () => {
+    expect(isValidIdentity('whatsapp', '123456789012345678')).toBe(false)
+  })
+
+  it('no nativePattern carries flags (`.test` must be stateless: no `g`/`y`)', () => {
+    for (const p of SURFACE_SLUGS) {
+      expect(SURFACES[p].identity.nativePattern.flags, `${p} pattern flags`).toBe('')
+    }
   })
 })

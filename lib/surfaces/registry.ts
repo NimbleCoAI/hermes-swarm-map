@@ -71,10 +71,11 @@ export type SurfaceSpec = {
   }
 
   // Native-identity shape for the users allowlist: a value already in this form
-  // is a resolved id (skip username resolution). This is the CANONICAL pattern;
-  // note two legacy sites (surface-admins.isValidIdentity, resolvers/index skip
-  // patterns) currently use slightly different bounds — captured, not yet
-  // unified, in registry.test.ts. New code should use this.
+  // is a resolved id (skip username resolution). This is the CANONICAL pattern
+  // and the ONLY one: surface-admins.isValidIdentity and the resolvers' skip
+  // checks all source it (unification asserted in registry.test.ts). Signal is
+  // the one nuance — phones match here but still resolve (sealed-sender UUID);
+  // see isSignalUuid in lib/resolvers/index.ts.
   identity: {
     nativePattern: RegExp
     hasResolver: boolean // a username→native-id resolver exists in lib/resolvers
@@ -165,8 +166,7 @@ export const SURFACES: Record<SurfaceSlug, SurfaceSpec> = {
       channelScopedAccess: 'DISCORD_CHANNEL_SCOPED_ACCESS',
     },
     identity: {
-      // Snowflake. Canonical bound 15–21 (real snowflakes are 17–20 + drift);
-      // note isValidIdentity still uses the looser 5–25 — see registry.test.ts.
+      // Snowflake. Canonical bound 15–21 (real snowflakes are 17–20 + drift).
       nativePattern: /^[0-9]{15,21}$/,
       hasResolver: true,
     },

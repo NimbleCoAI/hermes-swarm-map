@@ -20,13 +20,25 @@ vi.mock('./telegram', () => ({
   resolveTelegramUsername: vi.fn(),
   getTelegramDisplayName: vi.fn(),
 }))
+vi.mock('./mattermost', () => ({
+  resolveMattermostUsername: vi.fn(),
+}))
+vi.mock('./discord', () => ({
+  resolveDiscordUsername: vi.fn(),
+  expandDiscordAllowlist: vi.fn(),
+}))
 
-import { expandSignalAllowlist, resolveTelegramAdmins, expandTelegramAllowlist } from './index'
+import { expandSignalAllowlist, resolveTelegramAdmins, expandTelegramAllowlist, resolveIdentifier } from './index'
 import { resolveSignalPhone } from './signal'
 import { resolveTelegramUsername } from './telegram'
+import { resolveMattermostUsername } from './mattermost'
+import { resolveDiscordUsername } from './discord'
+import { SURFACES } from '@/lib/surfaces/registry'
 
 const mockResolve = vi.mocked(resolveSignalPhone)
 const mockTgResolve = vi.mocked(resolveTelegramUsername)
+const mockMmResolve = vi.mocked(resolveMattermostUsername)
+const mockDcResolve = vi.mocked(resolveDiscordUsername)
 
 describe('expandSignalAllowlist', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -157,5 +169,91 @@ describe('expandTelegramAllowlist (best-effort — settings path)', () => {
   it('does not duplicate an ID already present in the list', async () => {
     mockTgResolve.mockResolvedValue({ display: '@juniper', nativeId: '424242' })
     expect(await expandTelegramAllowlist('h_x', ['@juniper', '424242'])).toEqual(['@juniper', '424242'])
+  })
+
+  it('sends an over-long numeric (21 digits — outside the canonical bound) to resolution, keeping it raw on failure', async () => {
+    // Unified onto registry.identity.nativePattern: the old inline /^-?\d+$/
+    // was unbounded and passed this through as if it were a native id.
+    const tooLong = '1'.repeat(21)
+    expect(SURFACES.telegram.identity.nativePattern.test(tooLong)).toBe(false)
+    mockTgResolve.mockResolvedValue(null)
+    expect(await expandTelegramAllowlist('h_x', [tooLong])).toEqual([tooLong])
+    expect(mockTgResolve).toHaveBeenCalledWith('h_x', tooLong)
+  })
+})
+
+// ── resolveIdentifier: every "already native — skip" check sources the
+// registry's canonical nativePattern (drift D8, unified). These pin each
+// platform's skip behavior AGAINST the registry pattern itself, so the two
+// cannot diverge again without failing here.
+
+describe('resolveIdentifier — native-id skips agree with registry.identity.nativePattern', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('discord: a canonical snowflake skips resolution', async () => {
+    const snowflake = '123456789012345678'
+    expect(SURFACES.discord.identity.nativePattern.test(snowflake)).toBe(true)
+    expect(await resolveIdentifier('h_x', 'discord', snowflake)).toEqual({
+      display: snowflake,
+      nativeId: snowflake,
+    })
+    expect(mockDcResolve).not.toHaveBeenCalled()
+  })
+
+  it('discord: a 5-digit value is NOT a native id — it goes to resolution', async () => {
+    // Load-bearing tightening case: the legacy loose bound (5–25 in the old
+    // isValidIdentity switch) would have called this a snowflake.
+    expect(SURFACES.discord.identity.nativePattern.test('12345')).toBe(false)
+    mockDcResolve.mockResolvedValue(null)
+    expect(await resolveIdentifier('h_x', 'discord', '12345')).toBeNull()
+    expect(mockDcResolve).toHaveBeenCalledWith('h_x', '12345')
+  })
+
+  it('telegram: canonical numerics skip; a 21-digit numeric resolves instead', async () => {
+    expect(await resolveIdentifier('h_x', 'telegram', '-1001234567')).toEqual({
+      display: '-1001234567',
+      nativeId: '-1001234567',
+    })
+    expect(mockTgResolve).not.toHaveBeenCalled()
+    mockTgResolve.mockResolvedValue(null)
+    const tooLong = '1'.repeat(21)
+    expect(await resolveIdentifier('h_x', 'telegram', tooLong)).toBeNull()
+    expect(mockTgResolve).toHaveBeenCalledWith('h_x', tooLong)
+  })
+
+  it('mattermost: a 26-char id skips; anything else resolves', async () => {
+    const mmId = 'abcdefghijklmnopqrstuvwxyz'
+    expect(SURFACES.mattermost.identity.nativePattern.test(mmId)).toBe(true)
+    expect(await resolveIdentifier('h_x', 'mattermost', mmId)).toEqual({
+      display: mmId,
+      nativeId: mmId,
+    })
+    expect(mockMmResolve).not.toHaveBeenCalled()
+    mockMmResolve.mockResolvedValue(null)
+    await resolveIdentifier('h_x', 'mattermost', 'juniper')
+    expect(mockMmResolve).toHaveBeenCalledWith('h_x', 'juniper')
+  })
+
+  it('signal: a full canonical UUID skips (any case); a phone still resolves', async () => {
+    // Phones match the canonical pattern too (they ARE native ids), but only
+    // the UUID form may skip — a phone entry still resolves so its
+    // sealed-sender UUID can be stored alongside (see isSignalUuid).
+    const upper = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE'
+    expect(SURFACES.signal.identity.nativePattern.test(upper)).toBe(true)
+    expect(await resolveIdentifier('h_x', 'signal', upper)).toEqual({
+      display: upper,
+      nativeId: upper,
+    })
+    expect(mockResolve).not.toHaveBeenCalled()
+    expect(SURFACES.signal.identity.nativePattern.test('+15550001234')).toBe(true)
+    mockResolve.mockResolvedValue({ display: '+15550001234', nativeId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' })
+    expect(await resolveIdentifier('h_x', 'signal', '+15550001234')).toEqual({
+      display: '+15550001234',
+      nativeId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    })
+  })
+
+  it('unknown platform returns null', async () => {
+    expect(await resolveIdentifier('h_x', 'whatsapp', '12345')).toBeNull()
   })
 })

@@ -4,7 +4,7 @@ import os from 'os'
 import type { Harness } from '@/lib/types'
 import type { Storage } from './storage'
 import type { AuditService } from './audit'
-import { SURFACE_SLUGS as REGISTRY_SLUGS, isSurfaceSlug } from '@/lib/surfaces/registry'
+import { SURFACE_SLUGS as REGISTRY_SLUGS, isSurfaceSlug, surfaceSpec } from '@/lib/surfaces/registry'
 import {
   USERS_VARS as DERIVED_USERS_VARS,
   GROUPS_VARS as DERIVED_GROUPS_VARS,
@@ -52,26 +52,12 @@ export function isValidIdentity(platform: string, raw: unknown): boolean {
   // stored list or the exact-match compare the plugin performs.
   if (/[\s,;=\n\r\t]/.test(id)) return false
   if (id === '*') return false
-  switch (platform) {
-    case 'signal':
-      // Phone (+64…) or a Signal UUID.
-      return /^\+?[0-9]{5,20}$/.test(id) ||
-        /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
-    case 'telegram':
-      // Numeric user id (Telegram ids are positive; groups negative).
-      return /^-?[0-9]{1,20}$/.test(id)
-    case 'mattermost':
-      // 26-char base32-ish id.
-      return /^[a-z0-9]{26}$/.test(id)
-    case 'discord':
-      // Snowflake.
-      return /^[0-9]{5,25}$/.test(id)
-    case 'slack':
-      // User id like U012ABCDEF.
-      return /^[UW][A-Z0-9]{6,20}$/.test(id)
-    default:
-      return false
-  }
+  // Shape check: the CANONICAL native-id pattern from the surface registry
+  // (registry.identity.nativePattern) — this used to be a hand-maintained
+  // per-platform switch whose Discord bound had drifted loose (5–25 digits vs
+  // the canonical 15–21; drift D8, now unified). An unknown platform has no
+  // spec and is invalid — fail-closed, exactly like the old switch default.
+  return surfaceSpec(platform)?.identity.nativePattern.test(id) ?? false
 }
 
 function parseEnvFile(envPath: string): Record<string, string> {
