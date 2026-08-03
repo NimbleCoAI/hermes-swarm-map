@@ -236,3 +236,20 @@ describe('settings PUT defaults', () => {
     expect(buildSettingsEnvValue('allow-all', false, ['user1'])).toBe('user1')
   })
 })
+
+describe('ensurePolicyDefaults — Discord deny sentinel (drift D1)', () => {
+  it('seeds DISCORD_ALLOWED_CHANNELS=0, never empty (empty = no channel gate)', async () => {
+    const { ensurePolicyDefaults } = await import('@/lib/env-helpers')
+    const out = ensurePolicyDefaults('DISCORD_BOT_TOKEN=tok\n', 'discord')
+    expect(out).toMatch(/^DISCORD_ALLOWED_CHANNELS=0$/m)
+    expect(out).not.toMatch(/^DISCORD_ALLOWED_CHANNELS=$/m)
+    // Users still seeds empty (empty users = nobody, genuinely secure).
+    expect(out).toMatch(/^DISCORD_ALLOWED_USERS=$/m)
+  })
+
+  it('never overwrites an existing channel list', async () => {
+    const { ensurePolicyDefaults } = await import('@/lib/env-helpers')
+    const out = ensurePolicyDefaults('DISCORD_ALLOWED_CHANNELS=555\n', 'discord')
+    expect(out).toMatch(/^DISCORD_ALLOWED_CHANNELS=555$/m)
+  })
+})

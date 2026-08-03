@@ -109,8 +109,14 @@ export function ensurePolicyDefaults(
   for (const key of policyKeys) {
     const regex = new RegExp(`^${key}=`, 'm')
     if (!regex.test(result)) {
-      // Secure default: empty string = no one allowed
-      result = result.trimEnd() + `\n${key}=\n`
+      // Secure default: empty string = no one allowed — EXCEPT Discord's
+      // channel allowlist, where the adapter reads empty as "no channel gate
+      // at all". Seed the '0' deny sentinel instead (no snowflake can be '0'),
+      // matching the deploy template. Before this, the connect path and the
+      // deploy path seeded OPPOSITE Discord postures (drift D1): a Discord
+      // surface connected to an existing agent was born fail-open.
+      const value = key === 'DISCORD_ALLOWED_CHANNELS' ? '0' : ''
+      result = result.trimEnd() + `\n${key}=${value}\n`
     }
   }
 
