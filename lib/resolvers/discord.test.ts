@@ -160,6 +160,16 @@ describe('expandDiscordAllowlist', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('treats a numeric outside the canonical 15–21 bound as a username, not a snowflake', async () => {
+    // The skip check sources registry.identity.nativePattern (drift D8,
+    // unified): '12345' is not a native id, so it goes through resolution —
+    // observable as a guild scan — and stays raw when nothing matches.
+    const fetchMock = mockFetchSequence([{ id: 'g1' }], { g1: [] })
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await expandDiscordAllowlist('h_test', ['12345'])).toEqual(['12345'])
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
   it('keeps an unresolvable username unchanged (no worse than before)', async () => {
     vi.stubGlobal('fetch', mockFetchSequence([{ id: 'g1' }], { g1: [] }))
     expect(await expandDiscordAllowlist('h_test', ['ghostname']))

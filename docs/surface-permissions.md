@@ -65,9 +65,13 @@ cycle.
 
 ## Known deferred items
 
-- `isValidIdentity` and the resolver skip-patterns use slightly different
-  native-id bounds than `registry.identity.nativePattern` (documented in
-  `registry.test.ts`); unifying is a behavior change needing its own review.
+- ~~`isValidIdentity` and the resolver skip-patterns use slightly different
+  native-id bounds than `registry.identity.nativePattern`~~ — **done (Phase
+  2b)**: every legacy site now sources the canonical pattern; the visible
+  behavior change is Discord tightening from a loose 5–25-digit bound to the
+  canonical 15–21 (real snowflakes are 17–20, so stored allowlists are
+  unaffected). Unknown platforms stay fail-closed. Agreement is asserted in
+  `registry.test.ts`.
 - Connect-path `ensurePolicyDefaults` seeds `DISCORD_ALLOWED_CHANNELS=` (empty
   = no channel gate) while deploy seeds `'0'` (deny) — drift D1, a real
   fail-open on the connect path, tracked for its own fix (security behavior

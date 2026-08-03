@@ -45,6 +45,15 @@ describe('isValidIdentity', () => {
     expect(isValidIdentity('telegram', '123456789')).toBe(true)
     expect(isValidIdentity('telegram', '-1001234567')).toBe(true)
   })
+  it('holds Discord to the canonical snowflake bound (15–21 digits, from the registry)', () => {
+    expect(isValidIdentity('discord', '123456789012345678')).toBe(true) // 18-digit snowflake
+    expect(isValidIdentity('discord', '123456789012345')).toBe(true) // 15 — canonical floor
+    expect(isValidIdentity('discord', '123456789012345678901')).toBe(true) // 21 — canonical ceiling
+    // The old hand-rolled bound (5–25) accepted these; the canonical
+    // registry pattern — now the single source — rejects them.
+    expect(isValidIdentity('discord', '12345')).toBe(false)
+    expect(isValidIdentity('discord', '1234567890123456789012')).toBe(false) // 22
+  })
   it('rejects the wildcard, empty, and separator/control chars', () => {
     expect(isValidIdentity('signal', '*')).toBe(false)
     expect(isValidIdentity('signal', '')).toBe(false)

@@ -10,9 +10,22 @@ import { resolveSignalPhone } from './signal'
 import { resolveTelegramUsername } from './telegram'
 import { resolveMattermostUsername } from './mattermost'
 import { resolveDiscordUsername } from './discord'
+import { SURFACES } from '@/lib/surfaces/registry'
 import type { ResolvedIdentity } from './signal'
 
-const SIGNAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-/
+// "Already a native id — skip resolution" checks, all sourced from the
+// canonical registry.identity.nativePattern (lib/surfaces/registry.ts) so the
+// bounds cannot drift from the single source of truth (drift D8, now unified).
+const TELEGRAM_NATIVE_RE = SURFACES.telegram.identity.nativePattern
+const MATTERMOST_NATIVE_RE = SURFACES.mattermost.identity.nativePattern
+const DISCORD_NATIVE_RE = SURFACES.discord.identity.nativePattern
+
+// Signal's canonical pattern matches BOTH native forms — phone and UUID — but
+// only a UUID may skip resolution: a phone entry still resolves so its
+// sealed-sender UUID can be stored/displayed alongside it. The dash test
+// selects the UUID alternative (the phone arm has no dashes).
+const isSignalUuid = (id: string) =>
+  SURFACES.signal.identity.nativePattern.test(id) && id.includes('-')
 
 /**
  * Expand a Signal allowlist so every phone-number entry is stored alongside its
@@ -50,15 +63,13 @@ export async function expandSignalAllowlist(
     const id = raw.trim()
     if (!id) continue
     push(id)
-    if (id === '*' || SIGNAL_UUID_RE.test(id) || !id.startsWith('+')) continue
+    if (id === '*' || isSignalUuid(id) || !id.startsWith('+')) continue
     const resolved = await resolveSignalPhone(harnessId, id)
     if (resolved?.nativeId) push(resolved.nativeId)
   }
 
   return out
 }
-
-const TELEGRAM_NUMERIC_RE = /^-?\d+$/
 
 export type TelegramAdminResolution =
   | { ok: true; ids: string[]; resolved: ResolvedIdentity[] }
@@ -91,7 +102,7 @@ export async function resolveTelegramAdmins(
     if (entry === '*') {
       return { ok: false, error: 'Wildcard (*) is not a valid admin entry' }
     }
-    if (TELEGRAM_NUMERIC_RE.test(entry)) {
+    if (TELEGRAM_NATIVE_RE.test(entry)) {
       if (!seen.has(entry)) {
         seen.add(entry)
         ids.push(entry)
@@ -146,7 +157,7 @@ export async function expandTelegramAllowlist(
     const id = raw.trim()
     if (!id) continue
     push(id)
-    if (id === '*' || TELEGRAM_NUMERIC_RE.test(id)) continue
+    if (id === '*' || TELEGRAM_NATIVE_RE.test(id)) continue
     const resolved = await resolveTelegramUsername(harnessId, id)
     if (resolved?.nativeId) push(resolved.nativeId)
   }
@@ -165,30 +176,30 @@ export async function resolveIdentifier(
 ): Promise<ResolvedIdentity | null> {
   switch (platform) {
     case 'signal': {
-      // Already a UUID — skip resolution
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-/.test(identifier)) {
+      // Already a UUID — skip resolution (phones resolve: sealed-sender)
+      if (isSignalUuid(identifier)) {
         return { display: identifier, nativeId: identifier }
       }
       return resolveSignalPhone(harnessId, identifier)
     }
     case 'telegram': {
       // Already numeric — skip resolution
-      if (/^-?\d+$/.test(identifier)) {
+      if (TELEGRAM_NATIVE_RE.test(identifier)) {
         return { display: identifier, nativeId: identifier }
       }
       return resolveTelegramUsername(harnessId, identifier)
     }
     case 'mattermost': {
       // Already a 26-char alphanumeric ID — skip
-      if (/^[a-z0-9]{26}$/.test(identifier)) {
+      if (MATTERMOST_NATIVE_RE.test(identifier)) {
         return { display: identifier, nativeId: identifier }
       }
       return resolveMattermostUsername(harnessId, identifier)
     }
     case 'discord': {
-      // Already a snowflake — skip resolution. Bounds mirror
-      // DISCORD_SNOWFLAKE_RE in ./discord.ts.
-      if (/^[0-9]{15,21}$/.test(identifier)) {
+      // Already a snowflake — skip resolution (same registry pattern
+      // DISCORD_SNOWFLAKE_RE in ./discord.ts sources).
+      if (DISCORD_NATIVE_RE.test(identifier)) {
         return { display: identifier, nativeId: identifier }
       }
       return resolveDiscordUsername(harnessId, identifier)

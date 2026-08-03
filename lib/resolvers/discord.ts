@@ -3,6 +3,7 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { SURFACES } from '@/lib/surfaces/registry'
 import type { ResolvedIdentity } from './signal'
 
 function getDiscordBotToken(harnessId: string): string | null {
@@ -129,10 +130,11 @@ async function scanGuildsForUsername(
   }
 }
 
-// Real snowflakes are 17–20 digits (64-bit, 2015 epoch); the wider bound
-// tolerates clock drift at both ends without swallowing short numeric
-// usernames. Keep in sync with the discord case in resolvers/index.ts.
-const DISCORD_SNOWFLAKE_RE = /^[0-9]{15,21}$/
+// The canonical snowflake shape from the surface registry (15–21 digits: real
+// snowflakes are 17–20, 64-bit with the 2015 epoch; the wider bound tolerates
+// clock drift at both ends without swallowing short numeric usernames). The
+// discord case in resolvers/index.ts sources the same pattern.
+const DISCORD_SNOWFLAKE_RE = SURFACES.discord.identity.nativePattern
 
 /**
  * Expand a Discord allowlist so every username entry is stored alongside its
