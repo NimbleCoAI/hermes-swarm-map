@@ -104,6 +104,20 @@ describe('SurfaceAdminService.listAdmins — default to allowlist (no regression
     expect(list.admins).toEqual(['+64777'])
   })
 
+  it('a slug-keyed write lands on the h_ overlay, not a ghost entry', () => {
+    // Writes must normalize like reads: before this, a setAdmins under a bare
+    // slug created a NEW {id: 'seraph-doer'} overlay invisible to every
+    // normalized read — the read/write drift class the registry exists to kill.
+    writeAgentEnv('seraph-doer', 'SIGNAL_ALLOWED_USERS=+64111\n')
+    storage.write('harnesses.json', [{ id: 'h_seraph_doer' }])
+    const res = svc.setAdmins('seraph-doer', 'signal', ['+64111'], '+64111')
+    expect(res.ok).toBe(true)
+    const overlays = storage.read<Array<{ id: string; surfaceAdmins?: Record<string, string[]> }>>('harnesses.json', [])
+    expect(overlays).toHaveLength(1)
+    expect(overlays[0].id).toBe('h_seraph_doer')
+    expect(overlays[0].surfaceAdmins?.signal).toEqual(['+64111'])
+  })
+
   it('resolves the personal agent .env at ~/.hermes', () => {
     writeAgentEnv('personal', 'TELEGRAM_ALLOWED_USERS=555\n')
     expect(svc.listAdmins('h_personal', 'telegram').admins).toEqual(['555'])

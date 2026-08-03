@@ -259,7 +259,7 @@ export class SurfaceAdminService {
     // Persist onto the harness overlay (read-modify-write the raw array — the
     // single persisted shape; HarnessService tolerates partial overlays).
     const overlays = this.readOverlays()
-    const idx = overlays.findIndex((h) => h.id === harnessId)
+    const idx = overlays.findIndex((h) => h.id === this.canonicalHarnessId(harnessId))
     if (idx !== -1) {
       const existing = overlays[idx].surfaceAdmins ?? {}
       overlays[idx] = { ...overlays[idx], surfaceAdmins: { ...existing, [platform]: cleaned } }
@@ -300,7 +300,7 @@ export class SurfaceAdminService {
   syncFromAllowlist(harnessId: string, platform: string, allowlist: string[]): void {
     if (!isSupportedSurface(platform)) return
     const overlays = this.readOverlays()
-    const idx = overlays.findIndex((h) => h.id === harnessId)
+    const idx = overlays.findIndex((h) => h.id === this.canonicalHarnessId(harnessId))
     const existing = idx !== -1 ? overlays[idx].surfaceAdmins?.[platform] : undefined
     if (!Array.isArray(existing)) return // no explicit list → bootstrap default already tracks the env
 

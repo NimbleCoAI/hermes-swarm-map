@@ -21,7 +21,7 @@ import type { ContainerRuntimeAdapter } from './runtime-adapter'
 
 const DEFAULT_IMAGE_REPO = 'nimblecoorg/hermes-agent-mt'
 import { hsmBaseUrl } from './hsm-url'
-import { PLATFORM_ENV_KEYS as SURFACE_STRIP_BY_PLATFORM } from '@/lib/surfaces/derive'
+import { PLATFORM_ENV_KEYS as SURFACE_STRIP_BY_PLATFORM, MENTION_GATING_VARS } from '@/lib/surfaces/derive'
 
 const HARNESSES_FILE = 'harnesses.json'
 
@@ -36,13 +36,8 @@ const PORT_STEP = 10
 // runtime (gateway/platforms/signal.py), but HSM's secure default is
 // require-mention — so an imported/legacy .env with a bare KEY= would silently
 // un-gate the agent while the UI still showed "@mention only".
-const MENTION_GATING_ENV_VARS = [
-  'SIGNAL_REQUIRE_MENTION',
-  'TELEGRAM_REQUIRE_MENTION',
-  'MATTERMOST_REQUIRE_MENTION',
-  'DISCORD_REQUIRE_MENTION',
-  'SLACK_REQUIRE_MENTION',
-]
+// Derived from the surface registry (lib/surfaces) — one var per platform.
+const MENTION_GATING_ENV_VARS = Object.values(MENTION_GATING_VARS)
 
 // Rewrite any empty (or whitespace-only) mention-gating value to the secure
 // default 'true', so the stored value is unambiguous and the runtime gate
