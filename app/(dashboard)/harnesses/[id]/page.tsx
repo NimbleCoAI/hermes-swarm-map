@@ -423,7 +423,8 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
           refetch()
         } else {
           toast.success(data.unchanged ? 'No changes — agent left running.' : 'Settings saved')
-          setSettingsSaved(true)
+          // A no-op save needs no "restart to apply" affordance.
+          setSettingsSaved(!data.unchanged)
         }
       } else {
         toast.error(data.error || 'Failed to save')

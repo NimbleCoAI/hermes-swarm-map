@@ -164,6 +164,11 @@ type SettingsResponse = {
 // The .env file is the single source of truth these routes read and write, so
 // its mtime is a serviceable version token. String-typed because mtimeMs is a
 // float and JSON round-trips of floats invite precision surprises.
+//
+// Known limit: `resources` lives on the harness overlay (harnesses.json), not
+// in .env, so the token does not detect concurrent resources-only edits —
+// last writer wins for that one field. Fold the overlay's mtime in if that
+// ever bites in practice.
 function envVersion(envPath: string): string {
   return String(fs.statSync(envPath).mtimeMs)
 }
@@ -456,6 +461,9 @@ export async function PUT(
   }
 
   let content = fs.readFileSync(envPath, 'utf-8')
+  // Snapshot token for the pre-write recheck below. Taken immediately after
+  // the read (both sync, so no in-process interleaving between them).
+  const snapshotVersion = envVersion(envPath)
   // Kept for the no-op detection at the end: a PUT whose rendered .env is
   // byte-identical must not rewrite the file (bumping the version token for
   // nothing) and must not recreate the container (which kills in-flight work).
@@ -686,6 +694,23 @@ export async function PUT(
 
   const envUnchanged = content === originalContent
   if (!envUnchanged) {
+    // Pre-write recheck: the 409 at the top of the handler races the async
+    // allowlist resolvers (Signal RPC has a 15s timeout) — another PUT can
+    // land while this one is awaiting, and this handler would then write from
+    // a stale snapshot with no conflict detected. Everything from this stat to
+    // the write is synchronous, so in a single-process Node server the recheck
+    // closes that in-handler window completely. Applies to version-less
+    // scripted callers too — a mid-flight overwrite is a conflict regardless
+    // of whether the caller opted into tokens.
+    if (envVersion(envPath) !== snapshotVersion) {
+      return NextResponse.json(
+        {
+          error: 'Settings changed while this save was in flight — reload and re-apply your edit.',
+          currentVersion: envVersion(envPath),
+        },
+        { status: 409 },
+      )
+    }
     fs.writeFileSync(envPath, content, { mode: 0o600 })
   }
 

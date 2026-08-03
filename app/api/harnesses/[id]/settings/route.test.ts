@@ -12,7 +12,7 @@ import os from 'os'
 
 vi.mock('@/lib/services', () => ({
   services: {
-    harness: { restart: vi.fn(), get: vi.fn(() => undefined) },
+    harness: { restart: vi.fn(), get: vi.fn(() => undefined), updateConfig: vi.fn() },
     config: { getSettings: vi.fn(() => ({})) },
     surfaceAdmins: { syncFromAllowlist: vi.fn() },
   },
@@ -929,5 +929,56 @@ describe('Settings API — optimistic concurrency (409) + no-op detection', () =
     const resolvedWrites = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .filter(c => typeof c[0] === 'string' && (c[0] as string).endsWith('resolved-identities.json'))
     expect(resolvedWrites).toHaveLength(0)
+  })
+})
+
+describe('Settings API — restart arms beyond .env changes', () => {
+  const ENV = [
+    'GITHUB_TOKEN=x',
+    'HERMES_DM_POLICY=approved-only',
+    'SIGNAL_GROUP_INVITE_POLICY=approved-only',
+    'SLACK_CHANNEL_POLICY=approved-only',
+    'TELEGRAM_GROUP_INVITE_POLICY=approved-only',
+    'SIGNAL_REQUIRE_MENTION=true',
+    'TELEGRAM_REQUIRE_MENTION=true',
+    'MATTERMOST_REQUIRE_MENTION=true',
+    'DISCORD_REQUIRE_MENTION=true',
+    'SLACK_REQUIRE_MENTION=true',
+    'SIGNAL_OBSERVE_UNMENTIONED=true',
+    'MATTERMOST_OBSERVE_UNMENTIONED=true',
+    'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true',
+    'HERMES_APPROVAL_ADMIN_ONLY=true',
+    'HERMES_MEMORY_SCOPE=channel',
+  ].join('\n') + '\n'
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(ENV as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('a resources-only change recreates the container without touching .env', async () => {
+    // Regression pin for the restart condition's resourcesChanged arm: collapsing
+    // it to !envUnchanged would silently stop applying resource-limit edits.
+    vi.mocked(services.harness.get).mockReturnValue(
+      { resources: { memory: '1G', cpus: '1.0' }, composeFile: '/tmp/none.yml' } as never,
+    )
+    const body = {
+      dmPolicy: 'approved-only',
+      resources: { memory: '2G', cpus: '2.0' },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.restarted).toBe(true)
+    expect(data.unchanged).toBe(false)
+    const envWrites = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .filter(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
+    expect(envWrites).toHaveLength(0)
+    expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
   })
 })

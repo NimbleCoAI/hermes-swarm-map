@@ -75,19 +75,22 @@ describe('surface disconnect — applies removal by recreating the container', (
     expect(body.ok).toBe(true)
     expect(restartMock).toHaveBeenCalledWith('h_seraph', 'recreate')
 
-    // The full Discord policy surface is stripped — including the vars added
-    // by hsm#186 and DISCORD_CHANNEL_SCOPED_ACCESS. Leaving any behind means a
-    // future reconnect inherits stale policy the operator believed was gone.
+    // Credentials and identity-bound lists are stripped — ids are meaningless
+    // outside the disconnected guild and must not leak into a future connect.
     const envWrite = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .find(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
     const written = (envWrite?.[1] as string) ?? ''
     for (const key of [
       'DISCORD_BOT_TOKEN', 'DISCORD_ALLOWED_USERS', 'DISCORD_ALLOWED_CHANNELS',
-      'DISCORD_ALLOWED_ROLES', 'DISCORD_IGNORED_CHANNELS', 'DISCORD_ALLOW_BOTS',
-      'DISCORD_REQUIRE_MENTION', 'DISCORD_CHANNEL_SCOPED_ACCESS',
+      'DISCORD_ALLOWED_ROLES', 'DISCORD_IGNORED_CHANNELS',
     ]) {
       expect(written).not.toContain(`${key}=`)
     }
+    // Behavioral preferences survive a disconnect: nothing reseeds their
+    // VALUES on reconnect, so stripping them silently changed agent behavior.
+    expect(written).toContain('DISCORD_REQUIRE_MENTION=true')
+    expect(written).toContain('DISCORD_ALLOW_BOTS=none')
+    expect(written).toContain('DISCORD_CHANNEL_SCOPED_ACCESS=true')
   })
 
   it('recreates the container after stripping the slack env', async () => {

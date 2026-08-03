@@ -138,7 +138,8 @@ function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
           setSaved(false)
         } else {
           toast.success(data.unchanged ? 'No changes — agent left running.' : 'Settings saved')
-          setSaved(true)
+          // A no-op save needs no "restart to apply" affordance.
+          setSaved(!data.unchanged)
         }
       } else {
         toast.error(data.error || 'Failed to save')
