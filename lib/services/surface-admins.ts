@@ -4,6 +4,12 @@ import os from 'os'
 import type { Harness } from '@/lib/types'
 import type { Storage } from './storage'
 import type { AuditService } from './audit'
+import { SURFACE_SLUGS as REGISTRY_SLUGS, isSurfaceSlug } from '@/lib/surfaces/registry'
+import {
+  USERS_VARS as DERIVED_USERS_VARS,
+  GROUPS_VARS as DERIVED_GROUPS_VARS,
+  GROUP_INVITE_POLICY_VARS as DERIVED_GROUP_INVITE_POLICY_VARS,
+} from '@/lib/surfaces/derive'
 
 const HARNESSES_FILE = 'harnesses.json'
 
@@ -12,37 +18,17 @@ const HARNESSES_FILE = 'harnesses.json'
 // DM allowlist (the "_is_approval_admin" / approved-user convention). Keeping
 // this as the default is what guarantees no regression — an agent with no role
 // config behaves exactly as it did before this store existed.
-const ALLOWED_USERS_VARS: Record<string, string> = {
-  signal: 'SIGNAL_ALLOWED_USERS',
-  telegram: 'TELEGRAM_ALLOWED_USERS',
-  mattermost: 'MATTERMOST_ALLOWED_USERS',
-  discord: 'DISCORD_ALLOWED_USERS',
-  slack: 'SLACK_ALLOWED_USERS',
-}
+// All derived from the surface registry (lib/surfaces). These used to be three
+// hand-maintained maps; GROUP_INVITE_POLICY_VARS in particular carried a "must
+// stay in step with the settings route" comment because it was a second copy.
+const ALLOWED_USERS_VARS = DERIVED_USERS_VARS
+const GROUP_ALLOWED_VARS = DERIVED_GROUPS_VARS
+const GROUP_INVITE_POLICY_VARS = DERIVED_GROUP_INVITE_POLICY_VARS
 
-// Per-platform group/channel allowlist env var (which groups the agent responds
-// in). Shared by isGroupAllowed and approveGroupInvite.
-const GROUP_ALLOWED_VARS: Record<string, string> = {
-  signal: 'SIGNAL_GROUP_ALLOWED_USERS',
-  telegram: 'TELEGRAM_GROUP_ALLOWED_CHATS',
-  mattermost: 'MATTERMOST_ALLOWED_CHANNELS',
-  discord: 'DISCORD_ALLOWED_CHANNELS',
-  slack: 'SLACK_ALLOWED_CHANNELS',
-}
-
-// Per-platform group-invite policy env var (who may add the agent to groups).
-// Must stay in step with GROUP_INVITE_VARS in the settings route, which writes
-// these from the single UI toggle. Unset = approved-only (secure default).
-const GROUP_INVITE_POLICY_VARS: Record<string, string> = {
-  signal: 'SIGNAL_GROUP_INVITE_POLICY',
-  slack: 'SLACK_CHANNEL_POLICY',
-  telegram: 'TELEGRAM_GROUP_INVITE_POLICY',
-}
-
-export const SUPPORTED_SURFACES = Object.keys(ALLOWED_USERS_VARS)
+export const SUPPORTED_SURFACES: string[] = [...REGISTRY_SLUGS]
 
 export function isSupportedSurface(platform: string): boolean {
-  return Object.prototype.hasOwnProperty.call(ALLOWED_USERS_VARS, platform)
+  return isSurfaceSlug(platform)
 }
 
 // Resolve an agent's data dir from its harness id — same convention the settings
@@ -158,8 +144,18 @@ export class SurfaceAdminService {
     return this.storage.read<Partial<Harness>[]>(HARNESSES_FILE, [])
   }
 
+  // Agents call the policy API with their bare slug (HERMES_AGENT_NAME, e.g.
+  // "seraph-doer") while harnesses.json ids are "h_seraph_doer". agentDataDir()
+  // already tolerates both, but the overlay lookup matched by exact id — so an
+  // agent-side call silently missed every EXPLICIT admin list and fell back to
+  // the allowlist bootstrap. Normalize before matching.
+  private canonicalHarnessId(idOrSlug: string): string {
+    return idOrSlug.startsWith('h_') ? idOrSlug : `h_${idOrSlug.replace(/-/g, '_')}`
+  }
+
   private explicitAdmins(harnessId: string, platform: string): string[] | undefined {
-    const overlay = this.readOverlays().find((h) => h.id === harnessId)
+    const canonical = this.canonicalHarnessId(harnessId)
+    const overlay = this.readOverlays().find((h) => h.id === canonical)
     const list = overlay?.surfaceAdmins?.[platform]
     return Array.isArray(list) ? list : undefined
   }
@@ -263,7 +259,7 @@ export class SurfaceAdminService {
     // Persist onto the harness overlay (read-modify-write the raw array — the
     // single persisted shape; HarnessService tolerates partial overlays).
     const overlays = this.readOverlays()
-    const idx = overlays.findIndex((h) => h.id === harnessId)
+    const idx = overlays.findIndex((h) => h.id === this.canonicalHarnessId(harnessId))
     if (idx !== -1) {
       const existing = overlays[idx].surfaceAdmins ?? {}
       overlays[idx] = { ...overlays[idx], surfaceAdmins: { ...existing, [platform]: cleaned } }
@@ -304,7 +300,7 @@ export class SurfaceAdminService {
   syncFromAllowlist(harnessId: string, platform: string, allowlist: string[]): void {
     if (!isSupportedSurface(platform)) return
     const overlays = this.readOverlays()
-    const idx = overlays.findIndex((h) => h.id === harnessId)
+    const idx = overlays.findIndex((h) => h.id === this.canonicalHarnessId(harnessId))
     const existing = idx !== -1 ? overlays[idx].surfaceAdmins?.[platform] : undefined
     if (!Array.isArray(existing)) return // no explicit list → bootstrap default already tracks the env
 

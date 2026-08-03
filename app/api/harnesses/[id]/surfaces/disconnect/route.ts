@@ -4,6 +4,7 @@ import path from 'path'
 import os from 'os'
 import { services } from '@/lib/services'
 import { setPlatformEnabled } from '@/lib/config-yaml-helpers'
+import { PLATFORM_ENV_KEYS as DERIVED_PLATFORM_ENV_KEYS } from '@/lib/surfaces/derive'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -11,46 +12,15 @@ function agentDataDir(harnessId: string): string {
   return path.join(os.homedir(), `.hermes-${name}`)
 }
 
-const PLATFORM_ENV_KEYS: Record<string, string[]> = {
-  signal: [
-    'SIGNAL_ACCOUNT',
-    'SIGNAL_HTTP_URL',
-    'SIGNAL_ALLOWED_USERS',
-    'SIGNAL_GROUP_ALLOWED_USERS',
-  ],
-  telegram: [
-    'TELEGRAM_BOT_TOKEN',
-    'TELEGRAM_ALLOWED_USERS',
-    'TELEGRAM_GROUP_ALLOWED_CHATS',
-  ],
-  mattermost: [
-    'MATTERMOST_URL',
-    'MATTERMOST_TOKEN',
-    'MATTERMOST_ALLOWED_CHANNELS',
-    'MATTERMOST_ALLOWED_USERS',
-    'MATTERMOST_ADMIN_USERS',
-  ],
-  // Strip credentials and identity-bound lists (user/role/channel ids are
-  // meaningless outside the disconnected guild). Behavioral preferences —
-  // DISCORD_REQUIRE_MENTION, DISCORD_ALLOW_BOTS, DISCORD_CHANNEL_SCOPED_ACCESS
-  // — are deliberately KEPT: they are harmless without a token, nothing
-  // reseeds their values on reconnect (ensurePolicyDefaults only appends empty
-  // keys), and stripping them silently changed agent behavior after a
-  // disconnect/reconnect cycle.
-  discord: [
-    'DISCORD_BOT_TOKEN',
-    'DISCORD_ALLOWED_USERS',
-    'DISCORD_ALLOWED_CHANNELS',
-    'DISCORD_ALLOWED_ROLES',
-    'DISCORD_IGNORED_CHANNELS',
-  ],
-  slack: [
-    'SLACK_BOT_TOKEN',
-    'SLACK_APP_TOKEN',
-    'SLACK_ALLOWED_USERS',
-    'SLACK_ALLOWED_CHANNELS',
-  ],
-}
+// The strip-on-disconnect set is derived from the surface registry
+// (lib/surfaces): credentials + every admission var, and NEVER a behavioral
+// preference. Behavioral vars (REQUIRE_MENTION, ALLOW_BOTS,
+// CHANNEL_SCOPED_ACCESS, invite/observe policy) are KEPT — they are harmless
+// without a token and are not reseeded on reconnect, so stripping them silently
+// changed agent behavior across a disconnect/reconnect cycle. The registry's
+// class rule (registry.test.ts) enforces this; the duplicate-agent path
+// (harness.ts) now derives the same set, so the two can no longer disagree.
+const PLATFORM_ENV_KEYS = DERIVED_PLATFORM_ENV_KEYS
 
 export async function POST(
   request: Request,

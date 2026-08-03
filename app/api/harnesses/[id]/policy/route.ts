@@ -4,20 +4,14 @@ import path from 'path'
 import os from 'os'
 import { getCostMonth } from '@/lib/services/usage'
 import { services } from '@/lib/services'
+// Group/channel allowlist map, derived from the surface registry (lib/surfaces)
+// — the same map surface-admins uses.
+import { GROUPS_VARS as GROUP_VARS } from '@/lib/surfaces/derive'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
   if (name === 'personal') return path.join(os.homedir(), '.hermes')
   return path.join(os.homedir(), `.hermes-${name}`)
-}
-
-/** Env var that holds the group allowlist for each platform */
-const GROUP_VARS: Record<string, string> = {
-  signal: 'SIGNAL_GROUP_ALLOWED_USERS',
-  telegram: 'TELEGRAM_GROUP_ALLOWED_CHATS',
-  mattermost: 'MATTERMOST_ALLOWED_CHANNELS',
-  discord: 'DISCORD_ALLOWED_CHANNELS',
-  slack: 'SLACK_ALLOWED_CHANNELS',
 }
 
 function parseEnvFile(envPath: string): Record<string, string> {
