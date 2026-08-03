@@ -21,19 +21,36 @@ function getDiscordBotToken(harnessId: string): string | null {
 }
 
 const DISCORD_API = 'https://discord.com/api/v10'
+// Per-request timeout + an overall deadline for the guild scan: this runs
+// inline in the settings PUT, so a hung Discord connection must not hold the
+// operator's save hostage (undici's default lets a dead socket sit ~300s).
+const FETCH_TIMEOUT_MS = 5_000
+const SCAN_DEADLINE_MS = 15_000
+
+// The settings PUT resolves each username twice by construction (allowlist
+// expansion, then the resolved-identities rebuild). A short-lived memo keeps
+// that from doubling the API traffic without letting stale answers persist
+// across saves.
+const memo = new Map<string, { at: number; value: ResolvedIdentity | null }>()
+const MEMO_TTL_MS = 60_000
 
 /**
- * Resolve a Discord username / global name / server nickname to the numeric
- * snowflake, by searching the members of every guild the bot is in.
+ * Resolve a Discord username to the numeric snowflake, by searching the
+ * members of every guild the bot is in.
  *
- * Discord has no global username→id lookup for bots; guild-member search is
- * the same surface the agent's own on_ready resolution uses, so HSM and the
- * runtime agree on what a username means. First match wins (matching the
- * adapter's semantics); the comparison is case-insensitive against username,
- * global_name and nick.
+ * AUTHORIZATION-GRADE matching, deliberately narrower than the runtime's
+ * display resolution: only `user.username` is compared. Usernames are
+ * globally unique on Discord; `global_name` and `nick` are freely
+ * self-settable, so matching them would let anyone in a shared guild
+ * name-squat an operator's intended entry and get their own snowflake
+ * persisted into DISCORD_ALLOWED_USERS (which also feeds the surface-admins
+ * bootstrap). For the same reason, if different snowflakes match the same
+ * name across guilds (possible mid-migration or via API drift), resolution
+ * REFUSES rather than picking one — the raw entry is kept unchanged.
  *
- * Every failure path returns null — the caller stores the raw entry unchanged,
- * which is no worse than before this resolver existed.
+ * Every failure path — no token, 429, timeout, deadline, ambiguity — returns
+ * null: the caller stores the raw entry, no worse than before this resolver
+ * existed.
  */
 export async function resolveDiscordUsername(
   harnessId: string,
@@ -44,41 +61,78 @@ export async function resolveDiscordUsername(
 
   const query = (username.startsWith('@') ? username.slice(1) : username).trim()
   if (!query) return null
+
+  const memoKey = `${harnessId}:${query.toLowerCase()}`
+  const hit = memo.get(memoKey)
+  if (hit && Date.now() - hit.at < MEMO_TTL_MS) return hit.value
+
+  const value = await scanGuildsForUsername(token, query)
+  memo.set(memoKey, { at: Date.now(), value })
+  return value
+}
+
+async function scanGuildsForUsername(
+  token: string,
+  query: string
+): Promise<ResolvedIdentity | null> {
   const wanted = query.toLowerCase()
   const headers = { Authorization: `Bot ${token}` }
+  const deadline = Date.now() + SCAN_DEADLINE_MS
+  const get = (url: string) =>
+    fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
 
   try {
-    const guildsRes = await fetch(`${DISCORD_API}/users/@me/guilds`, { headers })
+    // Single page: caps at 200 guilds. Guilds beyond that are not scanned —
+    // acceptable for a resolver that fails toward "keep the raw entry".
+    const guildsRes = await get(`${DISCORD_API}/users/@me/guilds`)
     if (!guildsRes.ok) return null
     const guilds = (await guildsRes.json()) as Array<{ id: string }>
     if (!Array.isArray(guilds)) return null
 
+    const matches = new Map<string, ResolvedIdentity>()
     for (const guild of guilds) {
-      const searchRes = await fetch(
+      if (Date.now() > deadline) return null
+      const searchRes = await get(
         `${DISCORD_API}/guilds/${guild.id}/members/search?query=${encodeURIComponent(query)}&limit=25`,
-        { headers },
       )
+      if (searchRes.status === 429) {
+        // Rate-limited: abort the whole scan. Treating 429 as "not in this
+        // guild" and continuing could skip the true guild and let a match
+        // from a later guild win — feeding exactly the squatting scenario
+        // the username-only rule exists to prevent.
+        return null
+      }
       if (!searchRes.ok) continue
       const members = (await searchRes.json()) as Array<{
-        nick?: string | null
-        user?: { id: string; username: string; global_name?: string | null }
+        user?: { id: string; username: string }
       }>
       if (!Array.isArray(members)) continue
 
       for (const member of members) {
         const user = member.user
         if (!user?.id) continue
-        const names = [user.username, user.global_name ?? '', member.nick ?? '']
-        if (names.some((n) => n.toLowerCase() === wanted)) {
-          return { display: query, nativeId: user.id, profileName: user.username }
+        if (user.username.toLowerCase() === wanted) {
+          matches.set(user.id, {
+            display: query,
+            nativeId: user.id,
+            profileName: user.username,
+          })
         }
       }
     }
-  } catch {}
-  return null
+
+    if (matches.size === 1) return matches.values().next().value ?? null
+    // Zero matches, or conflicting snowflakes for one name: refuse.
+    return null
+  } catch {
+    return null
+  }
 }
 
-const DISCORD_SNOWFLAKE_RE = /^[0-9]{5,25}$/
+// Real snowflakes are 17–20 digits (64-bit, 2015 epoch); the wider bound
+// tolerates clock drift at both ends without swallowing short numeric
+// usernames. Keep in sync with the discord case in resolvers/index.ts.
+const DISCORD_SNOWFLAKE_RE = /^[0-9]{15,21}$/
 
 /**
  * Expand a Discord allowlist so every username entry is stored alongside its
@@ -92,9 +146,9 @@ const DISCORD_SNOWFLAKE_RE = /^[0-9]{5,25}$/
  * BOTH forms keeps the two planes agreeing on who the operator meant.
  *
  * - '*' and entries already in snowflake form pass through untouched.
- * - Usernames that resolve gain their snowflake alongside the name.
- * - Usernames that fail to resolve pass through unchanged (no worse than
- *   before; resolution retries on the next write).
+ * - Usernames that resolve unambiguously gain their snowflake alongside.
+ * - Usernames that fail to resolve (or resolve ambiguously) pass through
+ *   unchanged — no worse than before; resolution retries on the next write.
  *
  * Order is preserved and duplicates are removed — mirrors
  * expandSignalAllowlist.
@@ -123,4 +177,9 @@ export async function expandDiscordAllowlist(
   }
 
   return out
+}
+
+/** Test hook: the memo would otherwise leak resolutions across test cases. */
+export function _clearDiscordResolverMemo(): void {
+  memo.clear()
 }

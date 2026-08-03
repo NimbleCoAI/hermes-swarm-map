@@ -186,8 +186,9 @@ export async function resolveIdentifier(
       return resolveMattermostUsername(harnessId, identifier)
     }
     case 'discord': {
-      // Already a snowflake — skip resolution
-      if (/^[0-9]{5,25}$/.test(identifier)) {
+      // Already a snowflake — skip resolution. Bounds mirror
+      // DISCORD_SNOWFLAKE_RE in ./discord.ts.
+      if (/^[0-9]{15,21}$/.test(identifier)) {
         return { display: identifier, nativeId: identifier }
       }
       return resolveDiscordUsername(harnessId, identifier)
