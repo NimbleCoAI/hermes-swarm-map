@@ -1046,11 +1046,14 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                           )}
                           <div className="space-y-1">
                             <label className="text-xs font-medium text-muted-foreground">
-                              {/* "Admins" undersold what this list does on Discord: it is the
-                                  user ALLOWLIST — the only people the bot answers unless
-                                  channel-scoped access is enabled. The mislabel caused a real
-                                  incident (approved channel, silent bot). */}
-                              {platform === 'discord' ? `Allowed users (${labels.users})` : `Admins (${labels.users})`}
+                              {/* One label on every platform, because it is one concept on
+                                  every platform: this field renders to
+                                  {PLATFORM}_ALLOWED_USERS — ADMISSION (who the bot answers).
+                                  Admin PRIVILEGE is the separate surfaceAdmins overlay, which
+                                  merely BOOTSTRAPS from this list until an explicit admin
+                                  list is set. Labeling admission "Admins" caused a real
+                                  incident (approved Discord channel, silent bot). */}
+                              Allowed users ({labels.users})
                             </label>
                             <TagInput
                               values={surf.allowedUsers}
@@ -1066,9 +1069,16 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                               }}
                             />
                             <p className="text-xs text-muted-foreground">
-                              {platform === 'discord'
-                                ? 'The user allowlist: these users can DM the bot and message it anywhere it listens. Everyone else is only answered in Approved Channels, and only when channel-scoped access (DISCORD_CHANNEL_SCOPED_ACCESS) is enabled on the agent.'
-                                : 'Admins can DM, add bot to groups, approve commands, and access global memory.'}
+                              The user allowlist: who the bot answers. Until an explicit
+                              per-surface admin list is set, these users also act as the
+                              surface&apos;s admins (DM, add to groups, approve commands, global
+                              memory).
+                              {platform === 'discord' && (
+                                <> Everyone else is only answered in Approved Channels, and only
+                                when channel-scoped access (DISCORD_CHANNEL_SCOPED_ACCESS) is
+                                enabled on the agent. Usernames are resolved to IDs
+                                automatically.</>
+                              )}
                               {platform === 'telegram' && (
                                 <> Entries may be numeric Telegram user IDs or @usernames — @usernames are resolved to IDs automatically.</>
                               )}
