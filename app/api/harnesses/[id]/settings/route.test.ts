@@ -21,6 +21,7 @@ vi.mock('@/lib/resolvers', () => ({
   resolveIdentifier: vi.fn(async () => null),
   expandSignalAllowlist: vi.fn(async (_id: string, users: string[]) => users),
   expandTelegramAllowlist: vi.fn(async (_id: string, users: string[]) => users),
+  expandDiscordAllowlist: vi.fn(async (_id: string, users: string[]) => users),
 }))
 vi.mock('@/lib/services/harness-compose', () => ({ generateStandaloneCompose: vi.fn(() => '') }))
 vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
@@ -839,20 +840,20 @@ describe('Settings API — optimistic concurrency (409) + no-op detection', () =
   it('GET includes the env mtime as version', async () => {
     const res = await GET(makeRequest({}) as Request, makeParams('h_test'))
     const data = await res.json()
-    expect(data.version).toBe('1111')
+    expect(data.version).toBe('1111:{"memory":null,"cpus":null}')
   })
 
   it('PUT with a stale version is rejected 409 with no write and no restart', async () => {
     const res = await PUT(makeRequest({ ...policyBody, version: '999' }), makeParams('h_test'))
     expect(res.status).toBe(409)
     const data = await res.json()
-    expect(data.currentVersion).toBe('1111')
+    expect(data.currentVersion).toBe('1111:{"memory":null,"cpus":null}')
     expect(fs.writeFileSync).not.toHaveBeenCalled()
     expect(services.harness.restart).not.toHaveBeenCalled()
   })
 
   it('PUT with the current version proceeds', async () => {
-    const res = await PUT(makeRequest({ ...policyBody, version: '1111' }), makeParams('h_test'))
+    const res = await PUT(makeRequest({ ...policyBody, version: '1111:{"memory":null,"cpus":null}' }), makeParams('h_test'))
     expect(res.status).toBe(200)
   })
 
@@ -980,5 +981,56 @@ describe('Settings API — restart arms beyond .env changes', () => {
       .filter(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
     expect(envWrites).toHaveLength(0)
     expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
+  })
+})
+
+describe('Settings API — discord parity (username expansion + overlay-covered token)', () => {
+  const ENV = 'GITHUB_TOKEN=x\nDISCORD_ALLOWED_USERS=111\nDISCORD_ALLOWED_CHANNELS=555\n'
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(ENV as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('PUT expands discord usernames through expandDiscordAllowlist before writing', async () => {
+    const { expandDiscordAllowlist } = await import('@/lib/resolvers')
+    vi.mocked(expandDiscordAllowlist).mockResolvedValue(['111', 'vincent', '424242'])
+    const body = {
+      dmPolicy: 'approved-only',
+      surfaces: {
+        discord: {
+          allowedUsers: ['111', 'vincent'],
+          allowedGroups: ['555'],
+          allowAll: false,
+          allowAllGroups: false,
+        },
+      },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(200)
+    expect(expandDiscordAllowlist).toHaveBeenCalledWith('h_test', ['111', 'vincent'])
+    const calls = (fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    const envCall = calls.find(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
+    expect(envCall?.[1] as string).toMatch(/^DISCORD_ALLOWED_USERS=111,vincent,424242$/m)
+  })
+
+  it('a token whose resources fingerprint diverged is rejected 409', async () => {
+    // Same .env mtime, different overlay: a concurrent resources-only edit
+    // must invalidate the token even though the .env never changed.
+    vi.mocked(services.harness.get).mockReturnValue(
+      { resources: { memory: '4G', cpus: '3.0' } } as never,
+    )
+    const staleToken = '1111:{"memory":null,"cpus":null}'
+    const res = await PUT(
+      makeRequest({ dmPolicy: 'approved-only', version: staleToken }),
+      makeParams('h_test'),
+    )
+    expect(res.status).toBe(409)
+    expect(fs.writeFileSync).not.toHaveBeenCalled()
+    expect(services.harness.restart).not.toHaveBeenCalled()
   })
 })

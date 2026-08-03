@@ -4,10 +4,12 @@ export type { ResolvedIdentity } from './signal'
 export { resolveSignalPhone, getSignalAccountUuid } from './signal'
 export { resolveTelegramUsername, getTelegramDisplayName } from './telegram'
 export { resolveMattermostUsername } from './mattermost'
+export { resolveDiscordUsername, expandDiscordAllowlist } from './discord'
 
 import { resolveSignalPhone } from './signal'
 import { resolveTelegramUsername } from './telegram'
 import { resolveMattermostUsername } from './mattermost'
+import { resolveDiscordUsername } from './discord'
 import type { ResolvedIdentity } from './signal'
 
 const SIGNAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-/
@@ -182,6 +184,13 @@ export async function resolveIdentifier(
         return { display: identifier, nativeId: identifier }
       }
       return resolveMattermostUsername(harnessId, identifier)
+    }
+    case 'discord': {
+      // Already a snowflake — skip resolution
+      if (/^[0-9]{5,25}$/.test(identifier)) {
+        return { display: identifier, nativeId: identifier }
+      }
+      return resolveDiscordUsername(harnessId, identifier)
     }
     default:
       return null

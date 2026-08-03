@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
-import { resolveIdentifier, expandSignalAllowlist, expandTelegramAllowlist } from '@/lib/resolvers'
+import { resolveIdentifier, expandSignalAllowlist, expandTelegramAllowlist, expandDiscordAllowlist } from '@/lib/resolvers'
 import { services } from '@/lib/services'
 import { adapterForRuntime } from '@/lib/services/harness'
 
@@ -161,16 +161,19 @@ type SettingsResponse = {
   discordChannelScopedAccess?: boolean
 }
 
-// The .env file is the single source of truth these routes read and write, so
-// its mtime is a serviceable version token. String-typed because mtimeMs is a
-// float and JSON round-trips of floats invite precision surprises.
-//
-// Known limit: `resources` lives on the harness overlay (harnesses.json), not
-// in .env, so the token does not detect concurrent resources-only edits —
-// last writer wins for that one field. Fold the overlay's mtime in if that
-// ever bites in practice.
-function envVersion(envPath: string): string {
-  return String(fs.statSync(envPath).mtimeMs)
+// Version token for optimistic concurrency: covers BOTH stores this route
+// writes — the .env (mtime; string-typed because mtimeMs is a float and JSON
+// round-trips of floats invite precision surprises) and the harness overlay's
+// `resources` (normalized value fingerprint, since harnesses.json has no
+// per-harness mtime). Any concurrent settings write moves one of the two
+// components, so a stale tab 409s instead of silently reverting it.
+function settingsVersion(envPath: string, id: string): string {
+  const resources = services.harness.get(id)?.resources
+  const fingerprint = JSON.stringify({
+    memory: resources?.memory ?? null,
+    cpus: resources?.cpus ?? null,
+  })
+  return `${String(fs.statSync(envPath).mtimeMs)}:${fingerprint}`
 }
 
 export async function GET(
@@ -331,7 +334,7 @@ export async function GET(
     capsolverConfigured,
     resources,
     surfaces,
-    version: envVersion(envPath),
+    version: settingsVersion(envPath, id),
   }
 
   // Read-only surfacing of the channel-scoped access posture (set via env, not
@@ -364,7 +367,7 @@ export async function PUT(
   // agent). The token is optional so scripted callers without one keep
   // working; both UI clients send it and re-fetch on 409.
   if (body.version !== undefined) {
-    const currentVersion = envVersion(envPath)
+    const currentVersion = settingsVersion(envPath, id)
     if (body.version !== currentVersion) {
       return NextResponse.json(
         {
@@ -463,7 +466,7 @@ export async function PUT(
   let content = fs.readFileSync(envPath, 'utf-8')
   // Snapshot token for the pre-write recheck below. Taken immediately after
   // the read (both sync, so no in-process interleaving between them).
-  const snapshotVersion = envVersion(envPath)
+  const snapshotVersion = settingsVersion(envPath, id)
   // Kept for the no-op detection at the end: a PUT whose rendered .env is
   // byte-identical must not rewrite the file (bumping the version token for
   // nothing) and must not recreate the container (which kills in-flight work).
@@ -488,6 +491,14 @@ export async function PUT(
     let allowedUsers = settings.allowedUsers
     if (platform === 'signal' && allowedUsers.length > 0) {
       allowedUsers = await expandSignalAllowlist(id, allowedUsers)
+    }
+    // For Discord, expand usernames to also include their resolved snowflake —
+    // the runtime resolves usernames itself at on_ready, but the HSM policy
+    // plane (surface-admins bootstrap → is_platform_admin) reads this env var
+    // raw, so a username-only entry is an admin the policy plane can never
+    // recognize (see expandDiscordAllowlist).
+    if (platform === 'discord' && allowedUsers.length > 0) {
+      allowedUsers = await expandDiscordAllowlist(id, allowedUsers)
     }
     // For Telegram, expand @usernames to also include their resolved numeric
     // ID — the gateway matches numeric sender IDs verbatim, so an
@@ -702,11 +713,11 @@ export async function PUT(
     // closes that in-handler window completely. Applies to version-less
     // scripted callers too — a mid-flight overwrite is a conflict regardless
     // of whether the caller opted into tokens.
-    if (envVersion(envPath) !== snapshotVersion) {
+    if (settingsVersion(envPath, id) !== snapshotVersion) {
       return NextResponse.json(
         {
           error: 'Settings changed while this save was in flight — reload and re-apply your edit.',
-          currentVersion: envVersion(envPath),
+          currentVersion: settingsVersion(envPath, id),
         },
         { status: 409 },
       )
@@ -831,6 +842,6 @@ export async function PUT(
     restarted,
     unchanged: envUnchanged && !vpnChanged && !resourcesChanged,
     // Fresh token so clients can keep editing without a refetch.
-    version: envVersion(envPath),
+    version: settingsVersion(envPath, id),
   })
 }
