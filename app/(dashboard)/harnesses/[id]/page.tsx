@@ -23,7 +23,9 @@ import { EditSurfaceDialog } from '@/components/surfaces/edit-surface-dialog'
 import { SignalPinManager } from '@/components/surfaces/signal-pin-manager'
 import { SettingsTab } from '@/components/harness/settings-tab'
 import { toast } from 'sonner'
-import { MessageSquare, Globe, Bot, Hash, Pencil, ChevronDown, ChevronRight, Shield, Loader2, Save, RotateCw, Users, X } from 'lucide-react'
+import { Globe, Bot, Pencil, ChevronDown, ChevronRight, Shield, Loader2, Save, RotateCw, Users, X } from 'lucide-react'
+import { SURFACE_SLUGS } from '@/lib/surfaces/registry'
+import { ADMISSION_FIELD_LABELS, SURFACE_LIST_ICONS } from '@/components/surfaces/platform-ui'
 import { TagInput } from '@/components/ui/tag-input'
 import { Switch } from '@/components/ui/switch'
 import { TIER_LABELS } from '@/lib/constants'
@@ -51,22 +53,22 @@ type Settings = {
   version?: string
 }
 
+// Derived from the surface registry + platform-ui metadata; widened to string
+// indexes because this page also renders non-surface platforms (web, api).
 const PLATFORM_LABELS: Record<string, { users: string; groups: string }> = {
-  signal: { users: 'Phone numbers (E.164)', groups: 'Group IDs' },
-  telegram: { users: 'User IDs', groups: 'Chat IDs' },
-  mattermost: { users: 'User IDs', groups: 'Channel IDs' },
-  discord: { users: 'User IDs', groups: 'Channel IDs' },
-  slack: { users: 'User IDs', groups: 'Channel IDs' },
+  ...ADMISSION_FIELD_LABELS,
 }
 
 const PLATFORM_ICONS: Record<string, React.ReactNode> = {
-  telegram: <MessageSquare className="h-4 w-4" />,
-  mattermost: <Hash className="h-4 w-4" />,
-  slack: <Hash className="h-4 w-4" />,
+  ...Object.fromEntries(
+    SURFACE_SLUGS.map((p) => {
+      const Icon = SURFACE_LIST_ICONS[p]
+      return [p, <Icon key={p} className="h-4 w-4" />]
+    }),
+  ),
+  // Non-registry surfaces keep their page-local icons.
   web: <Globe className="h-4 w-4" />,
   api: <Bot className="h-4 w-4" />,
-  discord: <MessageSquare className="h-4 w-4" />,
-  signal: <MessageSquare className="h-4 w-4" />,
 }
 
 const SURFACE_STATUS_STYLES: Record<Surface['status'], string> = {
