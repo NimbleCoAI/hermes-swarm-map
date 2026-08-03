@@ -30,10 +30,19 @@ const PLATFORM_ENV_KEYS: Record<string, string[]> = {
     'MATTERMOST_ALLOWED_USERS',
     'MATTERMOST_ADMIN_USERS',
   ],
+  // Strip credentials and identity-bound lists (user/role/channel ids are
+  // meaningless outside the disconnected guild). Behavioral preferences —
+  // DISCORD_REQUIRE_MENTION, DISCORD_ALLOW_BOTS, DISCORD_CHANNEL_SCOPED_ACCESS
+  // — are deliberately KEPT: they are harmless without a token, nothing
+  // reseeds their values on reconnect (ensurePolicyDefaults only appends empty
+  // keys), and stripping them silently changed agent behavior after a
+  // disconnect/reconnect cycle.
   discord: [
     'DISCORD_BOT_TOKEN',
     'DISCORD_ALLOWED_USERS',
     'DISCORD_ALLOWED_CHANNELS',
+    'DISCORD_ALLOWED_ROLES',
+    'DISCORD_IGNORED_CHANNELS',
   ],
   slack: [
     'SLACK_BOT_TOKEN',

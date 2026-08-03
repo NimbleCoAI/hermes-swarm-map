@@ -122,6 +122,12 @@ export function generateEnvContent(params: {
     // this denies until the operator scopes the agent deliberately.
     lines.push(`DISCORD_ALLOWED_CHANNELS=0`)
     lines.push(`DISCORD_REQUIRE_MENTION=true`)
+    // Org policy: anyone in an admin-approved channel may talk to the bot
+    // (union with the user allowlist; threads inherit their parent channel).
+    // Inert until channels are actually approved — the '0' deny sentinel above
+    // parses to no explicit ids, and '*' is never honored as a grant, so this
+    // cannot open an agent by itself.
+    lines.push(`DISCORD_CHANNEL_SCOPED_ACCESS=true`)
     // Explicit: this check runs BEFORE the user allowlist and skips it entirely
     // when it permits a bot, so it must not be left to an implicit default.
     lines.push(`DISCORD_ALLOW_BOTS=none`)

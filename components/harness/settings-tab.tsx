@@ -23,6 +23,8 @@ type Settings = {
   capsolverConfigured: boolean
   resources?: { memory?: string; cpus?: string }
   surfaces: Record<string, SurfaceSettings>
+  // Optimistic-concurrency token from GET; round-tripped in PUT.
+  version?: string
 }
 
 type Props = {
@@ -103,36 +105,41 @@ function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
     if (!settings) return
     setSaving(true)
     try {
+      // Policy-only PUT: this tab has no surface controls, so it must not send
+      // `surfaces` at all. Sending the whole document made a save here silently
+      // revert any allowlist edit made in the Surfaces tab since this tab's
+      // GET — the two tabs mount together and each held its own stale copy.
+      // An omitted platform is preserved verbatim by the PUT handler.
+      const { surfaces: _omitted, capsolverConfigured: _ro, ...policyOnly } = settings
       const res = await fetch(`/api/harnesses/${harnessId}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(policyOnly),
       })
       const data = await res.json()
-      if (data.success) {
-        // Auto-restart with rebuild mode so the container picks up .env changes
-        toast.success('Settings saved. Restarting agent...')
+      if (res.status === 409) {
+        toast.error(data.error || 'Settings changed since you loaded them — reloaded, re-apply your edit.')
+        const fresh = await fetch(`/api/harnesses/${harnessId}/settings`).then(r => r.json()).catch(() => null)
+        if (fresh && !fresh.error) {
+          setSettings(fresh)
+          setDirty(false)
+        }
+      } else if (data.success) {
         setDirty(false)
-        setSaved(false)
-        setRestarting(true)
-        try {
-          const restartRes = await fetch(`/api/harnesses/${harnessId}/restart`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode: 'rebuild' }),
-          })
-          if (restartRes.ok) {
-            toast.success('Agent restarted with new settings')
-          } else {
-            const restartData = await restartRes.json()
-            toast.error(restartData.error || 'Restart failed — restart manually')
-            setSaved(true) // Show manual restart button as fallback
-          }
-        } catch {
-          toast.error('Restart failed — restart manually')
-          setSaved(true)
-        } finally {
-          setRestarting(false)
+        if (data.version) {
+          setSettings(prev => (prev ? { ...prev, version: data.version } : prev))
+        }
+        // The PUT handler already recreated the container when anything
+        // requiring it changed (restarted:true) — a second POST /restart here
+        // hit the recreate's lock, returned 409, and surfaced as "restart
+        // failed — restart manually".
+        if (data.restarted) {
+          toast.success('Settings saved. Agent restarting...')
+          setSaved(false)
+        } else {
+          toast.success(data.unchanged ? 'No changes — agent left running.' : 'Settings saved')
+          // A no-op save needs no "restart to apply" affordance.
+          setSaved(!data.unchanged)
         }
       } else {
         toast.error(data.error || 'Failed to save')
