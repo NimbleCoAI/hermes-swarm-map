@@ -4,18 +4,14 @@ import { useApi } from '@/lib/hooks/use-api'
 import { StatusDot } from '@/components/shared/status-dot'
 import Link from 'next/link'
 import type { Surface, Harness, HarnessStatus } from '@/lib/types'
-import {
-  MessageSquare, Send, Hash, Radio, Plug,
-} from 'lucide-react'
+import { Plug } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { SURFACE_META } from '@/components/surfaces/platform-ui'
 
-const PLATFORM_META: Record<string, { icon: LucideIcon; label: string }> = {
-  signal: { icon: Radio, label: 'Signal' },
-  telegram: { icon: Send, label: 'Telegram' },
-  mattermost: { icon: MessageSquare, label: 'Mattermost' },
-  discord: { icon: Hash, label: 'Discord' },
-  slack: { icon: MessageSquare, label: 'Slack' },
-}
+// Derived from the surface registry (labels) + platform-ui (icons). Widened to
+// a string index because surfaces may report platforms outside the registry
+// (handled by the Plug fallback below).
+const PLATFORM_META: Record<string, { icon: LucideIcon; label: string }> = { ...SURFACE_META }
 
 function surfaceStatusToHarnessStatus(status: Surface['status']): HarnessStatus {
   if (status === 'connected') return 'running'

@@ -4,8 +4,9 @@
 import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { generateClientPin } from '@/components/surfaces/signal-pin-field'
+import { SURFACES, type SurfaceSlug } from '@/lib/surfaces/registry'
 
-export type SurfacePlatform = 'signal' | 'telegram' | 'mattermost' | 'discord' | 'slack'
+export type SurfacePlatform = SurfaceSlug
 
 /**
  * Where the captured connection should go.
@@ -214,7 +215,7 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
 
     if (data.success) {
       setStep('done')
-      toast.success(`${platformLabel(platform)} connected`)
+      toast.success(`${SURFACES[platform].label} connected`)
       onConnected?.()
       return true
     } else {
@@ -527,20 +528,5 @@ export function useSurfaceRegister(opts: UseSurfaceRegisterOptions) {
     reset,
     // meta
     isPending,
-  }
-}
-
-function platformLabel(platform: SurfacePlatform): string {
-  switch (platform) {
-    case 'signal':
-      return 'Signal'
-    case 'telegram':
-      return 'Telegram'
-    case 'mattermost':
-      return 'Mattermost'
-    case 'discord':
-      return 'Discord'
-    case 'slack':
-      return 'Slack'
   }
 }

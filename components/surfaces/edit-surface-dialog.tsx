@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Pencil, Loader2, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { isSurfaceSlug } from '@/lib/surfaces/registry'
+import { PLATFORM_CREDENTIAL_FIELDS } from './platform-ui'
 
 type Props = {
   platform: string
@@ -13,27 +15,6 @@ type Props = {
   onSaved: () => void
 }
 
-const PLATFORM_FIELDS: Record<string, { key: string; label: string; configKey: string; placeholder?: string }[]> = {
-  signal: [
-    { key: 'phone', label: 'Phone Number (SIGNAL_ACCOUNT)', configKey: 'phone', placeholder: '+1234567890' },
-    { key: 'url', label: 'Signal HTTP URL', configKey: 'url', placeholder: 'http://host.docker.internal:8080' },
-  ],
-  telegram: [
-    { key: 'token', label: 'Bot Token (TELEGRAM_BOT_TOKEN)', configKey: 'token', placeholder: '123456789:ABCdefGHIjklMNOpqrsTUVwxyz' },
-  ],
-  mattermost: [
-    { key: 'url', label: 'Mattermost URL', configKey: 'url', placeholder: 'https://mattermost.example.com' },
-    { key: 'token', label: 'Bot Token (MATTERMOST_TOKEN)', configKey: 'token', placeholder: 'your-bot-token' },
-  ],
-  discord: [
-    { key: 'token', label: 'Bot Token (DISCORD_BOT_TOKEN)', configKey: 'token', placeholder: 'MTAx...xxxx.xxxxxx.xxxx' },
-  ],
-  slack: [
-    { key: 'botToken', label: 'Bot Token (SLACK_BOT_TOKEN)', configKey: 'botToken', placeholder: 'xoxb-...' },
-    { key: 'appToken', label: 'App Token (SLACK_APP_TOKEN)', configKey: 'appToken', placeholder: 'xapp-...' },
-  ],
-}
-
 export function EditSurfaceDialog({ platform, harnessId, currentConfig, open, onClose, onSaved }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -41,7 +22,8 @@ export function EditSurfaceDialog({ platform, harnessId, currentConfig, open, on
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
 
-  const fields = PLATFORM_FIELDS[platform.toLowerCase()] || []
+  const slug = platform.toLowerCase()
+  const fields = isSurfaceSlug(slug) ? PLATFORM_CREDENTIAL_FIELDS[slug] : []
 
   useEffect(() => {
     if (open) {
