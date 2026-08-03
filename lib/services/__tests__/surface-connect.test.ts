@@ -253,3 +253,45 @@ describe('ensurePolicyDefaults — Discord deny sentinel (drift D1)', () => {
     expect(out).toMatch(/^DISCORD_ALLOWED_CHANNELS=555$/m)
   })
 })
+
+describe('buildConnectEnvVars parity with the replaced switch', () => {
+  it('signal: url default applied when config.url is falsy', () => {
+    expect(buildConnectEnvVars('signal', { phone: '+15551112222' })).toEqual({
+      SIGNAL_ACCOUNT: '+15551112222',
+      SIGNAL_HTTP_URL: 'http://host.docker.internal:8080',
+    })
+  })
+
+  it('signal: profileName written only when truthy', () => {
+    expect(
+      buildConnectEnvVars('signal', { phone: '+1', url: 'http://x:1', profileName: 'Iris' }),
+    ).toEqual({
+      SIGNAL_ACCOUNT: '+1',
+      SIGNAL_HTTP_URL: 'http://x:1',
+      SIGNAL_PROFILE_NAME: 'Iris',
+    })
+    expect(
+      buildConnectEnvVars('signal', { phone: '+1', url: 'http://x:1', profileName: '' }),
+    ).not.toHaveProperty('SIGNAL_PROFILE_NAME')
+  })
+
+  it('telegram / mattermost / discord / slack map exactly their credential vars', () => {
+    expect(buildConnectEnvVars('telegram', { token: 't1' })).toEqual({ TELEGRAM_BOT_TOKEN: 't1' })
+    expect(buildConnectEnvVars('mattermost', { url: 'http://mm', token: 't2' })).toEqual({
+      MATTERMOST_URL: 'http://mm',
+      MATTERMOST_TOKEN: 't2',
+    })
+    expect(buildConnectEnvVars('discord', { token: 't3' })).toEqual({ DISCORD_BOT_TOKEN: 't3' })
+    expect(buildConnectEnvVars('slack', { botToken: 'xoxb-1', appToken: 'xapp-1' })).toEqual({
+      SLACK_BOT_TOKEN: 'xoxb-1',
+      SLACK_APP_TOKEN: 'xapp-1',
+    })
+  })
+
+  it('extra config keys are ignored; unknown platform returns {}', () => {
+    expect(buildConnectEnvVars('discord', { token: 't', url: 'http://x', junk: 'y' })).toEqual({
+      DISCORD_BOT_TOKEN: 't',
+    })
+    expect(buildConnectEnvVars('whatsapp', { token: 't' })).toEqual({})
+  })
+})

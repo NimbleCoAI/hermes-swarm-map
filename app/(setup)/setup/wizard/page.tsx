@@ -734,7 +734,7 @@ export default function WizardPage() {
                       type="password"
                       value={state.mattermostToken}
                       onChange={(e) => update({ mattermostToken: e.target.value })}
-                      placeholder="xoxb-..."
+                      placeholder="your-bot-token"
                     />
                   </div>
                 </div>

@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest'
 import { Hash, MessageSquare, Radio, Send } from 'lucide-react'
 import { SURFACES, SURFACE_SLUGS } from '@/lib/surfaces/registry'
 import { buildConnectEnvVars } from '@/lib/env-helpers'
+import { CONNECT_CONFIG_KEYS } from '@/lib/surfaces/derive'
 import {
   SURFACE_LABELS,
   SURFACE_CATALOG_ICONS,
@@ -138,10 +139,10 @@ describe('UI metadata structural invariants', () => {
       expect(Object.keys(envVars).sort(), `${p} env vars`).toEqual(
         [...SURFACES[p].credentials].sort(),
       )
-      // And each field's value lands on the var its metadata is keyed by.
+      // And each field's value lands on the var its wire key maps to.
       for (const f of PLATFORM_CREDENTIAL_FIELDS[p]) {
-        const envVar = Object.entries(CREDENTIAL_FIELD_META).find(
-          ([v, m]) => m.configKey === f.configKey && SURFACES[p].credentials.includes(v),
+        const envVar = Object.entries(CONNECT_CONFIG_KEYS).find(
+          ([v, wire]) => wire.configKey === f.configKey && SURFACES[p].credentials.includes(v),
         )?.[0]
         expect(envVar, `${p}.${f.configKey} maps to a credential var`).toBeTruthy()
         expect(envVars[envVar!]).toBe(`test-${f.configKey}`)

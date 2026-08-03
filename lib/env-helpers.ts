@@ -5,48 +5,28 @@
  * (ALLOWED_USERS, GROUP_ALLOWED_USERS, etc.) that the user set via settings.
  */
 
-import { POLICY_VARS as DERIVED_POLICY_VARS } from '@/lib/surfaces/derive'
+import { POLICY_VARS as DERIVED_POLICY_VARS, CONNECT_ENV_MAP } from '@/lib/surfaces/derive'
+import { isSurfaceSlug } from '@/lib/surfaces/registry'
 
 /**
  * Build env vars for a surface connect operation.
- * Returns ONLY connection-specific vars (URL, token, account) — never policy vars.
+ * Returns ONLY connection-specific vars (URL, token, account) — never policy
+ * vars. Derived from CONNECT_ENV_MAP (lib/surfaces/derive): credentials in
+ * registry order, plus Signal's optional profileName.
  */
 export function buildConnectEnvVars(
   platform: string,
   config: Record<string, string>
 ): Record<string, string> {
-  switch (platform) {
-    case 'signal': {
-      const vars: Record<string, string> = {
-        SIGNAL_HTTP_URL: config.url || 'http://host.docker.internal:8080',
-        SIGNAL_ACCOUNT: config.phone,
-      }
-      if (config.profileName) {
-        vars.SIGNAL_PROFILE_NAME = config.profileName
-      }
-      return vars
-    }
-    case 'telegram':
-      return {
-        TELEGRAM_BOT_TOKEN: config.token,
-      }
-    case 'mattermost':
-      return {
-        MATTERMOST_URL: config.url,
-        MATTERMOST_TOKEN: config.token,
-      }
-    case 'discord':
-      return {
-        DISCORD_BOT_TOKEN: config.token,
-      }
-    case 'slack':
-      return {
-        SLACK_BOT_TOKEN: config.botToken,
-        SLACK_APP_TOKEN: config.appToken,
-      }
-    default:
-      return {}
+  if (!isSurfaceSlug(platform)) return {}
+  const vars: Record<string, string> = {}
+  for (const entry of CONNECT_ENV_MAP[platform]) {
+    const value =
+      entry.default !== undefined ? config[entry.configKey] || entry.default : config[entry.configKey]
+    if (entry.optional && !value) continue
+    vars[entry.envVar] = value
   }
+  return vars
 }
 
 /** Policy env var names per platform — these are never touched by connect. */
