@@ -92,6 +92,18 @@ describe('SurfaceAdminService.listAdmins — default to allowlist (no regression
     expect(list.admins).toEqual(['+64777'])
   })
 
+  it('finds the explicit list when called with the bare agent slug', () => {
+    // Agents call with HERMES_AGENT_NAME (e.g. "seraph-doer"), not "h_seraph_doer".
+    // Before id normalization the overlay lookup missed every explicit list for
+    // agent-side calls and silently fell back to the allowlist bootstrap.
+    storage.write('harnesses.json', [
+      { id: 'h_seraph_doer', surfaceAdmins: { signal: ['+64777'] } },
+    ])
+    const list = svc.listAdmins('seraph-doer', 'signal')
+    expect(list.source).toBe('explicit')
+    expect(list.admins).toEqual(['+64777'])
+  })
+
   it('resolves the personal agent .env at ~/.hermes', () => {
     writeAgentEnv('personal', 'TELEGRAM_ALLOWED_USERS=555\n')
     expect(svc.listAdmins('h_personal', 'telegram').admins).toEqual(['555'])

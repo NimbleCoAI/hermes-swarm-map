@@ -6,6 +6,7 @@ import { buildConnectEnvVars, mergeEnvVars, ensurePolicyDefaults, getSignalDaemo
 import { setPlatformEnabled } from '@/lib/config-yaml-helpers'
 import { services } from '@/lib/services'
 import { expandSignalAllowlist, resolveTelegramAdmins, type ResolvedIdentity } from '@/lib/resolvers'
+import { USERS_VARS } from '@/lib/surfaces/derive'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -69,13 +70,8 @@ export async function POST(
   // (comma-separated for multiple admins)
   let telegramAdmins: { ids: string[]; resolved: ResolvedIdentity[] } | undefined
   if (config.adminUser) {
-    const allowedUsersKey: Record<string, string> = {
-      signal: 'SIGNAL_ALLOWED_USERS',
-      telegram: 'TELEGRAM_ALLOWED_USERS',
-      mattermost: 'MATTERMOST_ALLOWED_USERS',
-      discord: 'DISCORD_ALLOWED_USERS',
-      slack: 'SLACK_ALLOWED_USERS',
-    }
+    // Derived from the surface registry (lib/surfaces).
+    const allowedUsersKey = USERS_VARS
     const key = allowedUsersKey[platform]
     if (key) {
       if (platform === 'signal') {

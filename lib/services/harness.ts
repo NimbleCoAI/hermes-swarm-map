@@ -21,6 +21,7 @@ import type { ContainerRuntimeAdapter } from './runtime-adapter'
 
 const DEFAULT_IMAGE_REPO = 'nimblecoorg/hermes-agent-mt'
 import { hsmBaseUrl } from './hsm-url'
+import { PLATFORM_ENV_KEYS as SURFACE_STRIP_BY_PLATFORM } from '@/lib/surfaces/derive'
 
 const HARNESSES_FILE = 'harnesses.json'
 
@@ -230,13 +231,15 @@ function assertPortAvailable(overlays: Partial<Harness>[], port: number, selfId:
 const COPY_SKIP_DIRS = new Set(['.cache', 'node_modules', '__pycache__', '.venv'])
 
 // Surface-specific env vars stripped from duplicates to prevent two harnesses sharing one surface
-const SURFACE_ENV_VARS = [
-  'SIGNAL_ACCOUNT', 'SIGNAL_HTTP_URL', 'SIGNAL_ALLOWED_USERS', 'SIGNAL_GROUP_ALLOWED_USERS',
-  'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USERS', 'TELEGRAM_GROUP_ALLOWED_CHATS',
-  'MATTERMOST_URL', 'MATTERMOST_TOKEN', 'MATTERMOST_ALLOWED_CHANNELS', 'MATTERMOST_ALLOWED_USERS',
-  'DISCORD_BOT_TOKEN', 'DISCORD_ALLOWED_USERS', 'DISCORD_ALLOWED_CHANNELS',
-  'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_ALLOWED_USERS', 'SLACK_ALLOWED_CHANNELS',
-]
+// The surface vars a DUPLICATED agent must NOT inherit from its source — the
+// credential + identity-bound (admission) set, derived from the single surface
+// registry classification (lib/surfaces), the same set disconnect strips.
+// Deriving it fixed drift D4: the old hand-maintained list here omitted
+// MATTERMOST_ADMIN_USERS, DISCORD_ALLOWED_ROLES and DISCORD_IGNORED_CHANNELS,
+// so a clone silently inherited the source's Mattermost admins and Discord
+// role/ignored-channel policy. Behavioral prefs (REQUIRE_MENTION, etc.) are
+// deliberately NOT in this set and DO carry to the clone.
+const SURFACE_ENV_VARS = Object.values(SURFACE_STRIP_BY_PLATFORM).flat()
 
 // Recursively copy a directory (sync — used by duplicateOverlay for full agent dir copies)
 function copyDirRecursive(src: string, dest: string): void {

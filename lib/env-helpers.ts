@@ -5,6 +5,8 @@
  * (ALLOWED_USERS, GROUP_ALLOWED_USERS, etc.) that the user set via settings.
  */
 
+import { POLICY_VARS as DERIVED_POLICY_VARS } from '@/lib/surfaces/derive'
+
 /**
  * Build env vars for a surface connect operation.
  * Returns ONLY connection-specific vars (URL, token, account) — never policy vars.
@@ -48,13 +50,9 @@ export function buildConnectEnvVars(
 }
 
 /** Policy env var names per platform — these are never touched by connect. */
-export const POLICY_VARS: Record<string, string[]> = {
-  signal: ['SIGNAL_ALLOWED_USERS', 'SIGNAL_GROUP_ALLOWED_USERS', 'SIGNAL_REQUIRE_MENTION'],
-  telegram: ['TELEGRAM_ALLOWED_USERS', 'TELEGRAM_GROUP_ALLOWED_CHATS', 'TELEGRAM_REQUIRE_MENTION'],
-  mattermost: ['MATTERMOST_ALLOWED_USERS', 'MATTERMOST_ALLOWED_CHANNELS', 'MATTERMOST_REQUIRE_MENTION'],
-  discord: ['DISCORD_ALLOWED_USERS', 'DISCORD_ALLOWED_CHANNELS', 'DISCORD_REQUIRE_MENTION'],
-  slack: ['SLACK_ALLOWED_USERS', 'SLACK_ALLOWED_CHANNELS', 'SLACK_REQUIRE_MENTION'],
-}
+// Derived from the surface registry (lib/surfaces): [users, groups,
+// requireMention] per platform. Re-exported for existing importers.
+export const POLICY_VARS = DERIVED_POLICY_VARS
 
 /**
  * Guard a value that will be spliced onto a single line of a generated file

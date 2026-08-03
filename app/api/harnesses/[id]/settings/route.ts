@@ -4,6 +4,13 @@ import path from 'path'
 import os from 'os'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
 import { resolveIdentifier, expandSignalAllowlist, expandTelegramAllowlist, expandDiscordAllowlist } from '@/lib/resolvers'
+import {
+  PLATFORM_VARS as DERIVED_PLATFORM_VARS,
+  MENTION_GATING_VARS as DERIVED_MENTION_GATING_VARS,
+  OBSERVE_UNMENTIONED_VARS as DERIVED_OBSERVE_UNMENTIONED_VARS,
+  GROUP_INVITE_POLICY_VARS as DERIVED_GROUP_INVITE_POLICY_VARS,
+  type PlatformVarNames as DerivedPlatformVarNames,
+} from '@/lib/surfaces/derive'
 import { services } from '@/lib/services'
 import { adapterForRuntime } from '@/lib/services/harness'
 
@@ -34,27 +41,10 @@ const DISCORD_DENY_ALL_CHANNELS_SENTINEL = '0'
 //   - DISCORD_ALLOW_BOTS     : evaluated BEFORE the human allowlist and skips it
 //                              entirely, so a permissive value is a fourth
 //                              authorization class invisible to this console.
-type PlatformVarNames = {
-  users: string
-  groups: string
-  roles?: string
-  ignoredGroups?: string
-  allowBots?: string
-}
-
-const PLATFORM_VARS: Record<string, PlatformVarNames> = {
-  signal: { users: 'SIGNAL_ALLOWED_USERS', groups: 'SIGNAL_GROUP_ALLOWED_USERS' },
-  telegram: { users: 'TELEGRAM_ALLOWED_USERS', groups: 'TELEGRAM_GROUP_ALLOWED_CHATS' },
-  mattermost: { users: 'MATTERMOST_ALLOWED_USERS', groups: 'MATTERMOST_ALLOWED_CHANNELS' },
-  discord: {
-    users: 'DISCORD_ALLOWED_USERS',
-    groups: 'DISCORD_ALLOWED_CHANNELS',
-    roles: 'DISCORD_ALLOWED_ROLES',
-    ignoredGroups: 'DISCORD_IGNORED_CHANNELS',
-    allowBots: 'DISCORD_ALLOW_BOTS',
-  },
-  slack: { users: 'SLACK_ALLOWED_USERS', groups: 'SLACK_ALLOWED_CHANNELS' },
-}
+// Derived from the surface registry (lib/surfaces) — do not re-declare these
+// maps here. registry.test.ts pins them against the former literals.
+type PlatformVarNames = DerivedPlatformVarNames
+const PLATFORM_VARS = DERIVED_PLATFORM_VARS
 
 // DISCORD_ALLOW_BOTS is tri-state; anything else is rejected rather than coerced,
 // because both other values skip the human allowlist.
@@ -107,27 +97,11 @@ type SurfaceSettings = {
 // means NO channels approved; allow-all = empty means respond everywhere).
 // Telegram's var is enforced by the group-approval POST endpoint
 // (surfaces/[platform]/groups/[groupId]) that the swarm_map_policy plugin calls.
-const GROUP_INVITE_VARS: Record<string, string> = {
-  signal: 'SIGNAL_GROUP_INVITE_POLICY',
-  slack: 'SLACK_CHANNEL_POLICY',
-  telegram: 'TELEGRAM_GROUP_INVITE_POLICY',
-}
-
-// Env var names for mention-gating per platform
-const MENTION_GATING_VARS: Record<string, string> = {
-  signal: 'SIGNAL_REQUIRE_MENTION',
-  telegram: 'TELEGRAM_REQUIRE_MENTION',
-  mattermost: 'MATTERMOST_REQUIRE_MENTION',
-  discord: 'DISCORD_REQUIRE_MENTION',
-  slack: 'SLACK_REQUIRE_MENTION',
-}
-
-// Env var names for observing unmentioned messages per platform
-const OBSERVE_UNMENTIONED_VARS: Record<string, string> = {
-  signal: 'SIGNAL_OBSERVE_UNMENTIONED',
-  mattermost: 'MATTERMOST_OBSERVE_UNMENTIONED',
-  telegram: 'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES',
-}
+// All three derived from the surface registry (lib/surfaces). GROUP_INVITE and
+// OBSERVE_UNMENTIONED cover only the surfaces that have the var.
+const GROUP_INVITE_VARS = DERIVED_GROUP_INVITE_POLICY_VARS
+const MENTION_GATING_VARS = DERIVED_MENTION_GATING_VARS
+const OBSERVE_UNMENTIONED_VARS = DERIVED_OBSERVE_UNMENTIONED_VARS
 
 // Global env vars for policy settings
 const COMMAND_APPROVAL_VAR = 'HERMES_APPROVAL_ADMIN_ONLY'
