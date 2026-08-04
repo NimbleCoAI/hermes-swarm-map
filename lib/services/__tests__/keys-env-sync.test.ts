@@ -96,3 +96,68 @@ describe('keys .env sync (assign / unassign / remove)', () => {
     expect([...affected].sort()).toEqual(['h_a', 'h_b'])
   })
 })
+
+// Bluesky writes a PAIR of vars (identifier + app password). Assignment and
+// removal must keep both halves in lockstep with keys.json.
+describe('bluesky pair .env sync (assign / unassign / remove)', () => {
+  let tmpHome: string
+  let tmpStore: string
+  let prevHome: string | undefined
+  let keys: KeysService
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-bskysync-home-'))
+    tmpStore = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-bskysync-store-'))
+    prevHome = process.env.HOME
+    process.env.HOME = tmpHome
+    const storage = new Storage(tmpStore)
+    keys = new KeysService(storage, new AuditService(storage))
+  })
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME
+    else process.env.HOME = prevHome
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+    fs.rmSync(tmpStore, { recursive: true, force: true })
+  })
+
+  const readEnv = (name: string) => {
+    try { return fs.readFileSync(path.join(tmpHome, `.hermes-${name}`, '.env'), 'utf-8') } catch { return '' }
+  }
+
+  const PASS = 'abcd-efgh-ijkl-mnop'
+
+  it('setAssignment() writes both vars into a newly-assigned harness .env', () => {
+    const key = keys.add({ provider: 'bluesky', value: PASS, identifier: 'nimbleco.ai' })
+    keys.setAssignment(key.id, ['h_iris'])
+    const env = readEnv('iris')
+    expect(env).toMatch(new RegExp(`^BLUESKY_APP_PASSWORD=${PASS}$`, 'm'))
+    expect(env).toMatch(/^BLUESKY_IDENTIFIER=nimbleco\.ai$/m)
+  })
+
+  it('setAssignment() strips both vars from a dropped harness .env', () => {
+    const key = keys.add({ provider: 'bluesky', value: PASS, identifier: 'nimbleco.ai' })
+    keys.setAssignment(key.id, ['h_iris'])
+    keys.setAssignment(key.id, [])
+    const env = readEnv('iris')
+    expect(env).not.toMatch(/BLUESKY_APP_PASSWORD/)
+    expect(env).not.toMatch(/BLUESKY_IDENTIFIER/)
+  })
+
+  it('remove() strips both vars from every assigned harness .env', () => {
+    const key = keys.add({ provider: 'bluesky', value: PASS, identifier: 'nimbleco.ai' })
+    keys.setAssignment(key.id, ['h_iris'])
+    keys.remove(key.id)
+    const env = readEnv('iris')
+    expect(env).not.toMatch(/BLUESKY_APP_PASSWORD/)
+    expect(env).not.toMatch(/BLUESKY_IDENTIFIER/)
+  })
+
+  it('rotateValue() rewrites the pair with the (possibly updated) identifier', () => {
+    const key = keys.add({ provider: 'bluesky', value: PASS, identifier: 'old.handle' })
+    keys.setAssignment(key.id, ['h_iris'])
+    keys.rotateValue(key.id, 'qrst-uvwx-yzab-cdef', { identifier: 'new.handle' })
+    const env = readEnv('iris')
+    expect(env).toMatch(/^BLUESKY_APP_PASSWORD=qrst-uvwx-yzab-cdef$/m)
+    expect(env).toMatch(/^BLUESKY_IDENTIFIER=new\.handle$/m)
+  })
+})

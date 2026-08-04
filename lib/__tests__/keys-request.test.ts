@@ -43,4 +43,16 @@ describe('parseKeyRequestParams', () => {
     const parsed = parseKeyRequestParams(params('request=hedra&assign=h_mare,h_ghost'), ['h_mare', 'h_cyborg'])
     expect(parsed?.assignTo).toEqual(['h_mare'])
   })
+
+  it('parses the optional identifier param (bluesky handle prefill)', () => {
+    const parsed = parseKeyRequestParams(params('request=bluesky&assign=h_iris&identifier=nimbleco.ai'))
+    expect(parsed?.provider).toBe('bluesky')
+    expect(parsed?.assignTo).toEqual(['h_iris'])
+    expect(parsed?.identifier).toBe('nimbleco.ai')
+  })
+
+  it('leaves identifier undefined when absent or blank', () => {
+    expect(parseKeyRequestParams(params('request=bluesky'))?.identifier).toBeUndefined()
+    expect(parseKeyRequestParams(params('request=bluesky&identifier=%20%20'))?.identifier).toBeUndefined()
+  })
 })

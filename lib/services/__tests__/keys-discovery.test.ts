@@ -87,3 +87,48 @@ describe('notion token detection (env discovery)', () => {
     expect(found).toBeTruthy()
   })
 })
+
+describe('bluesky pair detection (env discovery)', () => {
+  let tmpHome: string
+  let prevHome: string | undefined
+  let keys: KeysService
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-bsky-disc-home-'))
+    prevHome = process.env.HOME
+    process.env.HOME = tmpHome
+    const storage = new Storage(fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-bsky-disc-store-')))
+    keys = new KeysService(storage, new AuditService(storage))
+  })
+
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME
+    else process.env.HOME = prevHome
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+  })
+
+  function writeAgentEnv(name: string, content: string) {
+    const dir = path.join(tmpHome, `.hermes-${name}`)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, '.env'), content + '\n')
+  }
+
+  it('detects BLUESKY_APP_PASSWORD as a bluesky key carrying its companion identifier', () => {
+    writeAgentEnv('a', 'BLUESKY_IDENTIFIER=nimbleco.ai\nBLUESKY_APP_PASSWORD=abcd-efgh-ijkl-mnop')
+    const found = keys.list(['a']).find((k) => k.provider === 'bluesky')
+    expect(found).toBeTruthy()
+    expect(found!.identifier).toBe('nimbleco.ai')
+  })
+
+  it('does NOT surface BLUESKY_IDENTIFIER as a key of its own', () => {
+    writeAgentEnv('b', 'BLUESKY_IDENTIFIER=nimbleco.ai')
+    expect(keys.list(['b'])).toHaveLength(0)
+  })
+
+  it('detects the app password even without a companion identifier', () => {
+    writeAgentEnv('c', 'BLUESKY_APP_PASSWORD=abcd-efgh-ijkl-mnop')
+    const found = keys.list(['c']).find((k) => k.provider === 'bluesky')
+    expect(found).toBeTruthy()
+    expect(found!.identifier).toBeUndefined()
+  })
+})

@@ -47,6 +47,15 @@ export function anthropicEnvVarForValue(value: string): 'ANTHROPIC_API_KEY' | 'A
   return 'ANTHROPIC_API_KEY'
 }
 
+// --- Bluesky credential pairing ---------------------------------------------
+// A Bluesky session needs (identifier, app-password): the app password is the
+// single secret this key stores (→ BLUESKY_APP_PASSWORD), and the account
+// handle/DID is non-secret config carried in the key's `identifier` field and
+// emitted as BLUESKY_IDENTIFIER at write time. One key, two env vars — the
+// same "paired vars, single key" posture as Anthropic above, except both vars
+// are always written rather than one-of-two.
+export const BLUESKY_ENV_VARS = ['BLUESKY_IDENTIFIER', 'BLUESKY_APP_PASSWORD'] as const
+
 // A value in our AES-256-GCM at-rest format is `iv:authTag:ciphertext`, all hex
 // (see encryption.ts). Used to tell a real decrypt failure (rotated/lost .key →
 // must fail loud) apart from a legacy pre-encryption plaintext value (no such
@@ -81,7 +90,7 @@ function removeEnvVar(content: string, varName: string): string {
 
 // Hints that let a key resolve to the right .env var name. Custom-provider keys
 // carry no entry in PROVIDER_TO_VAR, so they lean on these.
-type EnvVarHints = { name?: string; envVar?: string }
+type EnvVarHints = { name?: string; envVar?: string; identifier?: string }
 
 // Coerce arbitrary text into a valid shell env-var identifier. Env var names
 // must match [A-Za-z_][A-Za-z0-9_]* — in particular they cannot start with a
@@ -122,6 +131,10 @@ const PROVIDER_PATTERNS: ProviderPattern[] = [
   { varPattern: /^MATTERMOST_TOKEN$/i, provider: 'mattermost' },
   { varPattern: /^TELEGRAM_BOT_TOKEN$/i, provider: 'telegram' },
   { varPattern: /^SIGNAL_ACCOUNT$/i, provider: 'signal' },
+  // Bluesky app passwords are xxxx-xxxx-xxxx-xxxx (Settings → App Passwords).
+  // BLUESKY_IDENTIFIER is deliberately NOT a pattern here: it is the non-secret
+  // half of the pair and must never be discovered as a key of its own.
+  { varPattern: /^BLUESKY_APP_PASSWORD$/i, provider: 'bluesky', valuePattern: /^[a-z0-9]{4}(-[a-z0-9]{4}){3}$/i },
   // Notion tokens: legacy `secret_` prefix or current `ntn_` prefix.
   { varPattern: /^NOTION_API_KEY$|^NOTION_TOKEN$/i, provider: 'notion', valuePattern: /^(secret_|ntn_)/ },
   { varPattern: /^AWS_ACCESS_KEY_ID$/i, provider: 'aws', valuePattern: /^AKIA/ },
@@ -213,6 +226,11 @@ function discoverKeys(harnessNames: string[], encryption?: Encryption): Map<stri
     const envPath = path.join(dataDir, '.env')
     const pairs = parseEnvFile(envPath)
 
+    // Bluesky's non-secret companion var: not a key itself (see
+    // PROVIDER_PATTERNS), but a discovered app password should carry the
+    // identifier it was written next to, so re-assignment round-trips both.
+    const blueskyIdentifier = pairs.find((p) => /^BLUESKY_IDENTIFIER$/i.test(p.varName))?.value
+
     for (const { varName, value } of pairs) {
       const provider = detectProvider(varName, value)
       if (!provider) continue
@@ -228,6 +246,7 @@ function discoverKeys(harnessNames: string[], encryption?: Encryption): Map<stri
         const storedKey: StoredKey = {
           id: fpId,
           provider,
+          ...(provider === 'bluesky' && blueskyIdentifier ? { identifier: blueskyIdentifier } : {}),
           maskedValue: maskValue(value),
           encryptedValue, // encrypted at rest; never exposed in API
           assignedTo: [],
@@ -332,6 +351,7 @@ export class KeysService {
         ...(override?.budgetUsd !== undefined ? { budgetUsd: override.budgetUsd } : {}),
         ...(override?.health ? { health: override.health } : {}),
         ...(override?.name ? { name: override.name } : {}),
+        ...(override?.identifier ? { identifier: override.identifier } : {}),
       }
       discoveredKeys.push(merged)
     }
@@ -357,6 +377,9 @@ export class KeysService {
     mattermost: 'MATTERMOST_TOKEN',
     telegram: 'TELEGRAM_BOT_TOKEN',
     signal: 'SIGNAL_ACCOUNT',
+    // The secret half only. The identifier half is written as a side effect in
+    // writeKeyToEnv (see BLUESKY_ENV_VARS).
+    bluesky: 'BLUESKY_APP_PASSWORD',
     notion: 'NOTION_API_KEY',
     aws: 'AWS_ACCESS_KEY_ID',
     'aws-bedrock': 'AWS_BEARER_TOKEN_BEDROCK',
@@ -384,6 +407,7 @@ export class KeysService {
       provider: input.provider,
       ...(input.name ? { name: input.name } : {}),
       ...(input.envVar ? { envVar: input.envVar } : {}),
+      ...(input.identifier ? { identifier: input.identifier } : {}),
       maskedValue: maskValue(input.value),
       encryptedValue: this.encryption.encrypt(input.value),
       assignedTo: input.assignedTo ?? [],
@@ -448,6 +472,14 @@ export class KeysService {
       }
     }
 
+    // Bluesky is a credential PAIR: the secret app password (written above) plus
+    // the non-secret account identifier from the key's metadata. Without the
+    // identifier hint any existing BLUESKY_IDENTIFIER is left untouched — never
+    // half-cleared — so a legacy hand-written pair keeps working.
+    if (provider === 'bluesky' && hints?.identifier?.trim()) {
+      content = upsertEnvVar(content, 'BLUESKY_IDENTIFIER', hints.identifier.trim())
+    }
+
     fs.mkdirSync(dataDir, { recursive: true })
     fs.writeFileSync(envPath, content, { mode: 0o600 })
   }
@@ -459,12 +491,16 @@ export class KeysService {
 
     try {
       let content = fs.readFileSync(envPath, 'utf-8')
-      // Anthropic may have been written to either var; clear both. Everything
-      // else resolves to the single var writeKeyToEnv would have used (custom
-      // keys included, via the same name/envVar hints).
+      // Anthropic may have been written to either var; clear both. Bluesky is a
+      // pair, so both halves go — a lingering BLUESKY_IDENTIFIER without its
+      // password is stale config, not a working credential. Everything else
+      // resolves to the single var writeKeyToEnv would have used (custom keys
+      // included, via the same name/envVar hints).
       const vars = provider === 'anthropic'
         ? [...ANTHROPIC_ENV_VARS]
-        : [this.resolveEnvVar(provider, '', hints)]
+        : provider === 'bluesky'
+          ? [...BLUESKY_ENV_VARS]
+          : [this.resolveEnvVar(provider, '', hints)]
       for (const v of vars) content = removeEnvVar(content, v)
       fs.writeFileSync(envPath, content, { mode: 0o600 })
     } catch {
@@ -528,6 +564,7 @@ export class KeysService {
             : {}),
         ...(partial.name ? { name: partial.name } : discovered?.name ? { name: discovered.name } : {}),
         ...(partial.envVar ? { envVar: partial.envVar } : discovered?.envVar ? { envVar: discovered.envVar } : {}),
+        ...(partial.identifier ? { identifier: partial.identifier } : discovered?.identifier ? { identifier: discovered.identifier } : {}),
         health: partial.health ?? discovered?.health ?? 'good',
       })
     }
@@ -557,10 +594,11 @@ export class KeysService {
     this.update(id, { assignedTo: next })
 
     const value = this.getDecryptedValue(id)
+    const hints: EnvVarHints = { name: before.name, envVar: before.envVar, identifier: before.identifier }
     if (value) {
-      for (const h of added) this.writeKeyToEnv(h, before.provider, value, { name: before.name, envVar: before.envVar })
+      for (const h of added) this.writeKeyToEnv(h, before.provider, value, hints)
     }
-    for (const h of removed) this.removeKeyFromEnv(h, before.provider, { name: before.name, envVar: before.envVar })
+    for (const h of removed) this.removeKeyFromEnv(h, before.provider, hints)
 
     return [...added, ...removed]
   }
@@ -589,6 +627,7 @@ export class KeysService {
         assignedTo: discovered.assignedTo,
         health: discovered.health,
         ...(discovered.name ? { name: discovered.name } : {}),
+        ...(discovered.identifier ? { identifier: discovered.identifier } : {}),
         ...(discovered.budgetUsd !== undefined ? { budgetUsd: discovered.budgetUsd } : {}),
       })
       index = stored.length - 1
@@ -610,6 +649,7 @@ export class KeysService {
       assignedTo: finalAssignedTo,
       ...(updates?.name !== undefined ? { name: updates.name } : {}),
       ...(updates?.envVar !== undefined ? { envVar: updates.envVar } : {}),
+      ...(updates?.identifier !== undefined ? { identifier: updates.identifier } : {}),
       ...(updates?.budgetUsd !== undefined ? { budgetUsd: updates.budgetUsd } : {}),
     }
     this.storage.write(KEYS_FILE, stored)
@@ -618,6 +658,7 @@ export class KeysService {
     const rotatedHints: EnvVarHints = {
       name: updates?.name ?? key.name,
       envVar: updates?.envVar ?? key.envVar,
+      identifier: updates?.identifier ?? key.identifier,
     }
     for (const harnessId of finalAssignedTo) {
       this.writeKeyToEnv(harnessId, key.provider, newValue, rotatedHints)
@@ -645,7 +686,7 @@ export class KeysService {
     // files. Callers should read the key's `assignedTo` before removing and
     // recreate those harnesses afterward.
     for (const harnessId of key.assignedTo ?? []) {
-      this.removeKeyFromEnv(harnessId, key.provider, { name: key.name, envVar: key.envVar })
+      this.removeKeyFromEnv(harnessId, key.provider, { name: key.name, envVar: key.envVar, identifier: key.identifier })
     }
     const filtered = stored.filter((k) => k.id !== id)
     this.storage.write(KEYS_FILE, filtered)
