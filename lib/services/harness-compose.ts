@@ -65,6 +65,21 @@ export interface ComposeOptions {
 /** Model the bundled ollama sidecar pulls and serves on boot (tiny, CPU-friendly). */
 export const BUNDLED_OLLAMA_MODEL = 'qwen2.5:0.5b'
 
+/**
+ * Default image for the Camofox sidecar in the VPN variant.
+ *
+ * This is the upstream third-party image (github.com/jo-inc/camofox-browser) —
+ * public on GHCR and anonymously pullable. Pinned by tag AND digest so the
+ * default can never silently drift or vanish: the previous default
+ * (`ghcr.io/nimblecoai/camofox:latest`) never existed under any namespace, so
+ * every VPN-enabled agent got a compose that failed only at `docker compose up`
+ * (issue #192). Digest verified against ghcr.io on 2026-08-04 (tags `1.13.0`
+ * and `latest` both resolved to this digest). Bumping the version means
+ * re-verifying the new tag's digest and updating both here.
+ */
+export const DEFAULT_CAMOFOX_IMAGE =
+  'ghcr.io/jo-inc/camofox-browser:1.13.0@sha256:64b30ffdbbc4ae0e28200a66dfbd6f55ac4188229eb34ef769afcf7be40faa6e'
+
 export function generateStandaloneCompose(
   agentName: string,
   port: number,
@@ -254,7 +269,7 @@ services:
         target: 6080
 
   camofox:
-    image: ${camofoxImage || 'ghcr.io/nimblecoai/camofox:latest'}
+    image: ${camofoxImage || DEFAULT_CAMOFOX_IMAGE}
     container_name: camofox-${agentName}
     restart: unless-stopped
     network_mode: "service:wireguard"

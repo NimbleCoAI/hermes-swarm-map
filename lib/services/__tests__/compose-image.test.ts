@@ -3,6 +3,10 @@ import { describe, it, expect } from 'vitest'
 import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from '../harness-compose'
 
 const REF = 'ghcr.io/nimblecoorg/hermes-agent-mt:2026-06-12'
+// Explicit camofox override fixture. Deliberately fake — these tests exercise
+// setComposeImage leaving sidecar images untouched, not image validity. The
+// real default lives in DEFAULT_CAMOFOX_IMAGE (see harness-compose.test.ts).
+const CAMOFOX_FIXTURE = 'ghcr.io/example/camofox-fixture:9.9.9'
 
 describe('readComposeBuildContext', () => {
   it('reads the long-form build context this generator emits', () => {
@@ -28,7 +32,7 @@ describe('readComposeBuildContext', () => {
   })
 
   it('reads the build context from the VPN variant', () => {
-    const c = generateStandaloneCompose('zeta', 8642, '/data/zeta', { imageOrBuild: { build: '/src/z' }, vpnEnabled: true, camofoxImage: 'ghcr.io/nimblecoai/camofox:latest' })
+    const c = generateStandaloneCompose('zeta', 8642, '/data/zeta', { imageOrBuild: { build: '/src/z' }, vpnEnabled: true, camofoxImage: CAMOFOX_FIXTURE })
     expect(readComposeBuildContext(c)).toBe('/src/z')
   })
 })
@@ -54,11 +58,11 @@ describe('setComposeImage', () => {
   })
 
   it('VPN variant: edits the hermes source block, NEVER the wireguard/camofox images', () => {
-    const c = generateStandaloneCompose('gamma', 8642, '/data/gamma', { imageOrBuild: { build: '/src' }, vpnEnabled: true, camofoxImage: 'ghcr.io/nimblecoai/camofox:latest' })
+    const c = generateStandaloneCompose('gamma', 8642, '/data/gamma', { imageOrBuild: { build: '/src' }, vpnEnabled: true, camofoxImage: CAMOFOX_FIXTURE })
     const out = setComposeImage(c, REF)
     expect(readComposeImage(out)).toBe(REF)
     expect(out).toContain('image: lscr.io/linuxserver/wireguard:latest') // untouched
-    expect(out).toContain('image: ghcr.io/nimblecoai/camofox:latest') // untouched
+    expect(out).toContain(`image: ${CAMOFOX_FIXTURE}`) // untouched
     expect(out).not.toContain('build:')
   })
 
