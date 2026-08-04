@@ -18,20 +18,30 @@
  * its duration. The sweep therefore checks one harness at a time and yields
  * (setTimeout) between harnesses instead of fanning out.
  *
- * KNOWN GAP (acknowledged, not unit-testable here): the host-side readonly
- * reader shares the DB with a WAL-mode writer that lives across a VM/VirtioFS
- * boundary. Live cross-VM WAL contention cannot be reproduced in unit tests —
- * it needs Docker Desktop's file-sharing translation layer under real write
- * load. That is exactly why (a) a single non-ok quick_check is never trusted
- * (see corruption hysteresis below), and (b) this host-path transport is
- * interim until PR2 swaps `runDbPragma` to a docker-exec transport inside the
- * VM, where SQLite's locking assumptions actually hold.
+ * PR2 transport swap (#204): once a harness's DBs migrate to a named Docker
+ * volume, the host-side state.db is a dangling symlink — better-sqlite3 can't
+ * open it at all. `runDbPragma` now branches on lstat:
+ *   - regular file → host-path better-sqlite3, exactly as PR1 (fast, sync;
+ *     fine for the unmigrated case where the file IS host-readable);
+ *   - symlink → async `docker exec <container> python3` running the PRAGMA
+ *     inside the VM, where SQLite's locking assumptions actually hold AND the
+ *     event loop is never blocked (matilde's 287MB quick_check blocked the
+ *     single pm2 fork ~3.2s on the host path).
+ *
+ * KNOWN GAP (acknowledged, not unit-testable here — applies to the UNMIGRATED
+ * host path only): the host-side readonly reader shares the DB with a WAL-mode
+ * writer that lives across a VM/VirtioFS boundary. Live cross-VM WAL
+ * contention cannot be reproduced in unit tests. That is why a single non-ok
+ * quick_check is never trusted (see corruption hysteresis below). Migrating a
+ * harness moves its checks in-VM and retires the gap for that harness.
  */
 
 import path from 'path'
 import fs from 'fs'
 import Database from 'better-sqlite3'
-import { agentDataDirForName, tailLogFile } from './harness'
+import type { Harness } from '@/lib/types'
+import { adapterForRuntime, agentDataDirForName, tailLogFile } from './harness'
+import { DockerService } from './docker'
 
 export type DbIntegrityStatus =
   | 'ok'
@@ -106,21 +116,134 @@ function dataDirForHarnessId(harnessId: string): string {
 }
 
 // --- Transport seam (PR2) ---------------------------------------------------
-// All SQLite access for integrity checks goes through this one function.
-// Today it opens the host-visible DB file readonly; after the named-volume
-// migration (PR2) this becomes a docker-exec into the container, with the
-// same signature.
-export function runDbPragma(dataDir: string, sql: string): unknown[] {
-  const dbPath = path.join(dataDir, 'state.db')
-  const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+
+/** What runDbPragma/checkDb operate on: a data dir plus the container that
+ * mounts it (needed for the docker-exec path on migrated harnesses). */
+export type DbCheckTarget = { dataDir: string; containerName: string }
+
+export type ExecInContainer = (
+  container: string,
+  argv: string[],
+  timeoutMs?: number,
+) => Promise<string>
+
+const dockerService = new DockerService()
+let execTransport: ExecInContainer = (c, argv, t) => dockerService.execInContainer(c, argv, t)
+
+/** Swap the docker-exec transport. Test hook only. */
+export function _setExecTransportForTests(fn: ExecInContainer | null): void {
+  execTransport = fn ?? ((c, argv, t) => dockerService.execInContainer(c, argv, t))
+}
+
+const EXEC_PRAGMA_TIMEOUT_MS = 30_000
+
+/** pragmaPython's exit code for "no state.db in the container yet" (fresh
+ * migrated harness, pre-first-write). Distinct from 3 (SQLite-level error). */
+export const EXEC_NO_DB_EXIT_CODE = 4
+
+/** Marker code for the shaped no-db error thrown by the exec transport. */
+const NO_DB_CODE = 'HSM_NO_DB'
+
+/**
+ * In-container PRAGMA runner: prints one finding per line on stdout, and on a
+ * SQLite-level failure prints the error to stderr and exits 3 so the TS side
+ * can classify it (busy/corrupt) instead of getting a generic exec error.
+ * `sql` is interpolated — it is an internal constant ('quick_check'), never
+ * user input.
+ */
+function pragmaPython(sql: string): string {
+  return [
+    'import sqlite3, sys, os',
+    // Fresh migrated harness: the symlink dangles until the agent's first DB
+    // write. Distinct exit code (not 3) so the TS side reports benign 'no-db'
+    // instead of a red 'error' badge (sqlite would raise "unable to open").
+    'if not os.path.exists("/opt/data/state.db"):',
+    `    sys.exit(${EXEC_NO_DB_EXIT_CODE})`,
+    'try:',
+    '    con = sqlite3.connect("file:/opt/data/state.db?mode=ro", uri=True, timeout=10)',
+    '    try:',
+    `        rows = con.execute("PRAGMA ${sql}").fetchall()`,
+    '    finally:',
+    '        con.close()',
+    '    for r in rows:',
+    '        print(r[0])',
+    'except sqlite3.Error as e:',
+    '    sys.stderr.write(str(e))',
+    '    sys.exit(3)',
+  ].join('\n')
+}
+
+/** Map a python-sqlite3 error message to a better-sqlite3-shaped code so
+ * classifyDbError keeps working across both transports. */
+function shapeExecError(err: unknown): Error & { code?: string } {
+  const raw = err instanceof Error ? err : new Error(String(err))
+  const stderr = String((err as { stderr?: unknown })?.stderr ?? '')
+  const msg = (stderr.trim() || raw.message).slice(0, 500)
+  const shaped: Error & { code?: string } = new Error(msg)
+  const lower = msg.toLowerCase()
+  if (lower.includes('database is locked') || lower.includes('database is busy')) {
+    shaped.code = 'SQLITE_BUSY'
+  } else if (lower.includes('malformed') || lower.includes('not a database')) {
+    shaped.code = 'SQLITE_CORRUPT'
+  } else if (lower.includes('unable to open database')) {
+    shaped.code = 'SQLITE_CANTOPEN'
+  }
+  return shaped
+}
+
+/** True when the exec failure is docker-level (container down), not SQLite-level. */
+function isContainerDownError(err: unknown): boolean {
+  const msg = `${(err as { message?: unknown })?.message ?? ''} ${(err as { stderr?: unknown })?.stderr ?? ''}`
+  return /is not running|no such container|container .* is (?:restarting|paused|dead)/i.test(msg)
+}
+
+/**
+ * All SQLite access for integrity checks goes through this one function.
+ * Transport is picked per-harness by lstat (regeneration-proof — independent
+ * of what any compose file claims):
+ *   - regular file → host-path better-sqlite3, readonly (unmigrated);
+ *   - symlink → async docker exec python3 in the container (migrated).
+ */
+export async function runDbPragma(target: DbCheckTarget, sql: string): Promise<unknown[]> {
+  const dbPath = path.join(target.dataDir, 'state.db')
+  let migrated = false
   try {
-    // Don't fail instantly on a transiently locked DB; a couple of seconds
-    // is plenty for WAL readers.
-    db.pragma('busy_timeout = 2000')
-    const rows = db.pragma(sql)
-    return Array.isArray(rows) ? rows : [rows]
-  } finally {
-    db.close()
+    migrated = fs.lstatSync(dbPath).isSymbolicLink()
+  } catch {
+    // Missing file: fall through to the host path so fileMustExist raises the
+    // same error PR1 callers/tests expect.
+  }
+
+  if (!migrated) {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    try {
+      // Don't fail instantly on a transiently locked DB; a couple of seconds
+      // is plenty for WAL readers.
+      db.pragma('busy_timeout = 2000')
+      const rows = db.pragma(sql)
+      return Array.isArray(rows) ? rows : [rows]
+    } finally {
+      db.close()
+    }
+  }
+
+  try {
+    const stdout = await execTransport(
+      target.containerName,
+      ['python3', '-c', pragmaPython(sql)],
+      EXEC_PRAGMA_TIMEOUT_MS,
+    )
+    return stdout.split('\n').filter((l) => l.length > 0)
+  } catch (err) {
+    if ((err as { code?: unknown })?.code === EXEC_NO_DB_EXIT_CODE) {
+      // pragmaPython's distinct exit: db missing in-container (fresh migrated
+      // harness). Shape it so checkDb can report benign 'no-db', not 'error'.
+      const noDb: Error & { code?: string } = new Error('no state.db in container yet')
+      noDb.code = NO_DB_CODE
+      throw noDb
+    }
+    if (isContainerDownError(err)) throw err // checkDb reports 'container not running'
+    throw shapeExecError(err)
   }
 }
 
@@ -133,33 +256,54 @@ export function classifyDbError(err: unknown): 'busy' | 'corrupt' | 'error' {
 }
 
 /**
- * Run a readonly quick_check against the state.db under dataDir.
- * A missing DB is not an error — fresh harnesses simply have no DB yet.
+ * Run a readonly quick_check against the target's state.db.
+ * A missing DB is not an error — fresh harnesses simply have no DB yet. The
+ * gate is lstat-based: a migrated harness's state.db is a HOST-dangling
+ * symlink that existsSync would misreport as no-db (silently disabling
+ * integrity monitoring for exactly the harnesses that were migrated to make
+ * it trustworthy) — it routes to the docker-exec transport instead.
  *
  * Returns the RAW single-sample verdict; callers must not surface a raw
  * 'corrupt' directly — publish through the corruption-hysteresis gate
  * (applyCheckResult) instead.
  */
-export function checkDbAtDir(dataDir: string): DbIntegrityResult {
+export async function checkDb(target: DbCheckTarget): Promise<DbIntegrityResult> {
   const start = Date.now()
-  const dbPath = path.join(dataDir, 'state.db')
-  if (!fs.existsSync(dbPath)) {
+  const dbPath = path.join(target.dataDir, 'state.db')
+  let st: fs.Stats
+  try {
+    st = fs.lstatSync(dbPath)
+  } catch {
     return { status: 'no-db', detail: null, checkedAt: start, durationMs: 0 }
   }
   try {
-    const rows = runDbPragma(dataDir, 'quick_check')
-    // quick_check returns a single 'ok' row on a healthy DB, otherwise one
-    // row per finding.
-    const findings = rows.map((r) =>
-      r !== null && typeof r === 'object' ? String(Object.values(r)[0]) : String(r),
-    )
-    const ok = findings.length === 1 && findings[0] === 'ok'
-    return {
-      status: ok ? 'ok' : 'corrupt',
-      detail: ok ? null : findings.join('; ').slice(0, DETAIL_MAX_CHARS),
-      checkedAt: start,
-      durationMs: Date.now() - start,
+    if (st.isSymbolicLink()) {
+      // Migrated: the only viable transport is in-container. A stopped
+      // container is an explicit 'error' (check impossible), NOT 'no-db' —
+      // the DB exists on the volume; we just can't reach it right now.
+      try {
+        const rows = await runDbPragma(target, 'quick_check')
+        return verdictFromRows(rows, start)
+      } catch (err) {
+        if ((err as { code?: unknown })?.code === NO_DB_CODE) {
+          // Dangling symlink, target not created yet (fresh migrated harness,
+          // pre-first-write) — benign, same verdict the unmigrated path gives
+          // a missing file. NOT an error badge.
+          return { status: 'no-db', detail: null, checkedAt: start, durationMs: Date.now() - start }
+        }
+        if (isContainerDownError(err)) {
+          return {
+            status: 'error',
+            detail: 'container not running — cannot check migrated DB',
+            checkedAt: start,
+            durationMs: Date.now() - start,
+          }
+        }
+        throw err
+      }
     }
+    const rows = await runDbPragma(target, 'quick_check')
+    return verdictFromRows(rows, start)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return {
@@ -168,6 +312,22 @@ export function checkDbAtDir(dataDir: string): DbIntegrityResult {
       checkedAt: start,
       durationMs: Date.now() - start,
     }
+  }
+}
+
+function verdictFromRows(rows: unknown[], start: number): DbIntegrityResult {
+  // quick_check returns a single 'ok' row on a healthy DB, otherwise one row
+  // per finding. Host transport yields objects ({quick_check: 'ok'}), the
+  // exec transport plain strings — both normalize here.
+  const findings = rows.map((r) =>
+    r !== null && typeof r === 'object' ? String(Object.values(r)[0]) : String(r),
+  )
+  const ok = findings.length === 1 && findings[0] === 'ok'
+  return {
+    status: ok ? 'ok' : 'corrupt',
+    detail: ok ? null : findings.join('; ').slice(0, DETAIL_MAX_CHARS),
+    checkedAt: start,
+    durationMs: Date.now() - start,
   }
 }
 
@@ -271,7 +431,7 @@ export function getWriteFailureSignal(harnessId: string): DbWriteFailureSignal {
 
 // --- Fleet sweep + cache ----------------------------------------------------
 
-export type SweepTarget = { harnessId: string; name: string; dataDir: string }
+export type SweepTarget = { harnessId: string; name: string; dataDir: string; containerName: string }
 
 const SWEEP_STAGGER_MS = 250
 
@@ -300,9 +460,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Build a sweep target from a harness id/name pair (host-path transport). */
-export function sweepTargetFor(harnessId: string, name: string): SweepTarget {
-  return { harnessId, name, dataDir: agentDataDirForName(name) }
+/**
+ * Build a sweep target from a harness id/name pair. containerName feeds the
+ * docker-exec transport for migrated harnesses (container == service name for
+ * hermes; the personal quirk applies only to the data dir).
+ */
+export function sweepTargetFor(harnessId: string, name: string, runtime?: Harness['runtime']): SweepTarget {
+  return {
+    harnessId,
+    name,
+    dataDir: agentDataDirForName(name),
+    containerName: adapterForRuntime(runtime).serviceName(name),
+  }
 }
 
 /** Publish a raw check result through the corruption-hysteresis gate. */
@@ -331,12 +500,14 @@ function scheduleCorruptionRecheck(t: SweepTarget, delayMs: number): void {
   if (recheckTimers.has(t.harnessId)) return
   const timer = setTimeout(() => {
     recheckTimers.delete(t.harnessId)
-    try {
-      if (!unconfirmedCorruption.has(t.harnessId)) return // cleared meanwhile
-      applyCheckResult(t, checkDbAtDir(t.dataDir), delayMs)
-    } catch (err) {
-      console.error('[integrity] corruption re-check failed:', err)
-    }
+    void (async () => {
+      try {
+        if (!unconfirmedCorruption.has(t.harnessId)) return // cleared meanwhile
+        applyCheckResult(t, await checkDb(t), delayMs)
+      } catch (err) {
+        console.error('[integrity] corruption re-check failed:', err)
+      }
+    })()
   }, delayMs)
   timer.unref?.()
   recheckTimers.set(t.harnessId, timer)
@@ -357,7 +528,7 @@ export async function runFleetIntegritySweep(
   try {
     for (let i = 0; i < targets.length; i++) {
       const t = targets[i]
-      applyCheckResult(t, checkDbAtDir(t.dataDir), corruptionRecheckDelayMs)
+      applyCheckResult(t, await checkDb(t), corruptionRecheckDelayMs)
       if (staggerMs > 0 && i < targets.length - 1) await sleep(staggerMs)
     }
     // Drop entries for harnesses that no longer exist.
@@ -389,6 +560,7 @@ export function getFleetIntegritySnapshot(): FleetIntegritySnapshot {
 
 /** Reset all module state. Test hook only. */
 export function _resetIntegrityStateForTests(): void {
+  _setExecTransportForTests(null)
   integrityCache.clear()
   writeFailureCache.clear()
   unconfirmedCorruption.clear()

@@ -28,8 +28,10 @@ export type Harness = {
   channel: string
   lastSeen: number
   models: string[]
-  costToday: number
-  invocations: number
+  // null = unknown (harness migrated to a named DB volume, snapshot not yet
+  // exported) — distinct from 0, which means "no usage". Render as '—', not $0.
+  costToday: number | null
+  invocations: number | null
   cpu: number
   mem: number
   tools: string[]

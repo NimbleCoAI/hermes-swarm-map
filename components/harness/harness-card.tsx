@@ -25,8 +25,9 @@ export function HarnessCard({ harness }: { harness: Harness }) {
         </div>
       </div>
       <div className="text-right text-xs text-muted-foreground">
-        <div>{harness.invocations} inv</div>
-        <div>${harness.costToday.toFixed(2)}</div>
+        {/* null = unknown (migrated, snapshot pending) — show '—', never $0 */}
+        <div>{harness.invocations ?? '—'} inv</div>
+        <div>{harness.costToday == null ? '—' : `$${harness.costToday.toFixed(2)}`}</div>
       </div>
       {harness.health.errors > 0 && (
         <span className="text-xs text-destructive font-medium">

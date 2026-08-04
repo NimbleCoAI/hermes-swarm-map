@@ -5,6 +5,7 @@ import { execSync } from 'child_process'
 import crypto from 'crypto'
 import type { MemoryScope, HabitatTier } from '@/lib/types'
 import type { Storage } from './storage'
+import { resolveStateDbPath } from './db-path'
 
 const MEMORY_FILE = 'memory-scopes.json'
 
@@ -47,11 +48,12 @@ function discoverMemoryScopes(harnessNames: string[]): MemoryScope[] {
   for (const name of harnessNames) {
     const dataDir = agentDataDir(name)
     const memoriesDir = path.join(dataDir, 'memories')
-    const stateDb = path.join(dataDir, 'state.db')
 
-    // Check if this agent has a memories directory or state.db
+    // Check if this agent has a memories directory or state.db. lstat-aware:
+    // a migrated harness's state.db is a host-dangling symlink that existsSync
+    // would misreport as absent — 'migrated-pending' still counts as having a DB.
     const hasMemories = fs.existsSync(memoriesDir)
-    const hasStateDb = fs.existsSync(stateDb)
+    const hasStateDb = resolveStateDbPath(dataDir).kind !== 'none'
 
     if (!hasMemories && !hasStateDb) continue
 

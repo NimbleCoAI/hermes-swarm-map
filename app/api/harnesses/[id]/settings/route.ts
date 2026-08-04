@@ -13,6 +13,7 @@ import {
 } from '@/lib/surfaces/derive'
 import { services } from '@/lib/services'
 import { adapterForRuntime } from '@/lib/services/harness'
+import { isDeployBornCompose } from '@/lib/services/harness-compose'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -674,6 +675,35 @@ export async function PUT(
       content = content.replace(vncRegex, `${VNC_EXTERNAL_URL_VAR}=${vncExternalUrl}`)
     } else if (vncExternalUrl) {
       content = content.trimEnd() + `\n${VNC_EXTERNAL_URL_VAR}=${vncExternalUrl}\n`
+    }
+  }
+
+  // #204 PR2 guard: a VPN/resources change regenerates the compose from the
+  // STANDALONE template below — on a deploy-born compose (read_only/tmpfs/
+  // google-MCP hardening from generateAgentCompose) that regeneration silently
+  // strips the extras. Refuse BEFORE writing anything, so a 409 leaves no
+  // partial state.
+  {
+    const resourcesWouldChange = body.resources !== undefined && (() => {
+      const norm = (r?: { memory?: string; cpus?: string }) => `${r?.memory ?? ''}|${r?.cpus ?? ''}`
+      return norm(services.harness.get(id)?.resources) !== norm(body.resources)
+    })()
+    if (vpnChanged || resourcesWouldChange) {
+      const harness = services.harness.get(id)
+      if (harness?.composeFile && fs.existsSync(harness.composeFile)) {
+        const existingCompose = fs.readFileSync(harness.composeFile, 'utf-8')
+        if (isDeployBornCompose(existingCompose)) {
+          return NextResponse.json(
+            {
+              error:
+                'This agent has a deploy-born compose (read_only/tmpfs/google-MCP hardening). ' +
+                'Regenerating it for VPN/resource changes would silently strip that hardening — ' +
+                'not supported on this harness yet. Edit the compose file directly if needed.',
+            },
+            { status: 409 },
+          )
+        }
+      }
     }
   }
 

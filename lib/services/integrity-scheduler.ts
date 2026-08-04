@@ -17,7 +17,7 @@ export function sweepTargets(): SweepTarget[] {
   return services.harness
     .list()
     .filter((h) => h.runtime !== 'letta' && h.runtime !== 'letta-server')
-    .map((h) => sweepTargetFor(h.id, h.name))
+    .map((h) => sweepTargetFor(h.id, h.name, h.runtime))
 }
 
 export async function runScheduledSweep(): Promise<void> {

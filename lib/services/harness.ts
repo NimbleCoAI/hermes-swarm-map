@@ -15,7 +15,8 @@ import { defaultEnabledPlugins, loadManifest, type InstallResult } from './artif
 import { planArtifactSync, applyArtifactSync, ensurePluginsEnabled, SyncResult } from './artifacts-sync'
 import { getUseCaseTemplate, reapplyUseCaseTemplate as reapplyTemplateToDataDir } from './usecase-templates'
 import type { ToolsService } from './tools'
-import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext } from './harness-compose'
+import { generateStandaloneCompose, setComposeImage, readComposeImage, readComposeBuildContext, stateVolumeName, MIGRATED_DB_FILES } from './harness-compose'
+import { isStateDbMigrated } from './db-path'
 import { RegistryService, parseImageRef } from './registry'
 import type { ContainerRuntimeAdapter } from './runtime-adapter'
 
@@ -1049,8 +1050,12 @@ export class HarnessService {
       channel: o.channel ?? '',
       models: o.models ?? [],
       tools: o.tools ?? [],
-      costToday: o.costToday ?? 0,
-      invocations: o.invocations ?? 0,
+      // Preserve null (= unknown: migrated harness awaiting its first
+      // snapshot). `?? 0` would coerce it to a confident $0.00 — the exact
+      // zero-when-unknown misread the number|null contract exists to prevent.
+      // Only a genuinely absent field (legacy overlay) defaults to 0.
+      costToday: o.costToday === undefined ? 0 : o.costToday,
+      invocations: o.invocations === undefined ? 0 : o.invocations,
       composeFile: o.composeFile,
       serviceName: o.serviceName,
       ...(o.parentId ? { parentId: o.parentId } : {}),
@@ -1111,6 +1116,16 @@ export class HarnessService {
         : undefined)
     if (!composeFile || !serviceName) return undefined
     return { composeFile, serviceName }
+  }
+
+  /**
+   * Public compose-file/service resolution for operations that need to read or
+   * rewrite the compose (e.g. the DB migration route). Same fallback logic as
+   * every lifecycle op (resolveComposeTarget).
+   */
+  composeTarget(id: string): { composeFile: string; serviceName: string } | undefined {
+    const harness = this.get(id)
+    return harness ? this.resolveComposeTarget(harness) : undefined
   }
 
   restart(id: string, mode: RestartMode): void {
@@ -1490,6 +1505,9 @@ export class HarnessService {
       // Reset SOUL.md so the duplicate has its own identity, not the source's
       // persona/name. A duplicate is a new agent; persona is customized afterward.
       fs.writeFileSync(path.join(newDataDir, 'SOUL.md'), defaultSoulContent(newName), 'utf-8')
+      // Migrated source (#204 PR2): the copy above reproduced DB symlinks, not
+      // DBs — replace them with real copies of the source's data (see helper).
+      await this.hydrateMigratedDbCopies(sourceName, sourceDataDir, newDataDir, source)
     } else if (!fs.existsSync(newDataDir)) {
       await dupAdapter.scaffold(newDataDir, newName, port)
     }
@@ -1527,20 +1545,124 @@ export class HarnessService {
     return duplicate
   }
 
-  remove(id: string, deleteFiles: boolean): { removed: boolean; stopped: boolean; filesDeleted: boolean } {
+  /**
+   * Hydrate a duplicate's data dir with REAL DB copies when the source is
+   * migrated (#204 PR2). copyDirRecursive reproduces the source's state.db /
+   * response_store.db / kanban.db SYMLINKS verbatim — they point at /state/*,
+   * which inside the DUPLICATE's container resolves to its own (empty) volume,
+   * so the clone would silently boot amnesiac. Instead: drop the copied
+   * symlinks (and stale snapshot artifacts) and pull consistent regular-file
+   * copies of the source DBs into the new data dir — the duplicate's own
+   * state-init migrates them onto its volume on first boot.
+   *
+   * Source container RUNNING → docker exec + Python sqlite3 backup API (a
+   * consistent copy under a live writer) written into the source's /opt/data
+   * (host-visible via the bind mount), then moved host-side. Source STOPPED →
+   * one-shot `docker run` cold-copying from the source volume (no writer, so
+   * plain cp is consistent). Best-effort: on failure the clone still works but
+   * starts with fresh DBs — logged and audited, never thrown.
+   */
+  private async hydrateMigratedDbCopies(
+    sourceName: string,
+    sourceDataDir: string,
+    newDataDir: string,
+    source: Partial<Harness>,
+  ): Promise<void> {
+    if (!isStateDbMigrated(sourceDataDir)) return
+
+    // 1. Drop the copied symlinks + siblings + stale snapshot artifacts. Even
+    // if hydration below fails, dangling symlinks into the wrong volume and a
+    // stale .snapshot must not survive in the clone.
+    for (const db of MIGRATED_DB_FILES) {
+      for (const suf of ['', '-wal', '-shm']) {
+        const p = path.join(newDataDir, `${db}${suf}`)
+        try {
+          if (fs.lstatSync(p).isSymbolicLink()) fs.rmSync(p, { force: true })
+        } catch {} // missing — fine
+      }
+    }
+    for (const f of ['state.db.snapshot', 'state.db.snapshot.tmp']) {
+      fs.rmSync(path.join(newDataDir, f), { force: true })
+    }
+
+    const containerName = adapterForRuntime(source.runtime).serviceName(sourceName)
+    try {
+      const running = this.docker.inspectState(containerName)?.running ?? false
+      if (running) {
+        // Consistent copy under the live writer via the sqlite3 backup API.
+        for (const db of MIGRATED_DB_FILES) {
+          const tmpName = `.clone-${db}.tmp`
+          const prog = [
+            'import sqlite3, os',
+            `p = "/opt/data/${db}"`,
+            `t = "/opt/data/${tmpName}"`,
+            'if os.path.exists(p):',
+            '    if os.path.exists(t):',
+            '        os.remove(t)',
+            '    s = sqlite3.connect("file:" + p + "?mode=ro", uri=True, timeout=10)',
+            '    d = sqlite3.connect(t)',
+            '    s.backup(d)',
+            '    d.close()',
+            '    s.close()',
+          ].join('\n')
+          await this.docker.execInContainer(containerName, ['python3', '-c', prog], 120000)
+          const hostTmp = path.join(sourceDataDir, tmpName)
+          if (fs.existsSync(hostTmp)) {
+            fs.copyFileSync(hostTmp, path.join(newDataDir, db))
+            fs.rmSync(hostTmp, { force: true })
+          }
+        }
+      } else {
+        // No writer — a plain cp out of the volume is consistent. Reuse the
+        // source's own image (guaranteed present if it ever ran); fall back to
+        // the default agent image.
+        let image: string | null = null
+        try {
+          if (source.composeFile && fs.existsSync(source.composeFile)) {
+            image = readComposeImage(fs.readFileSync(source.composeFile, 'utf-8'))
+          }
+        } catch {}
+        image = image ?? this.config?.getSettings()?.defaultImage ?? 'ghcr.io/nimblecoorg/hermes-agent-mt:latest'
+        const script = [
+          `for db in ${MIGRATED_DB_FILES.join(' ')}; do`,
+          '  for suf in "" -wal -shm; do',
+          '    if [ -f "/state/$db$suf" ]; then cp -p "/state/$db$suf" "/out/$db$suf"; fi',
+          '  done',
+          'done',
+        ].join('\n')
+        this.docker.runOneShot(image, [`${stateVolumeName(sourceName)}:/state:ro`, `${newDataDir}:/out`], script)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[harness] duplicate ${sourceName}: could not copy migrated DBs — clone starts with EMPTY databases:`, msg.slice(0, 300))
+      this.audit.append({
+        who: 'admin',
+        what: 'duplicate:db-copy-failed',
+        target: sourceName,
+        meta: { error: msg.slice(0, 300) },
+      })
+    }
+  }
+
+  remove(id: string, deleteFiles: boolean): { removed: boolean; stopped: boolean; filesDeleted: boolean; volumeRemoved: boolean } {
     const overlays = this.storage.read<Partial<Harness>[]>(HARNESSES_FILE, [])
     const index = overlays.findIndex((h) => h.id === id)
-    if (index === -1) return { removed: false, stopped: false, filesDeleted: false }
+    if (index === -1) return { removed: false, stopped: false, filesDeleted: false, volumeRemoved: false }
 
     const overlay = overlays[index]
     const name = overlay.name ?? id.replace(/^h_/, '').replace(/_/g, '-')
     let stopped = false
     let filesDeleted = false
+    let volumeRemoved = false
 
-    // Stop container if running
+    // Stop container if running. For a full delete, `down` instead of `stop`:
+    // it also REMOVES the containers (incl. the exited state-init-<name> one),
+    // without which `docker volume rm hermes-state-<name>` below would refuse
+    // — any container referencing a volume, even exited, blocks its removal.
     if (overlay.composeFile && overlay.serviceName) {
       try {
-        this.docker.stop(overlay.composeFile, overlay.serviceName)
+        if (deleteFiles) this.docker.down(overlay.composeFile)
+        else this.docker.stop(overlay.composeFile, overlay.serviceName)
         stopped = true
       } catch {
         // Container may not be running — that's fine
@@ -1570,6 +1692,26 @@ export class HarnessService {
           filesDeleted = true
         }
       }
+      // Remove the named state volume (#204 PR2). For a migrated harness the
+      // real DBs live here, NOT in the data dir — without this, "delete files"
+      // leaves the most sensitive data alive, and a future same-name agent
+      // reattaches it (the pinned `name:` defeats project prefixing) and boots
+      // with the deleted agent's full brain. Personal is exempt, matching the
+      // ~/.hermes guard above. Best-effort: "no such volume" (never migrated /
+      // pre-PR2) is the normal case and stays silent; real failures are logged.
+      if (dataDir !== personalBase) {
+        try {
+          this.docker.removeVolume(stateVolumeName(name))
+          volumeRemoved = true
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          // execFileSync puts docker's actual complaint in err.stderr, not message.
+          const stderr = String((err as { stderr?: unknown })?.stderr ?? '')
+          if (!/no such volume/i.test(`${msg} ${stderr}`)) {
+            console.error(`[harness] delete ${name}: could not remove volume ${stateVolumeName(name)}:`, (stderr.trim() || msg).slice(0, 300))
+          }
+        }
+      }
     }
 
     this.audit.append({
@@ -1578,7 +1720,7 @@ export class HarnessService {
       target: name,
     })
 
-    return { removed: true, stopped, filesDeleted }
+    return { removed: true, stopped, filesDeleted, volumeRemoved }
   }
 
   async createOverlay(input: { name: string; tier?: HabitatTier; platform?: string; channel?: string; models?: string[]; tools?: string[] }): Promise<Partial<Harness>> {

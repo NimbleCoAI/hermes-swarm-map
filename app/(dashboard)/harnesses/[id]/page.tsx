@@ -134,6 +134,17 @@ type UsageData = {
   recentSessions: UsageSession[]
 }
 
+/**
+ * Render a cost, honoring the number|null "never $0 when unknown" contract
+ * (#204 PR2): null/undefined (migrated harness whose snapshot hasn't exported
+ * yet, or usage still loading) renders '—', matching harness-card — a
+ * confident $0.00 here is exactly the misread the contract exists to prevent.
+ */
+function fmtUsd(v: number | null | undefined, costStatus?: 'estimated' | 'partial' | 'unknown'): string {
+  if (v == null) return '—'
+  return `${costStatus === 'estimated' ? '~' : ''}$${v.toFixed(2)}`
+}
+
 // Runtime-branching wrapper (design §4a). Letta harnesses have no container, so
 // their detail view is a dedicated read-only component rather than a thicket of
 // `runtime === 'letta'` branches through the container-shaped Hermes page below.
@@ -733,10 +744,12 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
             </div>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
               <h3 className="font-medium text-sm">Usage</h3>
-              <Row label="Sessions today" value={usageData?.sessionCountToday ?? 0} />
-              <Row label="Cost today" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costToday ?? harness.costToday).toFixed(2)}`} />
-              <Row label="Cost this week" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costWeek ?? 0).toFixed(2)}`} />
-              <Row label="Cost this month" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costMonth ?? 0).toFixed(2)}`} />
+              {/* null/absent usage = unknown (migrated harness, snapshot pending) —
+                  render '—' like harness-card, never a confident $0.00 */}
+              <Row label="Sessions today" value={usageData?.sessionCountToday ?? '—'} />
+              <Row label="Cost today" value={fmtUsd(usageData?.costToday ?? harness.costToday, usageData?.costStatus)} />
+              <Row label="Cost this week" value={fmtUsd(usageData?.costWeek, usageData?.costStatus)} />
+              <Row label="Cost this month" value={fmtUsd(usageData?.costMonth, usageData?.costStatus)} />
               <Row label="CPU" value={`${harness.cpu}%`} />
               <Row label="Memory" value={`${harness.mem}%`} />
             </div>
@@ -758,20 +771,20 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Today</p>
                 <p className="text-2xl font-semibold mt-1">
-                  {usageData?.costStatus === 'estimated' ? '~' : ''}${(usageData?.costToday ?? 0).toFixed(2)}
+                  {fmtUsd(usageData?.costToday, usageData?.costStatus)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-0.5">{usageData?.sessionCountToday ?? 0} sessions</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{usageData?.sessionCountToday ?? '—'} sessions</p>
               </div>
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">This Week</p>
                 <p className="text-2xl font-semibold mt-1">
-                  {usageData?.costStatus === 'estimated' ? '~' : ''}${(usageData?.costWeek ?? 0).toFixed(2)}
+                  {fmtUsd(usageData?.costWeek, usageData?.costStatus)}
                 </p>
               </div>
               <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">This Month</p>
                 <p className="text-2xl font-semibold mt-1">
-                  {usageData?.costStatus === 'estimated' ? '~' : ''}${(usageData?.costMonth ?? 0).toFixed(2)}
+                  {fmtUsd(usageData?.costMonth, usageData?.costStatus)}
                 </p>
               </div>
             </div>
