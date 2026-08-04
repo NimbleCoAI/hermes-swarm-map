@@ -1,5 +1,8 @@
-import { execFileSync, spawn } from 'child_process'
+import { execFile, execFileSync, spawn } from 'child_process'
+import { promisify } from 'util'
 import type { RestartMode } from '@/lib/types'
+
+const execFileAsync = promisify(execFile)
 
 // SECURITY: every subprocess in this file is invoked via execFileSync/spawn with
 // an argv ARRAY and no shell. Never reintroduce a string command run through
@@ -376,6 +379,25 @@ export class DockerService {
     } catch {
       return null
     }
+  }
+
+  /**
+   * Run a command inside a running container (docker exec) and return stdout.
+   *
+   * ASYNC on purpose: the callers are the DB snapshot exporter and the
+   * integrity transport for volume-migrated DBs — a multi-hundred-MB SQLite
+   * backup/quick_check must not block the single pm2 fork's event loop the way
+   * synchronous better-sqlite3 access did (issue #204: matilde's 287MB DB
+   * blocked ~3.2s per check).
+   *
+   * argv array + no shell, per the security header at the top of this file.
+   */
+  async execInContainer(container: string, argv: string[], timeoutMs = 60000): Promise<string> {
+    const { stdout } = await execFileAsync('docker', ['exec', container, ...argv], {
+      timeout: timeoutMs,
+      maxBuffer: 4 * 1024 * 1024,
+    })
+    return stdout.toString()
   }
 
   getLogs(composeFile: string, service: string, lines: number = 50): string {
