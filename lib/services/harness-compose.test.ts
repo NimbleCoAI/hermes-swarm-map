@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { generateStandaloneCompose } from './harness-compose'
+import { generateStandaloneCompose, DEFAULT_CAMOFOX_IMAGE } from './harness-compose'
 
 describe('generateStandaloneCompose', () => {
   const agentName = 'test-agent'
@@ -140,7 +140,19 @@ describe('generateStandaloneCompose', () => {
 
     it('uses default camofox image when not provided', () => {
       const result = generateStandaloneCompose(agentName, port, dataDir, vpnOpts)
-      expect(result).toContain('image: ghcr.io/nimblecoai/camofox:latest')
+      expect(result).toContain(`image: ${DEFAULT_CAMOFOX_IMAGE}`)
+    })
+
+    it('default camofox image is a real, digest-pinned reference (regression: #192)', () => {
+      // The old default (ghcr.io/nimblecoai/camofox:latest) never existed on
+      // GHCR under any namespace — every VPN compose was unpullable. Guard the
+      // semantics, not just the string:
+      // 1. never the ghost namespace again
+      expect(DEFAULT_CAMOFOX_IMAGE).not.toContain('nimblecoai/camofox')
+      // 2. digest-pinned so the reference cannot drift or be silently retagged
+      expect(DEFAULT_CAMOFOX_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/)
+      // 3. not a bare :latest tag
+      expect(DEFAULT_CAMOFOX_IMAGE).not.toMatch(/:latest(@|$)/)
     })
 
     it('preserves security hardening on hermes service', () => {
