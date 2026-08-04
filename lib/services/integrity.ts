@@ -17,6 +17,15 @@
  * better-sqlite3 is synchronous, so a quick_check blocks the event loop for
  * its duration. The sweep therefore checks one harness at a time and yields
  * (setTimeout) between harnesses instead of fanning out.
+ *
+ * KNOWN GAP (acknowledged, not unit-testable here): the host-side readonly
+ * reader shares the DB with a WAL-mode writer that lives across a VM/VirtioFS
+ * boundary. Live cross-VM WAL contention cannot be reproduced in unit tests —
+ * it needs Docker Desktop's file-sharing translation layer under real write
+ * load. That is exactly why (a) a single non-ok quick_check is never trusted
+ * (see corruption hysteresis below), and (b) this host-path transport is
+ * interim until PR2 swaps `runDbPragma` to a docker-exec transport inside the
+ * VM, where SQLite's locking assumptions actually hold.
  */
 
 import path from 'path'
@@ -24,7 +33,14 @@ import fs from 'fs'
 import Database from 'better-sqlite3'
 import { agentDataDirForName, tailLogFile } from './harness'
 
-export type DbIntegrityStatus = 'ok' | 'no-db' | 'busy' | 'corrupt' | 'error'
+export type DbIntegrityStatus =
+  | 'ok'
+  | 'no-db'
+  | 'busy'
+  | 'corrupt'
+  // Non-ok quick_check seen once, not yet confirmed by a second sample.
+  | 'recheck-pending'
+  | 'error'
 
 export type DbIntegrityResult = {
   status: DbIntegrityStatus
@@ -46,11 +62,18 @@ export type FleetIntegritySnapshot = {
 }
 
 export type DbWriteFailureSignal = {
-  /** Matching lines in the scanned tail window. */
+  /** Matching WARNING/ERROR/CRITICAL lines in the scanned tail window. */
   count: number
   /** Epoch ms of the earliest/latest matching line, when parseable. */
   firstSeen: number | null
   lastSeen: number | null
+  /**
+   * True when lastSeen falls inside the alert window (default 24h,
+   * DB_WRITE_FAILURE_ALERT_WINDOW_MS overrides). Old matches on an idle
+   * agent — or matches with unparseable timestamps — degrade to a warning
+   * instead of latching a red badge forever.
+   */
+  recent: boolean
   bySignature: Record<string, number>
   scannedLines: number
 }
@@ -65,6 +88,13 @@ export const DB_WRITE_FAILURE_SIGNATURES = [
 
 const DEFAULT_SCAN_LINES = 500
 const DETAIL_MAX_CHARS = 500
+
+const DEFAULT_WRITE_FAILURE_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000 // 24h
+
+function writeFailureAlertWindowMs(): number {
+  const env = parseInt(process.env.DB_WRITE_FAILURE_ALERT_WINDOW_MS ?? '', 10)
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_WRITE_FAILURE_ALERT_WINDOW_MS
+}
 
 // name-keyed like usage.ts: h_foo_bar → foo-bar → ~/.hermes-foo-bar
 function harnessIdToName(harnessId: string): string {
@@ -105,6 +135,10 @@ export function classifyDbError(err: unknown): 'busy' | 'corrupt' | 'error' {
 /**
  * Run a readonly quick_check against the state.db under dataDir.
  * A missing DB is not an error — fresh harnesses simply have no DB yet.
+ *
+ * Returns the RAW single-sample verdict; callers must not surface a raw
+ * 'corrupt' directly — publish through the corruption-hysteresis gate
+ * (applyCheckResult) instead.
  */
 export function checkDbAtDir(dataDir: string): DbIntegrityResult {
   const start = Date.now()
@@ -139,10 +173,23 @@ export function checkDbAtDir(dataDir: string): DbIntegrityResult {
 
 // --- Write-failure signal ---------------------------------------------------
 
-// Harness logs use Python logging format: `2026-05-16 02:18:50,965 LEVEL ...`
+// Harness logs use Python logging format: `2026-05-16 02:18:50,965 LEVEL ...`.
+// A signature only counts on a real WARNING/ERROR/CRITICAL line — bare
+// substring hits (traceback frames, recovery chatter merely mentioning the
+// strings) don't count.
+const LOG_LINE_RE =
+  /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})(?:[,.](\d{3}))?\s+(ERROR|WARNING|CRITICAL)\b/
+
 const LOG_TS_RE = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})(?:[,.](\d{3}))?/
 
-/** Parse the leading timestamp of a log line to epoch ms, if present. */
+/**
+ * Parse the leading timestamp of a log line to epoch ms, if present.
+ *
+ * Caveat (L1): the log timestamp is naive (no zone). Date.parse treats it as
+ * HOST-local time, while the container likely logs in UTC — so firstSeen/
+ * lastSeen can be skewed by the host's UTC offset. Acceptable for a
+ * recency/staleness signal; do not treat these as exact incident timestamps.
+ */
 export function parseLogLineTimestamp(line: string): number | null {
   const m = LOG_TS_RE.exec(line)
   if (!m) return null
@@ -152,7 +199,12 @@ export function parseLogLineTimestamp(line: string): number | null {
 }
 
 /** Scan raw log text for DB-write-failure signatures. Pure; exported for tests. */
-export function scanLogTextForWriteFailures(text: string): DbWriteFailureSignal {
+export function scanLogTextForWriteFailures(
+  text: string,
+  opts?: { now?: number; alertWindowMs?: number },
+): DbWriteFailureSignal {
+  const now = opts?.now ?? Date.now()
+  const alertWindowMs = opts?.alertWindowMs ?? writeFailureAlertWindowMs()
   const lines = text ? text.split('\n') : []
   const bySignature: Record<string, number> = {}
   let count = 0
@@ -160,6 +212,7 @@ export function scanLogTextForWriteFailures(text: string): DbWriteFailureSignal 
   let lastSeen: number | null = null
 
   for (const line of lines) {
+    if (!LOG_LINE_RE.test(line)) continue // not a leveled log line
     const lower = line.toLowerCase()
     let matched = false
     for (const sig of DB_WRITE_FAILURE_SIGNATURES) {
@@ -177,16 +230,30 @@ export function scanLogTextForWriteFailures(text: string): DbWriteFailureSignal 
     }
   }
 
-  return { count, firstSeen, lastSeen, bySignature, scannedLines: lines.length }
+  // Unparseable timestamps mean unknown recency — degrade to warn rather
+  // than latching a red badge (or hiding the count entirely).
+  const recent = count > 0 && lastSeen !== null && now - lastSeen <= alertWindowMs
+
+  return { count, firstSeen, lastSeen, recent, bySignature, scannedLines: lines.length }
 }
 
-/** Scan the tail of `<dataDir>/logs/errors.log` for write-failure signatures. */
+/**
+ * Scan the tail of `<dataDir>/logs/errors.log` for write-failure signatures.
+ * When the current file holds fewer than `lines` lines (fresh rotation), the
+ * remainder of the window is filled from `errors.log.1`.
+ */
 export function scanErrorLogForWriteFailures(
   dataDir: string,
   lines = DEFAULT_SCAN_LINES,
 ): DbWriteFailureSignal {
   const logPath = path.join(dataDir, 'logs', 'errors.log')
-  return scanLogTextForWriteFailures(tailLogFile(logPath, lines))
+  let text = tailLogFile(logPath, lines)
+  const got = text ? text.split('\n').length : 0
+  if (got < lines) {
+    const rotated = tailLogFile(`${logPath}.1`, lines - got)
+    if (rotated) text = text ? `${rotated}\n${text}` : rotated
+  }
+  return scanLogTextForWriteFailures(text)
 }
 
 // Log scans are cheap but not free (bounded file read per harness); cache
@@ -208,7 +275,24 @@ export type SweepTarget = { harnessId: string; name: string; dataDir: string }
 
 const SWEEP_STAGGER_MS = 250
 
+// Corruption hysteresis (audit H1): a torn read of a live WAL DB across the
+// VirtioFS boundary can present as genuine SQLITE_CORRUPT on a perfectly
+// healthy DB — and a false red badge primes an operator to run destructive
+// recovery. So a single non-ok quick_check is NEVER surfaced as 'corrupt':
+// the first corrupt sample publishes 'recheck-pending' (yellow) and schedules
+// a re-check after a short delay; only a second consecutive corrupt sample
+// (re-check or next sweep) confirms 'corrupt'. Any non-corrupt sample clears
+// the pending state.
+const DEFAULT_RECHECK_DELAY_MS = 5 * 60 * 1000 // 5 min — outlast a write burst
+
+function recheckDelayMs(): number {
+  const env = parseInt(process.env.INTEGRITY_RECHECK_DELAY_MS ?? '', 10)
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_RECHECK_DELAY_MS
+}
+
 const integrityCache = new Map<string, FleetIntegrityEntry>()
+const unconfirmedCorruption = new Map<string, { detectedAt: number }>()
+const recheckTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let lastSweepAt: number | null = null
 let sweepInProgress = false
 
@@ -221,6 +305,43 @@ export function sweepTargetFor(harnessId: string, name: string): SweepTarget {
   return { harnessId, name, dataDir: agentDataDirForName(name) }
 }
 
+/** Publish a raw check result through the corruption-hysteresis gate. */
+function applyCheckResult(t: SweepTarget, result: DbIntegrityResult, delayMs: number): void {
+  if (result.status !== 'corrupt') {
+    unconfirmedCorruption.delete(t.harnessId)
+    integrityCache.set(t.harnessId, { harnessId: t.harnessId, name: t.name, ...result })
+    return
+  }
+  if (unconfirmedCorruption.has(t.harnessId)) {
+    // Second consecutive corrupt sample → confirmed.
+    integrityCache.set(t.harnessId, { harnessId: t.harnessId, name: t.name, ...result })
+    return
+  }
+  unconfirmedCorruption.set(t.harnessId, { detectedAt: Date.now() })
+  integrityCache.set(t.harnessId, {
+    harnessId: t.harnessId,
+    name: t.name,
+    ...result,
+    status: 'recheck-pending',
+  })
+  scheduleCorruptionRecheck(t, delayMs)
+}
+
+function scheduleCorruptionRecheck(t: SweepTarget, delayMs: number): void {
+  if (recheckTimers.has(t.harnessId)) return
+  const timer = setTimeout(() => {
+    recheckTimers.delete(t.harnessId)
+    try {
+      if (!unconfirmedCorruption.has(t.harnessId)) return // cleared meanwhile
+      applyCheckResult(t, checkDbAtDir(t.dataDir), delayMs)
+    } catch (err) {
+      console.error('[integrity] corruption re-check failed:', err)
+    }
+  }, delayMs)
+  timer.unref?.()
+  recheckTimers.set(t.harnessId, timer)
+}
+
 /**
  * Check every target sequentially (one DB at a time — quick_check is
  * synchronous) with a short yield between harnesses, and cache results.
@@ -229,20 +350,23 @@ export function sweepTargetFor(harnessId: string, name: string): SweepTarget {
 export async function runFleetIntegritySweep(
   targets: SweepTarget[],
   staggerMs = SWEEP_STAGGER_MS,
+  corruptionRecheckDelayMs = recheckDelayMs(),
 ): Promise<FleetIntegritySnapshot> {
   if (sweepInProgress) return getFleetIntegritySnapshot()
   sweepInProgress = true
   try {
     for (let i = 0; i < targets.length; i++) {
       const t = targets[i]
-      const result = checkDbAtDir(t.dataDir)
-      integrityCache.set(t.harnessId, { harnessId: t.harnessId, name: t.name, ...result })
+      applyCheckResult(t, checkDbAtDir(t.dataDir), corruptionRecheckDelayMs)
       if (staggerMs > 0 && i < targets.length - 1) await sleep(staggerMs)
     }
     // Drop entries for harnesses that no longer exist.
     const ids = new Set(targets.map((t) => t.harnessId))
     for (const key of integrityCache.keys()) {
       if (!ids.has(key)) integrityCache.delete(key)
+    }
+    for (const key of unconfirmedCorruption.keys()) {
+      if (!ids.has(key)) unconfirmedCorruption.delete(key)
     }
     lastSweepAt = Date.now()
   } finally {
@@ -267,6 +391,9 @@ export function getFleetIntegritySnapshot(): FleetIntegritySnapshot {
 export function _resetIntegrityStateForTests(): void {
   integrityCache.clear()
   writeFailureCache.clear()
+  unconfirmedCorruption.clear()
+  for (const timer of recheckTimers.values()) clearTimeout(timer)
+  recheckTimers.clear()
   lastSweepAt = null
   sweepInProgress = false
 }

@@ -3,7 +3,7 @@
 // modules that pull in better-sqlite3.
 
 export type DbIntegritySummary = {
-  status: 'ok' | 'no-db' | 'busy' | 'corrupt' | 'error'
+  status: 'ok' | 'no-db' | 'busy' | 'corrupt' | 'recheck-pending' | 'error'
   detail: string | null
   checkedAt: number
 }
@@ -12,9 +12,13 @@ export type DbWriteFailureSummary = {
   count: number
   firstSeen: number | null
   lastSeen: number | null
+  /** Server-computed: lastSeen inside the alert window (default 24h). */
+  recent?: boolean
 }
 
 type Level = 'ok' | 'warn' | 'alert'
+
+const RANK: Record<Level, number> = { ok: 0, warn: 1, alert: 2 }
 
 const styles: Record<Level, string> = {
   ok: 'bg-green-500/10 text-green-600',
@@ -33,12 +37,26 @@ function levelFor(
   const parts: string[] = []
   let level: Level | null = null
 
+  const bump = (next: Level) => {
+    level = level === null || RANK[next] > RANK[level] ? next : level
+  }
+
   if (writeFailures && writeFailures.count > 0) {
-    level = 'alert'
     const last = writeFailures.lastSeen ? new Date(writeFailures.lastSeen).toLocaleString() : null
-    parts.push(
-      `${writeFailures.count} DB write failure${writeFailures.count === 1 ? '' : 's'} in recent error log${last ? ` (last ${last})` : ''}`,
-    )
+    const plural = writeFailures.count === 1 ? '' : 's'
+    if (writeFailures.recent) {
+      // Only recent failures are red — old matches on an idle agent are a
+      // stale warning, not an active incident.
+      bump('alert')
+      parts.push(
+        `${writeFailures.count} DB write failure${plural} in recent error log${last ? ` (last ${last})` : ''}`,
+      )
+    } else {
+      bump('warn')
+      parts.push(
+        `${writeFailures.count} DB write failure${plural} in error log (stale${last ? `, last ${last}` : ', time unknown'})`,
+      )
+    }
   }
 
   if (integrity) {
@@ -46,23 +64,31 @@ function levelFor(
     switch (integrity.status) {
       case 'ok':
         if (stale) {
-          level = level ?? 'warn'
+          bump('warn')
           parts.push('integrity check stale (last sweep >24h ago)')
         } else {
-          level = level ?? 'ok'
+          bump('ok')
           parts.push(`integrity ok (checked ${new Date(integrity.checkedAt).toLocaleString()})`)
         }
         break
       case 'corrupt':
-        level = 'alert'
-        parts.push(`integrity check failed: ${integrity.detail ?? 'corruption detected'}`)
+        bump('alert')
+        parts.push(`integrity check failed on two consecutive samples: ${integrity.detail ?? 'corruption detected'}`)
+        break
+      case 'recheck-pending':
+        // One non-ok sample — could be a torn read of a live WAL DB across
+        // VirtioFS, not real corruption. Yellow until a second sample confirms.
+        bump('warn')
+        parts.push(
+          `possible corruption (unconfirmed, recheck pending): ${integrity.detail ?? 'quick_check reported findings'}`,
+        )
         break
       case 'busy':
-        level = level ?? 'warn'
+        bump('warn')
         parts.push('DB busy/locked during last check')
         break
       case 'error':
-        level = level ?? 'warn'
+        bump('warn')
         parts.push(`integrity check error: ${integrity.detail ?? 'unknown'}`)
         break
       case 'no-db':

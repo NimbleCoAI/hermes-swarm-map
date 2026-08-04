@@ -27,6 +27,9 @@ function makeDataDir(name: string): string {
 
 function createHealthyDb(dataDir: string): void {
   const db = new Database(path.join(dataDir, 'state.db'))
+  // Production DBs run WAL mode — better-sqlite3's default is delete-journal,
+  // which never exercises the mode the fleet actually runs in.
+  db.pragma('journal_mode = WAL')
   db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, started_at REAL)')
   db.prepare('INSERT INTO sessions VALUES (?, ?)').run('s1', Date.now() / 1000)
   db.close()
@@ -80,9 +83,10 @@ describe('checkDbAtDir', () => {
     expect(result.detail).toBeTruthy()
   })
 
-  it('reports corrupt for a torn/overwritten page in a real DB', () => {
+  it('reports corrupt for a torn/overwritten page in a real WAL-mode DB', () => {
     const dir = makeDataDir('torn')
     const db = new Database(path.join(dir, 'state.db'))
+    db.pragma('journal_mode = WAL')
     db.exec('CREATE TABLE t (id INTEGER PRIMARY KEY, blob TEXT)')
     const insert = db.prepare('INSERT INTO t (blob) VALUES (?)')
     for (let i = 0; i < 200; i++) insert.run('x'.repeat(1000))
@@ -98,6 +102,28 @@ describe('checkDbAtDir', () => {
     const result = checkDbAtDir(dir)
     expect(result.status).toBe('corrupt')
   })
+
+  it('classifies a REAL lock as busy (second connection holds an exclusive txn)', () => {
+    // Not a fabricated {code} object: an actual writer connection holds an
+    // exclusive lock while checkDbAtDir tries to read. Uses rollback-journal
+    // mode because WAL readers are never blocked by writers — an exclusive
+    // rollback-mode txn is the way to produce a genuine SQLITE_BUSY.
+    // NOTE: live cross-VM WAL contention (host reader vs container writer
+    // through VirtioFS) is NOT reproducible in unit tests — see the KNOWN GAP
+    // note in integrity.ts; this test covers the in-process lock path only.
+    const dir = makeDataDir('locked')
+    const writer = new Database(path.join(dir, 'state.db'))
+    writer.pragma('journal_mode = DELETE')
+    writer.exec('CREATE TABLE t (id INTEGER PRIMARY KEY)')
+    writer.exec('BEGIN EXCLUSIVE')
+    try {
+      const result = checkDbAtDir(dir)
+      expect(result.status).toBe('busy')
+    } finally {
+      writer.exec('ROLLBACK')
+      writer.close()
+    }
+  }, 15000)
 })
 
 describe('classifyDbError', () => {
@@ -142,6 +168,52 @@ describe('runFleetIntegritySweep', () => {
     await runFleetIntegritySweep([{ harnessId: 'h_a', name: 'a', dataDir: healthy }], 0)
     expect(getIntegrityForHarness('h_b')).toBeNull()
     expect(getFleetIntegritySnapshot().results.map((r) => r.harnessId)).toEqual(['h_a'])
+  })
+})
+
+describe('corruption hysteresis', () => {
+  // Pass a long recheck delay so the internal timer never fires mid-test;
+  // confirmation comes from explicit second sweeps instead.
+  const RECHECK_NEVER = 60 * 60 * 1000
+
+  function createCorruptDb(dirName: string): string {
+    const dir = makeDataDir(dirName)
+    fs.writeFileSync(path.join(dir, 'state.db'), 'not a sqlite database\n'.repeat(50))
+    return dir
+  }
+
+  it('publishes recheck-pending (not corrupt) on the FIRST corrupt sample', async () => {
+    const dir = createCorruptDb('hys-first')
+    await runFleetIntegritySweep([{ harnessId: 'h_c', name: 'c', dataDir: dir }], 0, RECHECK_NEVER)
+    expect(getIntegrityForHarness('h_c')?.status).toBe('recheck-pending')
+  })
+
+  it('confirms corrupt on the SECOND consecutive corrupt sample', async () => {
+    const dir = createCorruptDb('hys-second')
+    const targets = [{ harnessId: 'h_c', name: 'c', dataDir: dir }]
+    await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
+    await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
+    expect(getIntegrityForHarness('h_c')?.status).toBe('corrupt')
+  })
+
+  it('clears the pending state when a later sample is healthy (torn-read scenario)', async () => {
+    const dir = createCorruptDb('hys-clears')
+    const targets = [{ harnessId: 'h_c', name: 'c', dataDir: dir }]
+    await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
+    expect(getIntegrityForHarness('h_c')?.status).toBe('recheck-pending')
+
+    // The "corruption" was transient (e.g. a torn read of a live WAL DB):
+    // replace with a healthy DB before the second sample.
+    fs.rmSync(path.join(dir, 'state.db'))
+    createHealthyDb(dir)
+    await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
+    expect(getIntegrityForHarness('h_c')?.status).toBe('ok')
+
+    // And a NEW corrupt sample after clearing starts the cycle over —
+    // recheck-pending again, not instant corrupt.
+    fs.writeFileSync(path.join(dir, 'state.db'), 'garbage again\n'.repeat(50))
+    await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
+    expect(getIntegrityForHarness('h_c')?.status).toBe('recheck-pending')
   })
 })
 
@@ -193,6 +265,36 @@ describe('scanLogTextForWriteFailures', () => {
       expect(signal.count).toBe(1)
     }
   })
+
+  it('ignores signature mentions outside WARNING/ERROR/CRITICAL lines', () => {
+    // Recovery chatter and traceback frames may MENTION the signature strings;
+    // only leveled warning/error lines count.
+    const text = [
+      '2026-05-16 02:00:00,000 INFO agent.db: recovered from: database disk image is malformed',
+      '    raise DatabaseError("database disk image is malformed")',
+      '2026-05-16 02:00:01,000 DEBUG agent.db: retrying append_message failed batch',
+    ].join('\n')
+    expect(scanLogTextForWriteFailures(text).count).toBe(0)
+  })
+
+  it('marks the signal recent only when lastSeen is inside the alert window', () => {
+    const line = '2026-05-16 02:00:00,000 ERROR agent.db: state.db write failed'
+    const lastSeen = Date.parse('2026-05-16T02:00:00')
+    const hour = 60 * 60 * 1000
+
+    const fresh = scanLogTextForWriteFailures(line, {
+      now: lastSeen + hour,
+      alertWindowMs: 24 * hour,
+    })
+    expect(fresh.recent).toBe(true)
+
+    const stale = scanLogTextForWriteFailures(line, {
+      now: lastSeen + 25 * hour,
+      alertWindowMs: 24 * hour,
+    })
+    expect(stale.count).toBe(1) // still counted…
+    expect(stale.recent).toBe(false) // …but not alert-red
+  })
 })
 
 describe('scanErrorLogForWriteFailures', () => {
@@ -212,6 +314,23 @@ describe('scanErrorLogForWriteFailures', () => {
     const signal = scanErrorLogForWriteFailures(dir)
     expect(signal.count).toBe(0)
     expect(signal.scannedLines).toBe(0)
+  })
+
+  it('falls back to errors.log.1 when errors.log is freshly rotated', () => {
+    const dir = makeDataDir('rotated')
+    fs.mkdirSync(path.join(dir, 'logs'), { recursive: true })
+    // Rotation just happened: current log is nearly empty, the failure
+    // evidence lives in errors.log.1.
+    fs.writeFileSync(
+      path.join(dir, 'logs', 'errors.log'),
+      '2026-05-16 03:00:00,000 WARNING gateway: fine\n',
+    )
+    fs.writeFileSync(
+      path.join(dir, 'logs', 'errors.log.1'),
+      '2026-05-16 02:00:00,000 ERROR agent.db: append_message failed\n',
+    )
+    const signal = scanErrorLogForWriteFailures(dir)
+    expect(signal.count).toBe(1)
   })
 
   it('only scans the requested tail window', () => {
