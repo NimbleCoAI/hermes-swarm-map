@@ -7,6 +7,7 @@ import { StatusDot } from '@/components/shared/status-dot'
 import { TierBadge } from '@/components/shared/tier-badge'
 import { TierSelect } from '@/components/shared/tier-select'
 import { CacheStatePill } from '@/components/shared/cache-state-pill'
+import { DbHealthBadge, type DbIntegritySummary, type DbWriteFailureSummary } from '@/components/shared/db-health-badge'
 import { Button } from '@/components/ui/button'
 import { SplitButton } from '@/components/shared/split-button'
 import { RiskBar } from '@/components/shared/risk-bar'
@@ -85,6 +86,17 @@ type ModelConfig = { provider: string; primary: string; models: string[]; fallba
 
 type LogsResponse = { logs: string; lines: number }
 
+type HealthResponse = {
+  status: 'healthy' | 'starting' | 'unhealthy'
+  running: boolean
+  restartCount: number
+  uptimeSec: number | null
+  db?: {
+    integrity: DbIntegritySummary | null
+    writeFailures: DbWriteFailureSummary | null
+  }
+}
+
 type UsageByModel = {
   model: string
   inputTokens: number
@@ -151,6 +163,8 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
   const { data: surfaces, refetch: refetchSurfaces } = useApi<Surface[]>('/api/surfaces')
   const { data: modelConfig, refetch: refetchModels } = useApi<ModelConfig>(`/api/harnesses/${id}/models`)
   const { data: usageData } = useApi<UsageData>(`/api/harnesses/${id}/usage`)
+  // DB integrity + write-failure signal (#204) — server-side cached.
+  const { data: healthData } = useApi<HealthResponse>(`/api/harnesses/${id}/health`, 30000)
 
   const [connectDialog, setConnectDialog] = useState<string | null>(null)
   const [editSurface, setEditSurface] = useState<Surface | null>(null)
@@ -651,6 +665,10 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
               {harness.cacheState && (
                 <CacheStatePill state={harness.cacheState} age={harness.cacheAge} />
               )}
+              <DbHealthBadge
+                integrity={healthData?.db?.integrity}
+                writeFailures={healthData?.db?.writeFailures}
+              />
             </div>
           </div>
         </div>

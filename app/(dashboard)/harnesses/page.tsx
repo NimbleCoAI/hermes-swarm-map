@@ -3,11 +3,20 @@
 import { useApi } from '@/lib/hooks/use-api'
 import { StatusDot } from '@/components/shared/status-dot'
 import { TierBadge } from '@/components/shared/tier-badge'
+import { DbHealthBadge, type DbIntegritySummary, type DbWriteFailureSummary } from '@/components/shared/db-health-badge'
 import { Button } from '@/components/ui/button'
 import type { Harness } from '@/lib/types'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+
+type FleetDbHealth = {
+  harnesses: Array<{
+    harnessId: string
+    integrity: DbIntegritySummary | null
+    writeFailures: DbWriteFailureSummary | null
+  }>
+}
 
 export default function HarnessesPage() {
   const router = useRouter()
@@ -15,6 +24,10 @@ export default function HarnessesPage() {
   // Letta agents come from a separate async REST path (design §1c) — merge them
   // into the fleet list. Failure is soft: no Letta server → just no Letta rows.
   const { data: lettaHarnesses } = useApi<Harness[]>('/api/letta/harnesses', 10000)
+  // DB integrity + write-failure signals (#204) — cached server-side, so a
+  // slower poll is plenty.
+  const { data: dbHealth } = useApi<FleetDbHealth>('/api/integrity', 30000)
+  const dbHealthById = new Map((dbHealth?.harnesses ?? []).map((h) => [h.harnessId, h]))
 
   const harnesses =
     containerHarnesses || lettaHarnesses
@@ -183,6 +196,12 @@ export default function HarnessesPage() {
                       <span className="font-medium">{h.name ?? h.id}</span>
                       {h.health?.errors > 0 && (
                         <span className="text-xs text-destructive">({h.health.errors} err)</span>
+                      )}
+                      {!isLetta(h) && (
+                        <DbHealthBadge
+                          integrity={dbHealthById.get(h.id)?.integrity}
+                          writeFailures={dbHealthById.get(h.id)?.writeFailures}
+                        />
                       )}
                     </Link>
                   </td>
