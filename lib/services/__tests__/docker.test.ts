@@ -33,12 +33,19 @@ describe('DockerService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // Default spawn mock returns a fake child process. `on` is needed because
-    // purge mode chains the `up` on the build child's exit event.
-    const fakeChild = { unref: vi.fn(), on: vi.fn() }
-    mockSpawn.mockReturnValue(fakeChild)
+    // Each spawn returns its OWN fake child — restart modes chain steps
+    // (stop→up, build→stop→up) on per-child exit events.
+    mockSpawn.mockImplementation(() => ({ unref: vi.fn(), on: vi.fn() }))
     docker = new DockerService()
   })
+
+  /** Fire the exit handler registered by the Nth spawned child (chain step). */
+  const fireExit = (spawnIndex: number, code: number) => {
+    const on = mockSpawn.mock.results[spawnIndex].value.on
+    const handler = on.mock.calls.find((c: unknown[]) => c[0] === 'exit')?.[1]
+    expect(handler).toBeDefined()
+    handler(code)
+  }
 
   it('checks if docker is available', () => {
     mockExecFileSync.mockReturnValueOnce(Buffer.from('Docker version 24.0.0'))
@@ -111,44 +118,73 @@ describe('DockerService', () => {
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
-  it('restarts a service in rebuild mode (fire-and-forget via spawn)', () => {
+  it('rebuild: builds first (agent stays up), then stop, then up — chained on clean exits', () => {
     docker.restart('/path/compose.yml', 'audrey', 'rebuild')
     expect(mockExecFileSync).not.toHaveBeenCalled()
-    expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
-      expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--build', '--force-recreate', 'audrey']),
-      expect.objectContaining({ detached: true, stdio: 'ignore' })
+    // Step 1: cached build — the agent keeps running during it.
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    const buildArgs = mockSpawn.mock.calls[0][1] as string[]
+    expect(buildArgs).toEqual(expect.arrayContaining(['-f', '/path/compose.yml', 'build', 'audrey']))
+    expect(buildArgs).not.toContain('--no-cache')
+    fireExit(0, 0)
+    // Step 2: stop — quiesces the DB writer BEFORE up runs state-init (#204).
+    expect(mockSpawn).toHaveBeenCalledTimes(2)
+    expect(mockSpawn.mock.calls[1][1]).toEqual(
+      expect.arrayContaining(['-f', '/path/compose.yml', 'stop', 'audrey']),
     )
-    // unref() must be called so the process outlives the caller
+    fireExit(1, 0)
+    // Step 3: up --force-recreate (no --build — already built).
+    expect(mockSpawn).toHaveBeenCalledTimes(3)
+    const upArgs = mockSpawn.mock.calls[2][1] as string[]
+    expect(upArgs).toEqual(expect.arrayContaining(['up', '-d', '--force-recreate', 'audrey']))
+    expect(upArgs).not.toContain('--build')
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
-  it('recreates a service in recreate mode (force-recreate, NO rebuild)', () => {
+  it('recreate: STOPS the service before up --force-recreate (state-init must never copy under a live writer, #204)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'recreate')
     expect(mockExecFileSync).not.toHaveBeenCalled()
-    expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
-      expect.arrayContaining(['-f', '/path/compose.yml', 'up', '-d', '--force-recreate', 'audrey']),
-      expect.objectContaining({ detached: true, stdio: 'ignore' })
+    // Step 1 is the stop — `up -d --force-recreate` converges dependencies
+    // first, so without the stop the state-init migration copy would run while
+    // the OLD container is still writing state.db (torn-copy corruption).
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    expect(mockSpawn.mock.calls[0][1]).toEqual(
+      expect.arrayContaining(['-f', '/path/compose.yml', 'stop', 'audrey']),
     )
+    fireExit(0, 0)
+    expect(mockSpawn).toHaveBeenCalledTimes(2)
+    const upArgs = mockSpawn.mock.calls[1][1] as string[]
+    expect(upArgs).toEqual(expect.arrayContaining(['up', '-d', '--force-recreate', 'audrey']))
     // recreate must NOT rebuild the image — it only reloads env_file / config
-    const args = mockSpawn.mock.calls[0][1] as string[]
-    expect(args).not.toContain('--build')
+    expect(upArgs).not.toContain('--build')
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
+    expect(mockSpawn.mock.results[1].value.unref).toHaveBeenCalled()
   })
 
-  it('restarts a service in purge mode: build then up, both via docker argv (no shell)', () => {
+  it('recreate: does NOT run up when the stop step fails (fail-stop beats fail-race)', () => {
+    docker.restart('/path/compose.yml', 'audrey', 'recreate')
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    fireExit(0, 1) // stop failed
+    expect(mockSpawn).toHaveBeenCalledTimes(1) // no up spawned
+  })
+
+  it('purge: build --no-cache, then stop, then up — all docker argv (no shell)', () => {
     docker.restart('/path/compose.yml', 'audrey', 'purge')
     expect(mockExecFileSync).not.toHaveBeenCalled()
-    // No `sh -c` — the build step is a direct docker argv call.
+    // No `sh -c` — every step is a direct docker argv call.
     expect(mockSpawn).not.toHaveBeenCalledWith('sh', expect.anything(), expect.anything())
-    expect(mockSpawn).toHaveBeenCalledWith(
-      'docker',
+    expect(mockSpawn).toHaveBeenCalledTimes(1)
+    expect(mockSpawn.mock.calls[0][1]).toEqual(
       expect.arrayContaining(['-f', '/path/compose.yml', 'build', '--no-cache', 'audrey']),
-      expect.objectContaining({ detached: true, stdio: 'ignore' })
     )
-    // The `up` is chained on the build child's exit event.
-    expect(mockSpawn.mock.results[0].value.on).toHaveBeenCalledWith('exit', expect.any(Function))
+    fireExit(0, 0)
+    expect(mockSpawn.mock.calls[1][1]).toEqual(
+      expect.arrayContaining(['-f', '/path/compose.yml', 'stop', 'audrey']),
+    )
+    fireExit(1, 0)
+    expect(mockSpawn.mock.calls[2][1]).toEqual(
+      expect.arrayContaining(['up', '-d', '--force-recreate', 'audrey']),
+    )
     expect(mockSpawn.mock.results[0].value.unref).toHaveBeenCalled()
   })
 
@@ -182,10 +218,10 @@ describe('DockerService', () => {
       const calls = mockExecFileSync.mock.calls.map(joined)
       expect(calls.some((c) => c.includes('git -C /src/hermes fetch'))).toBe(true)
       expect(calls.some((c) => c.includes('git -C /src/hermes merge --ff-only origin/main'))).toBe(true)
-      // build still fires
+      // build still fires (first chain step)
       expect(mockSpawn).toHaveBeenCalledWith(
         'docker',
-        expect.arrayContaining(['--build', '--force-recreate', 'audrey']),
+        expect.arrayContaining(['build', 'audrey']),
         expect.any(Object),
       )
     })

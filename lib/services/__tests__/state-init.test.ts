@@ -138,14 +138,38 @@ describe('STATE_INIT_SCRIPT (real script under sh)', () => {
     expect(readMarker(path.join(stateDir, 'state.db'))).toBe('imported')
   })
 
-  it('removes orphan -wal/-shm siblings left on the bind mount', () => {
+  it('removes EMPTY orphan -wal and any -shm siblings left on the bind mount', () => {
     createWalDb(path.join(dataDir, 'state.db'), 'x')
     runInitScript()
-    // Simulate stale siblings appearing next to the symlink (e.g. leftovers
-    // from an interrupted earlier run or an import).
-    fs.writeFileSync(path.join(dataDir, 'state.db-wal'), 'stale')
+    // Empty -wal carries no transactions; -shm is a shared-memory index, never
+    // authoritative data — both are safe to sweep.
+    fs.writeFileSync(path.join(dataDir, 'state.db-wal'), '')
+    fs.writeFileSync(path.join(dataDir, 'state.db-shm'), 'shm-bytes')
     runInitScript()
     expect(fs.existsSync(path.join(dataDir, 'state.db-wal'))).toBe(false)
+    expect(fs.existsSync(path.join(dataDir, 'state.db-shm'))).toBe(false)
+  })
+
+  it('REFUSES (exit 1) to delete a NON-EMPTY orphan -wal beside a migrated db', () => {
+    // Regression (#204 PR2 review): a non-empty regular -wal next to a
+    // symlinked db can hold committed-not-checkpointed transactions (SQLite
+    // symlink-derivation assumption violated, or a partial restore). Deleting
+    // it would be silent data loss — the script must fail loudly instead so
+    // the depends_on gate keeps the agent down for a human.
+    createWalDb(path.join(dataDir, 'state.db'), 'x')
+    runInitScript()
+    fs.writeFileSync(path.join(dataDir, 'state.db-wal'), 'committed-frames')
+    let failure: (Error & { status?: number; stderr?: Buffer }) | null = null
+    try {
+      runInitScript()
+    } catch (err) {
+      failure = err as Error & { status?: number; stderr?: Buffer }
+    }
+    expect(failure).not.toBeNull()
+    expect(failure!.status).toBe(1)
+    expect(String(failure!.stderr)).toContain('REFUSING')
+    // The suspect WAL must survive for manual recovery.
+    expect(fs.readFileSync(path.join(dataDir, 'state.db-wal'), 'utf-8')).toBe('committed-frames')
   })
 
   it('recovers from an interrupted run (volume tmp files present, source intact)', () => {

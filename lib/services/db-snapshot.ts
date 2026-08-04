@@ -53,13 +53,23 @@ export const SNAPSHOT_PYTHON = [
   'import sqlite3, os, sys',
   'p = os.environ.get("SNAPSHOT_DB", "/opt/data/state.db")',
   'if not os.path.exists(p):',
+  // Sentinel so the sweep can report 'skipped' (no db yet) instead of a
+  // success indistinguishable from a real export.
+  '    print("no-db")',
   '    sys.exit(0)',
+  't = p + ".snapshot.tmp"',
+  // Self-heal: a previous export that died mid-write leaves a torn tmp with an
+  // invalid SQLite header; connect()+backup() against it fails forever
+  // ("file is not a database"), permanently wedging the snapshot pipeline.
+  // Unconditionally sweep it away so every cycle starts from a fresh tmp.
+  'if os.path.exists(t):',
+  '    os.remove(t)',
   'src = sqlite3.connect("file:" + p + "?mode=ro", uri=True, timeout=10)',
-  'dst = sqlite3.connect(p + ".snapshot.tmp")',
+  'dst = sqlite3.connect(t)',
   'src.backup(dst)',
   'dst.close()',
   'src.close()',
-  'os.replace(p + ".snapshot.tmp", p + ".snapshot")',
+  'os.replace(t, p + ".snapshot")',
 ].join('\n')
 
 /** Generous ceiling: a multi-hundred-MB backup is seconds, not minutes. */
@@ -94,15 +104,37 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Re-entrancy guard (mirrors runFleetIntegritySweep's sweepInProgress): with
+// several hung containers at the 120s exec timeout a sweep can outlast the
+// scheduler interval — without this, two concurrent sweeps would run
+// overlapping backups into the SAME .snapshot.tmp in one container.
+let sweepInProgress = false
+
 /**
  * Export a snapshot for every MIGRATED harness (host state.db is a symlink —
  * regeneration-proof detection, independent of what any compose file claims).
  * Unmigrated harnesses are skipped: their state.db is host-readable directly.
+ * Re-entrant calls while a sweep is running return [] (the running sweep owns
+ * this cycle).
  */
 export async function runDbSnapshotSweep(
   targets: SnapshotTarget[] = snapshotTargets(),
   exec: ExecInContainer = defaultExec,
   staggerMs = SWEEP_STAGGER_MS,
+): Promise<DbSnapshotResult[]> {
+  if (sweepInProgress) return []
+  sweepInProgress = true
+  try {
+    return await runDbSnapshotSweepInner(targets, exec, staggerMs)
+  } finally {
+    sweepInProgress = false
+  }
+}
+
+async function runDbSnapshotSweepInner(
+  targets: SnapshotTarget[],
+  exec: ExecInContainer,
+  staggerMs: number,
 ): Promise<DbSnapshotResult[]> {
   const results: DbSnapshotResult[] = []
   for (let i = 0; i < targets.length; i++) {
@@ -113,8 +145,16 @@ export async function runDbSnapshotSweep(
       continue
     }
     try {
-      await exec(t.containerName, ['python3', '-c', SNAPSHOT_PYTHON], EXEC_TIMEOUT_MS)
-      results.push({ harnessId: t.harnessId, name: t.name, status: 'ok', detail: null, durationMs: Date.now() - start })
+      const stdout = await exec(t.containerName, ['python3', '-c', SNAPSHOT_PYTHON], EXEC_TIMEOUT_MS)
+      if (stdout.trim() === 'no-db') {
+        // In-container db missing: fresh harness pre-first-write, or the
+        // /state mount was rolled back leaving a dangling symlink. Either way
+        // nothing was exported — don't report an 'ok' that lets the snapshot
+        // age silently.
+        results.push({ harnessId: t.harnessId, name: t.name, status: 'skipped', detail: 'no db in container yet', durationMs: Date.now() - start })
+      } else {
+        results.push({ harnessId: t.harnessId, name: t.name, status: 'ok', detail: null, durationMs: Date.now() - start })
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       // Logged, never thrown: one down container must not starve the rest of

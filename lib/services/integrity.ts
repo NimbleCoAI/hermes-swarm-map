@@ -137,6 +137,13 @@ export function _setExecTransportForTests(fn: ExecInContainer | null): void {
 
 const EXEC_PRAGMA_TIMEOUT_MS = 30_000
 
+/** pragmaPython's exit code for "no state.db in the container yet" (fresh
+ * migrated harness, pre-first-write). Distinct from 3 (SQLite-level error). */
+export const EXEC_NO_DB_EXIT_CODE = 4
+
+/** Marker code for the shaped no-db error thrown by the exec transport. */
+const NO_DB_CODE = 'HSM_NO_DB'
+
 /**
  * In-container PRAGMA runner: prints one finding per line on stdout, and on a
  * SQLite-level failure prints the error to stderr and exits 3 so the TS side
@@ -146,7 +153,12 @@ const EXEC_PRAGMA_TIMEOUT_MS = 30_000
  */
 function pragmaPython(sql: string): string {
   return [
-    'import sqlite3, sys',
+    'import sqlite3, sys, os',
+    // Fresh migrated harness: the symlink dangles until the agent's first DB
+    // write. Distinct exit code (not 3) so the TS side reports benign 'no-db'
+    // instead of a red 'error' badge (sqlite would raise "unable to open").
+    'if not os.path.exists("/opt/data/state.db"):',
+    `    sys.exit(${EXEC_NO_DB_EXIT_CODE})`,
     'try:',
     '    con = sqlite3.connect("file:/opt/data/state.db?mode=ro", uri=True, timeout=10)',
     '    try:',
@@ -223,6 +235,13 @@ export async function runDbPragma(target: DbCheckTarget, sql: string): Promise<u
     )
     return stdout.split('\n').filter((l) => l.length > 0)
   } catch (err) {
+    if ((err as { code?: unknown })?.code === EXEC_NO_DB_EXIT_CODE) {
+      // pragmaPython's distinct exit: db missing in-container (fresh migrated
+      // harness). Shape it so checkDb can report benign 'no-db', not 'error'.
+      const noDb: Error & { code?: string } = new Error('no state.db in container yet')
+      noDb.code = NO_DB_CODE
+      throw noDb
+    }
     if (isContainerDownError(err)) throw err // checkDb reports 'container not running'
     throw shapeExecError(err)
   }
@@ -266,6 +285,12 @@ export async function checkDb(target: DbCheckTarget): Promise<DbIntegrityResult>
         const rows = await runDbPragma(target, 'quick_check')
         return verdictFromRows(rows, start)
       } catch (err) {
+        if ((err as { code?: unknown })?.code === NO_DB_CODE) {
+          // Dangling symlink, target not created yet (fresh migrated harness,
+          // pre-first-write) — benign, same verdict the unmigrated path gives
+          // a missing file. NOT an error badge.
+          return { status: 'no-db', detail: null, checkedAt: start, durationMs: Date.now() - start }
+        }
         if (isContainerDownError(err)) {
           return {
             status: 'error',

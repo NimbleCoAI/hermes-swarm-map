@@ -144,8 +144,19 @@ for db in ${MIGRATED_DB_FILES.join(' ')}; do
   # Idempotent repoint. Dangling on a fresh harness is correct: SQLite O_CREAT
   # follows the link and creates the file on the volume.
   ln -sfn "$dst" "$src"
+  # GUARD: a NON-EMPTY regular -wal next to an already-migrated (symlinked) db
+  # should be impossible — SQLite >= 3.20 derives -wal from the RESOLVED path,
+  # so siblings land on the volume. If one exists anyway (symlink-derivation
+  # assumption violated, or a partial restore), it may hold committed
+  # transactions: deleting it would be silent data loss. Fail loudly instead —
+  # the depends_on gate keeps the agent down until a human looks.
+  if [ -f "$src-wal" ] && [ ! -L "$src-wal" ] && [ -s "$src-wal" ]; then
+    echo "state-init: REFUSING to delete non-empty $src-wal beside migrated $db (possible un-checkpointed WAL) — manual intervention required" >&2
+    exit 1
+  fi
   # Orphan siblings on the bind mount are never read (SQLite resolves the
-  # symlink and keeps aux files next to the real db) — remove them.
+  # symlink and keeps aux files next to the real db) — remove them. (-shm is a
+  # shared-memory index, never authoritative data; empty -wal carries nothing.)
   for suf in -wal -shm; do
     if [ -e "$src$suf" ] || [ -L "$src$suf" ]; then rm -f "$src$suf"; fi
   done

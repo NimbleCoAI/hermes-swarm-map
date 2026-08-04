@@ -47,7 +47,11 @@ function inspectInit(container: string): { status: string; exitCode: number } | 
       { stdio: 'pipe', timeout: 5000 },
     ).toString().trim()
     const [status, code] = out.split('|')
-    return { status: status || 'unknown', exitCode: parseInt(code, 10) || 0 }
+    // Unparseable exit code must read as FAILURE, not success — `|| 0` would
+    // report "init exited 0" from garbage during exactly the incident where
+    // accurate steps matter.
+    const parsed = parseInt(code, 10)
+    return { status: status || 'unknown', exitCode: Number.isFinite(parsed) ? parsed : -1 }
   } catch {
     return null
   }

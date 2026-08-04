@@ -110,11 +110,25 @@ function computeSessionCost(
  *     callers must return null/unknown, NEVER a silent zero (a zero here
  *     turns budget enforcement off with no signal).
  */
-function readableStateDb(harnessId: string): string | 'none' | 'pending' {
+function readableStateDb(
+  harnessId: string,
+): { kind: 'none' } | { kind: 'pending' } | { kind: 'live' | 'snapshot'; path: string } {
   const r = resolveStateDbPath(agentDataDir(harnessId))
-  if (r.kind === 'none') return 'none'
-  if (r.kind === 'migrated-pending') return 'pending'
-  return r.path
+  if (r.kind === 'none') return { kind: 'none' }
+  if (r.kind === 'migrated-pending') return { kind: 'pending' }
+  return { kind: r.kind, path: r.path }
+}
+
+/**
+ * What a reader should return when opening/querying the resolved DB THREW.
+ * Live file: 0 — pre-PR2 behavior, a broken live DB was always reported as
+ * zero and the integrity sweep is the corruption watcher there. Snapshot: the
+ * data exists but this COPY is unreadable (torn export, mid-replace read) —
+ * that is "unknown", and a 0 here would silently disable month-scale budget
+ * enforcement, the exact hole the number|null contract exists to close.
+ */
+function onReadError(kind: 'live' | 'snapshot'): number | null {
+  return kind === 'snapshot' ? null : 0
 }
 
 /**
@@ -125,12 +139,12 @@ function readableStateDb(harnessId: string): string | 'none' | 'pending' {
  * Migrated harnesses read the snapshot export: at most ~5 min stale.
  */
 export function getCostToday(harnessId: string): number | null {
-  const dbPath = readableStateDb(harnessId)
-  if (dbPath === 'none') return 0
-  if (dbPath === 'pending') return null
+  const resolved = readableStateDb(harnessId)
+  if (resolved.kind === 'none') return 0
+  if (resolved.kind === 'pending') return null
 
   try {
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const db = new Database(resolved.path, { readonly: true, fileMustExist: true })
     try {
       const todayStart = startOfDayUnix()
       const rows = db.prepare(`
@@ -157,7 +171,7 @@ export function getCostToday(harnessId: string): number | null {
       db.close()
     }
   } catch {
-    return 0
+    return onReadError(resolved.kind)
   }
 }
 
@@ -171,12 +185,12 @@ export function getCostToday(harnessId: string): number | null {
  * pre-PR2 failure mode (dangling symlink → costMonth=0 → enforcement OFF).
  */
 export function getCostMonth(harnessId: string): number | null {
-  const dbPath = readableStateDb(harnessId)
-  if (dbPath === 'none') return 0
-  if (dbPath === 'pending') return null
+  const resolved = readableStateDb(harnessId)
+  if (resolved.kind === 'none') return 0
+  if (resolved.kind === 'pending') return null
 
   try {
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const db = new Database(resolved.path, { readonly: true, fileMustExist: true })
     try {
       const monthStart = startOfMonthUnix()
       const rows = db.prepare(`
@@ -203,7 +217,7 @@ export function getCostMonth(harnessId: string): number | null {
       db.close()
     }
   } catch {
-    return 0
+    return onReadError(resolved.kind)
   }
 }
 
@@ -214,12 +228,12 @@ export function getCostMonth(harnessId: string): number | null {
  * Used by HarnessService.list() to populate invocations cheaply.
  */
 export function getInvocationsToday(harnessId: string): number | null {
-  const dbPath = readableStateDb(harnessId)
-  if (dbPath === 'none') return 0
-  if (dbPath === 'pending') return null
+  const resolved = readableStateDb(harnessId)
+  if (resolved.kind === 'none') return 0
+  if (resolved.kind === 'pending') return null
 
   try {
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const db = new Database(resolved.path, { readonly: true, fileMustExist: true })
     try {
       const todayStart = startOfDayUnix()
       const row = db.prepare(`
@@ -233,7 +247,7 @@ export function getInvocationsToday(harnessId: string): number | null {
       db.close()
     }
   } catch {
-    return 0
+    return onReadError(resolved.kind)
   }
 }
 
@@ -243,11 +257,11 @@ export function getInvocationsToday(harnessId: string): number | null {
  * exported yet. Migrated harnesses read the snapshot export (≤ ~5 min stale).
  */
 export function getUsageSummary(harnessId: string): UsageSummary | null {
-  const dbPath = readableStateDb(harnessId)
-  if (dbPath === 'none' || dbPath === 'pending') return null
+  const resolved = readableStateDb(harnessId)
+  if (resolved.kind === 'none' || resolved.kind === 'pending') return null
 
   try {
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true })
+    const db = new Database(resolved.path, { readonly: true, fileMustExist: true })
     try {
       const todayStart = startOfDayUnix()
       const weekStart = startOfWeekUnix()

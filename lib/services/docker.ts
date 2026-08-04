@@ -282,37 +282,68 @@ export class DockerService {
       return child
     }
 
+    // Fire-and-forget SEQUENCE: each step spawns only after the previous one
+    // exits 0 (chained on the exit event — no shell, argv arrays throughout).
+    // A failed step stops the chain: fail-stop beats fail-race.
+    const chainDetached = (steps: string[][]) => {
+      const runFrom = (i: number) => {
+        const child = spawn('docker', steps[i], { stdio: 'ignore', detached: true })
+        if (i + 1 < steps.length) {
+          child.on('exit', (code) => {
+            if (code === 0) runFrom(i + 1)
+          })
+        }
+        child.unref()
+      }
+      runFrom(0)
+    }
+
+    // DATA SAFETY (#204 PR2): every mode that recreates MUST stop the service
+    // synchronously-in-sequence BEFORE `up`. `up -d --force-recreate <svc>`
+    // converges dependencies first: the one-shot state-init service (DB
+    // migration / post-import self-heal) runs to completion while the OLD
+    // container is still running — copying live WAL-mode SQLite files under an
+    // active writer, then deleting the originals: the exact torn-copy
+    // corruption class #204 exists to eliminate. Stopping first changes
+    // nothing semantically (recreate destroys the container anyway) and makes
+    // the init copy race-free. Do NOT "optimize" the stop away.
+    const stopArgs = ['compose', ...projArgs, '-f', composeFile, 'stop', service]
+    const upArgs = ['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--force-recreate', service]
+
     switch (mode) {
       case 'quick': {
+        // Plain restart: never (re)creates containers, so state-init does not
+        // run — no stop needed.
         detach(['compose', ...projArgs, '-f', composeFile, 'restart', service])
         break
       }
       case 'recreate': {
         // Recreate the container WITHOUT rebuilding the image — the correct
         // primitive for env_file changes (e.g. rotated API keys), which a plain
-        // `restart` would not reload. Fast; no image build.
-        detach(['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--force-recreate', service])
+        // `restart` would not reload. Fast; no image build. Stop-first: see
+        // the data-safety note above.
+        chainDetached([stopArgs, upArgs])
         break
       }
       case 'rebuild': {
+        // Build FIRST (cached), stop only after the build succeeds — the agent
+        // keeps running during the build and the stop→up window stays small.
         // Fire-and-forget: Docker builds can exceed any reasonable timeout.
-        // The container will come up on its own when the build finishes.
-        detach(['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--build', '--force-recreate', service])
+        chainDetached([
+          ['compose', ...projArgs, '-f', composeFile, 'build', service],
+          stopArgs,
+          upArgs,
+        ])
         break
       }
       case 'purge': {
-        // Two-step rebuild: build --no-cache, THEN bring up — sequenced without a
-        // shell by chaining on the build process's exit (only up on success).
-        const buildArgs = ['compose', ...projArgs, '-f', composeFile, 'build', '--no-cache', service]
-        const upArgs = ['compose', ...projArgs, '-f', composeFile, 'up', '-d', '--force-recreate', service]
-        const build = spawn('docker', buildArgs, { stdio: 'ignore', detached: true })
-        build.on('exit', (code) => {
-          if (code === 0) {
-            const up = spawn('docker', upArgs, { stdio: 'ignore', detached: true })
-            up.unref()
-          }
-        })
-        build.unref()
+        // Same as rebuild but --no-cache. Build → stop → up, each chained on
+        // the previous step's clean exit.
+        chainDetached([
+          ['compose', ...projArgs, '-f', composeFile, 'build', '--no-cache', service],
+          stopArgs,
+          upArgs,
+        ])
         break
       }
     }
@@ -336,6 +367,40 @@ export class DockerService {
       stdio: 'pipe',
       timeout: 30000,
     })
+  }
+
+  /**
+   * Stop AND REMOVE a project's containers (networks too; volumes are NOT
+   * touched — never pass -v here). Used by harness delete: `docker volume rm`
+   * refuses while any container (even an exited one, e.g. state-init-<name>)
+   * still references the volume, so delete must `down` rather than `stop`.
+   */
+  down(composeFile: string, projectName?: string): void {
+    const projArgs = projectName ? ['-p', projectName] : []
+    execFileSync('docker', ['compose', ...projArgs, '-f', composeFile, 'down'], {
+      stdio: 'pipe',
+      timeout: 60000,
+    })
+  }
+
+  /** Remove a named volume. Throws on failure (incl. "no such volume"). */
+  removeVolume(name: string): void {
+    execFileSync('docker', ['volume', 'rm', name], { stdio: 'pipe', timeout: 30000 })
+  }
+
+  /**
+   * Run a one-shot throwaway container (docker run --rm) with the given
+   * mounts, executing a /bin/sh script. Used by duplicate to cold-copy DB
+   * files out of a STOPPED source's state volume (no writer → plain cp is
+   * consistent). Synchronous; argv array, no host shell.
+   */
+  runOneShot(image: string, mounts: string[], shellScript: string, timeoutMs = 120000): void {
+    const volArgs = mounts.flatMap((m) => ['-v', m])
+    execFileSync(
+      'docker',
+      ['run', '--rm', ...volArgs, '--entrypoint', '/bin/sh', image, '-c', shellScript],
+      { stdio: 'pipe', timeout: timeoutMs },
+    )
   }
 
   pullImage(image: string): { ok: boolean; error?: string } {

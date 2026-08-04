@@ -182,6 +182,31 @@ describe('checkDb (exec transport: migrated symlink)', () => {
     expect(result.status).toBe('corrupt')
   })
 
+  it('reports no-db (NOT error) for a fresh migrated harness whose DB has no first write yet', async () => {
+    // Regression (#204 PR2 review): the symlink dangles in-container until the
+    // agent's first DB write. pragmaPython exits EXEC_NO_DB_EXIT_CODE for that
+    // (execFileAsync surfaces it as err.code = 4); mapping it through
+    // SQLITE_CANTOPEN would put a red 'error' badge on every new/idle harness,
+    // training operators to ignore the badge.
+    const dir = makeMigratedDir('mig-fresh')
+    _setExecTransportForTests(async () => {
+      throw Object.assign(new Error('Command failed: docker exec …'), { code: 4 })
+    })
+    const result = await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(result.status).toBe('no-db')
+    expect(result.detail).toBeNull()
+  })
+
+  it('the exec pragma program guards the missing-db case before connecting', async () => {
+    const dir = makeMigratedDir('mig-prog')
+    const exec = vi.fn().mockResolvedValue('ok\n')
+    _setExecTransportForTests(exec)
+    await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    const program = exec.mock.calls[0][1][2] as string
+    expect(program).toContain('os.path.exists')
+    expect(program).toContain('sys.exit(4)')
+  })
+
   it('reports error (NOT no-db) when the container is down', async () => {
     const dir = makeMigratedDir('mig-down')
     _setExecTransportForTests(async () => {
