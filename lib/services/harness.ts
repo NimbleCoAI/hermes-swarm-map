@@ -1113,6 +1113,16 @@ export class HarnessService {
     return { composeFile, serviceName }
   }
 
+  /**
+   * Public compose-file/service resolution for operations that need to read or
+   * rewrite the compose (e.g. the DB migration route). Same fallback logic as
+   * every lifecycle op (resolveComposeTarget).
+   */
+  composeTarget(id: string): { composeFile: string; serviceName: string } | undefined {
+    const harness = this.get(id)
+    return harness ? this.resolveComposeTarget(harness) : undefined
+  }
+
   restart(id: string, mode: RestartMode): void {
     const harness = this.get(id)
     const target = harness && this.resolveComposeTarget(harness)

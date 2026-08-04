@@ -23,10 +23,16 @@ vi.mock('@/lib/resolvers', () => ({
   expandTelegramAllowlist: vi.fn(async (_id: string, users: string[]) => users),
   expandDiscordAllowlist: vi.fn(async (_id: string, users: string[]) => users),
 }))
-vi.mock('@/lib/services/harness-compose', () => ({ generateStandaloneCompose: vi.fn(() => '') }))
+vi.mock('@/lib/services/harness-compose', () => ({
+  generateStandaloneCompose: vi.fn(() => ''),
+  // Real implementation is a pure string test; the fixtures in these tests are
+  // standalone-shaped composes (never deploy-born), so classify as such.
+  isDeployBornCompose: vi.fn(() => false),
+}))
 vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
 
 import { GET, PUT } from './route'
+import { isDeployBornCompose } from '@/lib/services/harness-compose'
 import { services } from '@/lib/services'
 import { expandSignalAllowlist, expandTelegramAllowlist } from '@/lib/resolvers'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
@@ -981,6 +987,25 @@ describe('Settings API — restart arms beyond .env changes', () => {
       .filter(c => typeof c[0] === 'string' && (c[0] as string).endsWith('.env'))
     expect(envWrites).toHaveLength(0)
     expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
+  })
+
+  it('REFUSES (409, nothing written) a resources change on a deploy-born compose (#204 PR2)', async () => {
+    // Regenerating a deploy-born compose via the STANDALONE template would
+    // silently strip read_only/tmpfs/google-MCP hardening.
+    vi.mocked(isDeployBornCompose).mockReturnValueOnce(true)
+    vi.mocked(services.harness.get).mockReturnValue(
+      { resources: { memory: '1G', cpus: '1.0' }, composeFile: '/tmp/deploy-born.yml' } as never,
+    )
+    const body = {
+      dmPolicy: 'approved-only',
+      resources: { memory: '2G', cpus: '2.0' },
+    }
+    const res = await PUT(makeRequest(body), makeParams('h_test'))
+    expect(res.status).toBe(409)
+    const data = await res.json()
+    expect(data.error).toMatch(/deploy-born/)
+    expect((fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls).toHaveLength(0)
+    expect(services.harness.restart).not.toHaveBeenCalled()
   })
 })
 

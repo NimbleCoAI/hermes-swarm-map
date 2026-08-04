@@ -513,6 +513,130 @@ function setServiceSource(lines: string[], svcIdx: number, image: string): void 
   throw new Error(`setComposeImage: unexpected source block under service "${lines[svcIdx].trim()}": "${lines[srcIdx]}"`)
 }
 
+/**
+ * Deploy-born compose detection (#204 PR2). generateAgentCompose adds
+ * hardening (read_only/tmpfs) and google-MCP wiring that the STANDALONE
+ * generator knows nothing about — regenerating such a file via the standalone
+ * template silently strips those extras. Callers that regenerate must refuse
+ * when this returns true.
+ */
+export function isDeployBornCompose(compose: string): boolean {
+  return (
+    /^ {4}read_only: true$/m.test(compose) ||
+    compose.includes('google-multiplayer-mcp') ||
+    compose.includes('/opt/google/tokens')
+  )
+}
+
+/**
+ * Surgically add the named-volume DB migration wiring (#204 PR2) to an
+ * EXISTING compose file, without regenerating it — the only safe way to
+ * migrate a live harness, since regeneration via the wrong-lineage generator
+ * silently strips extras (deploy-born hardening, google-MCP mounts, VPN
+ * sidecars). Inserts:
+ *   1. the one-shot state-init service (before the hermes service),
+ *   2. `- hermes-state-<name>:/state` in the hermes service's volumes,
+ *   3. a `state-init-<name>: condition: service_completed_successfully`
+ *      depends_on entry (converting any list-form deps to map form — compose
+ *      cannot mix forms),
+ *   4. the top-level `volumes:` declaration with a pinned name.
+ *
+ * Idempotent: returns the input unchanged when the volume wiring is already
+ * present. Throws (REFUSES — callers must never fall back to a generator) when
+ * an insertion anchor can't be found, e.g. a hand-edited file.
+ */
+export function addStateMigrationToCompose(
+  compose: string,
+  agentName: string,
+  agentDataDir: string,
+): string {
+  const vol = stateVolumeName(agentName)
+  if (compose.includes(`${vol}:`)) return compose // already migrated
+
+  const refuse = (why: string): never => {
+    throw new Error(`migrate-db: cannot transform compose (${why}) — refusing to regenerate; edit the file manually`)
+  }
+
+  if (/^volumes:/m.test(compose)) refuse('existing top-level volumes: block')
+
+  const lines = compose.split('\n')
+  const svcHeader = `  hermes-${agentName}:`
+  const svcIdx = lines.findIndex((l) => l.trimEnd() === svcHeader)
+  if (svcIdx < 0) refuse(`no "${svcHeader.trim()}" service found`)
+
+  // Source block for the init service = the hermes service's own image/build.
+  const srcIdx = svcIdx + 1
+  let sourceBlock: string
+  if (/^ {4}image:\s/.test(lines[srcIdx] ?? '')) {
+    sourceBlock = lines[srcIdx]
+  } else if (/^ {4}build:\s*/.test(lines[srcIdx] ?? '')) {
+    let end = srcIdx + 1
+    while (end < lines.length && /^ {5,}\S/.test(lines[end])) end++
+    sourceBlock = lines.slice(srcIdx, end).join('\n')
+  } else {
+    return refuse('hermes service does not start with an image:/build: source block')
+  }
+
+  // End of the hermes service block: first subsequent line that is non-empty
+  // and indented less than 4 spaces (sibling service or top-level key).
+  let blockEnd = srcIdx
+  while (blockEnd < lines.length && (lines[blockEnd] === '' || /^ {4,}/.test(lines[blockEnd]) || lines[blockEnd].trim() === '')) {
+    blockEnd++
+  }
+
+  const inBlock = (re: RegExp): number => {
+    for (let i = svcIdx + 1; i < blockEnd; i++) if (re.test(lines[i])) return i
+    return -1
+  }
+
+  // 3. depends_on — merge or insert (do this before other splices so indices
+  // stay simple; everything below operates inside the block).
+  const initDepends = [
+    `      state-init-${agentName}:`,
+    '        condition: service_completed_successfully',
+  ]
+  const depIdx = inBlock(/^ {4}depends_on:\s*$/)
+  if (depIdx >= 0) {
+    let end = depIdx + 1
+    const converted: string[] = []
+    while (end < blockEnd && /^ {5,}\S/.test(lines[end])) {
+      const listItem = lines[end].match(/^ {6}- (\S+)\s*$/)
+      if (listItem) {
+        // list form → map form (compose can't mix forms with the init entry)
+        converted.push(`      ${listItem[1]}:`, '        condition: service_started')
+      } else {
+        converted.push(lines[end])
+      }
+      end++
+    }
+    const replacement = [...converted, ...initDepends]
+    lines.splice(depIdx + 1, end - (depIdx + 1), ...replacement)
+    blockEnd += replacement.length - (end - (depIdx + 1))
+  } else {
+    lines.splice(srcIdx + (sourceBlock.split('\n').length), 0, '    depends_on:', ...initDepends)
+    blockEnd += 1 + initDepends.length
+  }
+
+  // 2. hermes volumes entry. The service must already mount the data dir.
+  const volIdx = inBlock(/^ {4}volumes:\s*$/)
+  if (volIdx < 0) refuse('hermes service has no volumes: key')
+  let volEnd = volIdx + 1
+  while (volEnd < blockEnd && /^ {6}- /.test(lines[volEnd])) volEnd++
+  if (volEnd === volIdx + 1) refuse('hermes volumes: list has no entries')
+  lines.splice(volEnd, 0, `      - ${vol}:/state`)
+
+  // 1. init service, inserted as a sibling right before the hermes service.
+  const initLines = stateInitService(agentName, agentDataDir, sourceBlock).split('\n')
+  if (initLines[initLines.length - 1] === '') initLines.pop()
+  lines.splice(svcIdx, 0, ...initLines)
+
+  // 4. top-level volumes declaration at the end (stateVolumeBlock leads with
+  // a blank-line separator, matching the generators' trailer shape).
+  let out = lines.join('\n')
+  if (!out.endsWith('\n')) out += '\n'
+  return out + stateVolumeBlock(agentName)
+}
+
 /** Read the hermes service's image ref from a compose string, or null if it's a build: block (local). */
 export function readComposeImage(compose: string): string | null {
   const lines = compose.split('\n')
