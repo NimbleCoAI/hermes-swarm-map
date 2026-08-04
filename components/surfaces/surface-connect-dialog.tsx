@@ -251,7 +251,7 @@ function SignalBody({ s, onClose }: { s: Hook; onClose: () => void }) {
               onChange={(e) => s.setCaptchaToken(e.target.value)}
               placeholder="signalcaptcha://signal-hcaptcha..."
               rows={3}
-              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-xs font-mono"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-base md:text-xs font-mono"
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -392,7 +392,7 @@ function TelegramBody({ s, onClose }: { s: Hook; onClose: () => void }) {
               value={s.token}
               onChange={(e) => { s.setToken(e.target.value); if (step === 'verified') s.setStep('input') }}
               placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
-              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-mono"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-base md:text-sm font-mono"
               disabled={step === 'verifying' || step === 'connecting'}
             />
             {s.token && !tokenValid && (
@@ -532,7 +532,7 @@ function MattermostBody({ s, onClose }: { s: Hook; onClose: () => void }) {
               value={s.token}
               onChange={(e) => { s.setToken(e.target.value); handleFieldChange() }}
               placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-mono"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-base md:text-sm font-mono"
               disabled={step === 'verifying' || step === 'connecting'}
             />
           </div>
@@ -636,7 +636,7 @@ function DiscordBody({ s, onClose }: { s: Hook; onClose: () => void }) {
               value={s.token}
               onChange={(e) => { s.setToken(e.target.value); if (step === 'verified') s.setStep('input') }}
               placeholder="MTAxxxxxxxxxxxxxxxxxxxxxx.xxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-mono"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-base md:text-sm font-mono"
               disabled={step === 'verifying' || step === 'connecting'}
             />
           </div>
@@ -748,7 +748,7 @@ function SlackBody({ s, onClose }: { s: Hook; onClose: () => void }) {
               value={s.token}
               onChange={(e) => { s.setToken(e.target.value); handleFieldChange() }}
               placeholder="xoxb-..."
-              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-mono"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-base md:text-sm font-mono"
               disabled={step === 'verifying' || step === 'connecting'}
             />
             {s.token && !botValid && (
@@ -763,7 +763,7 @@ function SlackBody({ s, onClose }: { s: Hook; onClose: () => void }) {
               value={s.appToken}
               onChange={(e) => { s.setAppToken(e.target.value); handleFieldChange() }}
               placeholder="xapp-..."
-              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm font-mono"
+              className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--surface)] text-base md:text-sm font-mono"
               disabled={step === 'verifying' || step === 'connecting'}
             />
             {s.appToken && !appValid && (

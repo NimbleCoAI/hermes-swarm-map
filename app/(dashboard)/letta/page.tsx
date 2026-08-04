@@ -94,7 +94,7 @@ function AgentRow({ agent }: { agent: LettaAgent }) {
                 onChange={(e) => setText(e.target.value)}
                 placeholder={`Message ${agent.name ?? agent.id}…`}
                 rows={2}
-                className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm resize-y"
+                className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-base md:text-sm resize-y"
               />
               <Button size="sm" onClick={send} disabled={sending || !text.trim()}>
                 {sending ? 'Sending…' : 'Send'}
@@ -176,7 +176,7 @@ export default function LettaPage() {
       )}
 
       {!loading && !error && agents && agents.length > 0 && (
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">

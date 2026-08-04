@@ -329,7 +329,7 @@ function KeysPageContent() {
       {loading && <p className="text-muted-foreground">Loading...</p>}
 
       {!loading && keys && (
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">

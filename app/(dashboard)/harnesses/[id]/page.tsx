@@ -764,6 +764,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                 <div className="p-4 border-b border-[var(--border)]">
                   <h3 className="font-medium text-sm">Cost by Model (Today)</h3>
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">
@@ -792,6 +793,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
 
@@ -801,6 +803,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                 <div className="p-4 border-b border-[var(--border)]">
                   <h3 className="font-medium text-sm">Recent Sessions</h3>
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">
@@ -827,6 +830,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             )}
 
@@ -1203,7 +1207,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
         </TabsContent>
 
         <TabsContent value="tools" className="mt-4">
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-xs text-muted-foreground uppercase tracking-wide">
