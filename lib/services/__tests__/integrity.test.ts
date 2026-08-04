@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import {
-  checkDbAtDir,
+  checkDb,
   classifyDbError,
   parseLogLineTimestamp,
   runDbPragma,
@@ -14,7 +14,9 @@ import {
   scanLogTextForWriteFailures,
   scanErrorLogForWriteFailures,
   _resetIntegrityStateForTests,
+  _setExecTransportForTests,
   DB_WRITE_FAILURE_SIGNATURES,
+  type DbCheckTarget,
 } from '@/lib/services/integrity'
 
 let testRoot: string
@@ -23,6 +25,11 @@ function makeDataDir(name: string): string {
   const dir = path.join(testRoot, name)
   fs.mkdirSync(dir, { recursive: true })
   return dir
+}
+
+/** Host-transport target (regular file / missing file). */
+function targetFor(dir: string): DbCheckTarget {
+  return { dataDir: dir, containerName: 'hermes-test' }
 }
 
 function createHealthyDb(dataDir: string): void {
@@ -45,45 +52,45 @@ afterEach(() => {
 })
 
 describe('runDbPragma', () => {
-  it('runs quick_check readonly against a healthy DB', () => {
+  it('runs quick_check readonly against a healthy DB', async () => {
     const dir = makeDataDir('healthy')
     createHealthyDb(dir)
-    const rows = runDbPragma(dir, 'quick_check')
+    const rows = await runDbPragma(targetFor(dir), 'quick_check')
     expect(rows).toEqual([{ quick_check: 'ok' }])
   })
 
-  it('throws when the DB file is missing (fileMustExist)', () => {
+  it('throws when the DB file is missing (fileMustExist)', async () => {
     const dir = makeDataDir('empty')
-    expect(() => runDbPragma(dir, 'quick_check')).toThrow()
+    await expect(runDbPragma(targetFor(dir), 'quick_check')).rejects.toThrow()
   })
 })
 
-describe('checkDbAtDir', () => {
-  it('reports ok for a healthy DB', () => {
+describe('checkDb (host transport: regular file)', () => {
+  it('reports ok for a healthy DB', async () => {
     const dir = makeDataDir('healthy')
     createHealthyDb(dir)
-    const result = checkDbAtDir(dir)
+    const result = await checkDb(targetFor(dir))
     expect(result.status).toBe('ok')
     expect(result.detail).toBeNull()
     expect(result.checkedAt).toBeGreaterThan(0)
   })
 
-  it('reports no-db (not an error) when state.db is missing', () => {
+  it('reports no-db (not an error) when state.db is missing', async () => {
     const dir = makeDataDir('fresh')
-    const result = checkDbAtDir(dir)
+    const result = await checkDb(targetFor(dir))
     expect(result.status).toBe('no-db')
     expect(result.detail).toBeNull()
   })
 
-  it('reports corrupt for a file that is not a SQLite database', () => {
+  it('reports corrupt for a file that is not a SQLite database', async () => {
     const dir = makeDataDir('garbage')
     fs.writeFileSync(path.join(dir, 'state.db'), 'this is not a sqlite database at all\n'.repeat(50))
-    const result = checkDbAtDir(dir)
+    const result = await checkDb(targetFor(dir))
     expect(result.status).toBe('corrupt')
     expect(result.detail).toBeTruthy()
   })
 
-  it('reports corrupt for a torn/overwritten page in a real WAL-mode DB', () => {
+  it('reports corrupt for a torn/overwritten page in a real WAL-mode DB', async () => {
     const dir = makeDataDir('torn')
     const db = new Database(path.join(dir, 'state.db'))
     db.pragma('journal_mode = WAL')
@@ -99,15 +106,17 @@ describe('checkDbAtDir', () => {
     fs.writeSync(fd, Buffer.from('CORRUPTED PAGE DATA '.repeat(200)), 0, 4000, Math.floor(size / 2))
     fs.closeSync(fd)
 
-    const result = checkDbAtDir(dir)
+    const result = await checkDb(targetFor(dir))
     expect(result.status).toBe('corrupt')
   })
 
-  it('classifies a REAL lock as busy (second connection holds an exclusive txn)', () => {
+  it('classifies a REAL lock as busy (second connection holds an exclusive txn)', async () => {
     // Not a fabricated {code} object: an actual writer connection holds an
-    // exclusive lock while checkDbAtDir tries to read. Uses rollback-journal
+    // exclusive lock while checkDb tries to read. Uses rollback-journal
     // mode because WAL readers are never blocked by writers — an exclusive
     // rollback-mode txn is the way to produce a genuine SQLITE_BUSY.
+    // A regular file always takes the sync/host branch, so this still
+    // exercises the PR1 path post-transport-swap.
     // NOTE: live cross-VM WAL contention (host reader vs container writer
     // through VirtioFS) is NOT reproducible in unit tests — see the KNOWN GAP
     // note in integrity.ts; this test covers the in-process lock path only.
@@ -117,13 +126,81 @@ describe('checkDbAtDir', () => {
     writer.exec('CREATE TABLE t (id INTEGER PRIMARY KEY)')
     writer.exec('BEGIN EXCLUSIVE')
     try {
-      const result = checkDbAtDir(dir)
+      const result = await checkDb(targetFor(dir))
       expect(result.status).toBe('busy')
     } finally {
       writer.exec('ROLLBACK')
       writer.close()
     }
   }, 15000)
+})
+
+describe('checkDb (exec transport: migrated symlink)', () => {
+  function makeMigratedDir(name: string): string {
+    const dir = makeDataDir(name)
+    // Host view of a migrated harness: dangling symlink into the container.
+    fs.symlinkSync('/state/state.db', path.join(dir, 'state.db'))
+    return dir
+  }
+
+  it('routes to docker exec and reports ok on a clean quick_check', async () => {
+    const dir = makeMigratedDir('mig-ok')
+    const exec = vi.fn().mockResolvedValue('ok\n')
+    _setExecTransportForTests(exec)
+    const result = await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(result.status).toBe('ok')
+    expect(exec).toHaveBeenCalledTimes(1)
+    const [container, argv] = exec.mock.calls[0]
+    expect(container).toBe('hermes-mig')
+    expect(argv[0]).toBe('python3')
+    expect(argv[2]).toContain('PRAGMA quick_check')
+  })
+
+  it('maps quick_check findings to corrupt (hysteresis input intact)', async () => {
+    const dir = makeMigratedDir('mig-corrupt')
+    _setExecTransportForTests(async () => 'row 17 missing from index i1\nwrong # of entries in index i1\n')
+    const result = await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(result.status).toBe('corrupt')
+    expect(result.detail).toContain('row 17 missing')
+  })
+
+  it('maps "database is locked" to busy across the transport', async () => {
+    const dir = makeMigratedDir('mig-busy')
+    _setExecTransportForTests(async () => {
+      throw Object.assign(new Error('Command failed'), { stderr: 'database is locked' })
+    })
+    const result = await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(result.status).toBe('busy')
+  })
+
+  it('maps "malformed" exec errors to corrupt', async () => {
+    const dir = makeMigratedDir('mig-malformed')
+    _setExecTransportForTests(async () => {
+      throw Object.assign(new Error('Command failed'), { stderr: 'database disk image is malformed' })
+    })
+    const result = await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(result.status).toBe('corrupt')
+  })
+
+  it('reports error (NOT no-db) when the container is down', async () => {
+    const dir = makeMigratedDir('mig-down')
+    _setExecTransportForTests(async () => {
+      throw new Error('Error response from daemon: container hermes-mig is not running')
+    })
+    const result = await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(result.status).toBe('error')
+    expect(result.detail).toContain('container not running')
+  })
+
+  it('never opens the host path for a symlinked DB (no better-sqlite3 CANTOPEN)', async () => {
+    // If checkDb fell through to better-sqlite3, the dangling link would
+    // produce SQLITE_CANTOPEN ('error'); the exec transport must win instead.
+    const dir = makeMigratedDir('mig-transport')
+    const exec = vi.fn().mockResolvedValue('ok\n')
+    _setExecTransportForTests(exec)
+    await checkDb({ dataDir: dir, containerName: 'hermes-mig' })
+    expect(exec).toHaveBeenCalled()
+  })
 })
 
 describe('classifyDbError', () => {
@@ -153,8 +230,8 @@ describe('runFleetIntegritySweep', () => {
 
     const snapshot = await runFleetIntegritySweep(
       [
-        { harnessId: 'h_a', name: 'a', dataDir: healthy },
-        { harnessId: 'h_b', name: 'b', dataDir: fresh },
+        { harnessId: 'h_a', name: 'a', dataDir: healthy, containerName: 'hermes-a' },
+        { harnessId: 'h_b', name: 'b', dataDir: fresh, containerName: 'hermes-b' },
       ],
       0,
     )
@@ -165,7 +242,7 @@ describe('runFleetIntegritySweep', () => {
     expect(getIntegrityForHarness('h_b')?.status).toBe('no-db')
 
     // A later sweep without h_b drops its stale entry.
-    await runFleetIntegritySweep([{ harnessId: 'h_a', name: 'a', dataDir: healthy }], 0)
+    await runFleetIntegritySweep([{ harnessId: 'h_a', name: 'a', dataDir: healthy, containerName: 'hermes-a' }], 0)
     expect(getIntegrityForHarness('h_b')).toBeNull()
     expect(getFleetIntegritySnapshot().results.map((r) => r.harnessId)).toEqual(['h_a'])
   })
@@ -184,13 +261,13 @@ describe('corruption hysteresis', () => {
 
   it('publishes recheck-pending (not corrupt) on the FIRST corrupt sample', async () => {
     const dir = createCorruptDb('hys-first')
-    await runFleetIntegritySweep([{ harnessId: 'h_c', name: 'c', dataDir: dir }], 0, RECHECK_NEVER)
+    await runFleetIntegritySweep([{ harnessId: 'h_c', name: 'c', dataDir: dir, containerName: 'hermes-c' }], 0, RECHECK_NEVER)
     expect(getIntegrityForHarness('h_c')?.status).toBe('recheck-pending')
   })
 
   it('confirms corrupt on the SECOND consecutive corrupt sample', async () => {
     const dir = createCorruptDb('hys-second')
-    const targets = [{ harnessId: 'h_c', name: 'c', dataDir: dir }]
+    const targets = [{ harnessId: 'h_c', name: 'c', dataDir: dir, containerName: 'hermes-c' }]
     await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
     await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
     expect(getIntegrityForHarness('h_c')?.status).toBe('corrupt')
@@ -198,7 +275,7 @@ describe('corruption hysteresis', () => {
 
   it('clears the pending state when a later sample is healthy (torn-read scenario)', async () => {
     const dir = createCorruptDb('hys-clears')
-    const targets = [{ harnessId: 'h_c', name: 'c', dataDir: dir }]
+    const targets = [{ harnessId: 'h_c', name: 'c', dataDir: dir, containerName: 'hermes-c' }]
     await runFleetIntegritySweep(targets, 0, RECHECK_NEVER)
     expect(getIntegrityForHarness('h_c')?.status).toBe('recheck-pending')
 

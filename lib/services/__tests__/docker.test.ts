@@ -8,11 +8,21 @@ import { DockerService } from '../docker'
 // fire-and-forget restarts, the RestartCount regression) is preserved.
 const mockExecFileSync = vi.hoisted(() => vi.fn())
 const mockSpawn = vi.hoisted(() => vi.fn())
+// Async execFile surface (execInContainer). The real child_process.execFile
+// carries util.promisify.custom returning Promise<{stdout, stderr}> — mirror
+// that so promisify() in docker.ts wraps the mock the same way.
+const mockExecFileAsync = vi.hoisted(() => vi.fn())
+const mockExecFile = vi.hoisted(() => {
+  const fn = vi.fn() as ReturnType<typeof vi.fn> & { [key: symbol]: unknown }
+  fn[Symbol.for('nodejs.util.promisify.custom')] = mockExecFileAsync
+  return fn
+})
 
 vi.mock('child_process', () => ({
-  default: { execFileSync: mockExecFileSync, spawn: mockSpawn },
+  default: { execFileSync: mockExecFileSync, spawn: mockSpawn, execFile: mockExecFile },
   execFileSync: mockExecFileSync,
   spawn: mockSpawn,
+  execFile: mockExecFile,
 }))
 
 // Join a [cmd, args] call into a single string for substring assertions.
@@ -238,6 +248,26 @@ describe('DockerService', () => {
       docker.start('/c.yml', 'svc')
       const argv = mockExecFileSync.mock.calls[0][1] as string[]
       expect(argv).not.toContain('--env-file')
+    })
+  })
+
+  describe('execInContainer', () => {
+    it('runs docker exec with an argv array (no shell) and returns stdout', async () => {
+      mockExecFileAsync.mockResolvedValueOnce({ stdout: 'ok\n', stderr: '' })
+      const out = await docker.execInContainer('hermes-x', ['python3', '-c', 'print("ok")'])
+      expect(out).toBe('ok\n')
+      const [file, argv, opts] = mockExecFileAsync.mock.calls[0]
+      expect(file).toBe('docker')
+      // argv array, exec first, container next, then the command verbatim —
+      // no /bin/sh, no string concatenation (F1–F5 security property).
+      expect(argv).toEqual(['exec', 'hermes-x', 'python3', '-c', 'print("ok")'])
+      expect((opts as { timeout: number }).timeout).toBe(60000)
+    })
+
+    it('propagates a custom timeout and rejects on failure', async () => {
+      mockExecFileAsync.mockRejectedValueOnce(new Error('container hermes-x is not running'))
+      await expect(docker.execInContainer('hermes-x', ['true'], 5000)).rejects.toThrow('is not running')
+      expect((mockExecFileAsync.mock.calls[0][2] as { timeout: number }).timeout).toBe(5000)
     })
   })
 })
