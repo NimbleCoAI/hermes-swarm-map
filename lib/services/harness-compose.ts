@@ -66,6 +66,141 @@ export interface ComposeOptions {
 export const BUNDLED_OLLAMA_MODEL = 'qwen2.5:0.5b'
 
 /**
+ * SQLite DB files migrated off the VirtioFS bind mount onto a named Docker
+ * volume (#204 PR2). Each has -wal/-shm siblings handled alongside it.
+ */
+export const MIGRATED_DB_FILES = ['state.db', 'response_store.db', 'kanban.db'] as const
+
+/** Named Docker volume holding an agent's migrated SQLite DBs. */
+export function stateVolumeName(agentName: string): string {
+  return `hermes-state-${agentName}`
+}
+
+/**
+ * Top-level `volumes:` trailer declaring the state volume. The explicit `name:`
+ * pins the real volume name — without it compose prefixes the project name
+ * (the compose file's parent dir), so the same agent would get different
+ * volume names depending on where its compose lives, breaking rollback/exec
+ * tooling that addresses `hermes-state-<name>`.
+ */
+export function stateVolumeBlock(agentName: string): string {
+  return `
+volumes:
+  ${stateVolumeName(agentName)}:
+    name: ${stateVolumeName(agentName)}
+`
+}
+
+/**
+ * The migration/self-heal shell script the state-init service runs, as plain
+ * POSIX sh (unescaped — `stateInitService` compose-escapes `$` on embed).
+ * STATE_INIT_DATA / STATE_INIT_STATE env overrides exist ONLY so tests can run
+ * the real script against temp dirs; in-container neither is set and the
+ * defaults (/opt/data, /state) apply.
+ *
+ * Script properties (see stateInitService for the service-level contract):
+ *   - Regular file at a DB path WINS (first migration, or a `hermes import`
+ *     replaced the symlink): copied to the volume over any volume copy, then
+ *     re-symlinked.
+ *   - Crash-safe ordering: copy all siblings to *.tmp on the volume → rename
+ *     (atomic within the volume) → only then delete bind copies, db FIRST so an
+ *     interrupted run re-migrates from the intact source instead of stranding
+ *     a db without its WAL.
+ *   - Fresh harness: symlink is created dangling — SQLite's open(O_CREAT)
+ *     follows it and creates the DB on the volume. No empty files are
+ *     pre-created (that would defeat the regular-file-wins test forever after).
+ *   - Only the .db names are symlinked: SQLite derives -wal/-shm paths from the
+ *     RESOLVED path (symlinks followed since SQLite 3.20), so siblings land on
+ *     the volume automatically; stale bind-mount siblings are removed.
+ */
+export const STATE_INIT_SCRIPT = `set -eu
+DATA="\${STATE_INIT_DATA:-/opt/data}"
+STATE="\${STATE_INIT_STATE:-/state}"
+# Volume dir must be writable by whatever uid s6 drops the gateway to; match
+# the data dir's ownership (a root-owned fresh volume would break WAL creation
+# for a non-root writer).
+chown "$(stat -c '%u:%g' "$DATA" 2>/dev/null || echo 0:0)" "$STATE" || true
+for db in ${MIGRATED_DB_FILES.join(' ')}; do
+  src="$DATA/$db"; dst="$STATE/$db"
+  if [ -f "$src" ] && [ ! -L "$src" ]; then
+    # Regular file on the bind mount = authoritative (first migration, or a
+    # hermes import un-migrated us). It WINS over volume copies.
+    for suf in "" -wal -shm; do
+      if [ -f "$src$suf" ] && [ ! -L "$src$suf" ]; then
+        cp -p "$src$suf" "$dst$suf.tmp"
+      else
+        rm -f "$dst$suf.tmp"
+      fi
+    done
+    sync
+    for suf in "" -wal -shm; do
+      if [ -f "$dst$suf.tmp" ]; then mv -f "$dst$suf.tmp" "$dst$suf"; else rm -f "$dst$suf"; fi
+    done
+    # Delete bind copies: db FIRST so an interrupted run re-migrates from
+    # source instead of stranding a db without its WAL.
+    rm -f "$src"
+    rm -f "$src-wal" "$src-shm"
+  fi
+  # Idempotent repoint. Dangling on a fresh harness is correct: SQLite O_CREAT
+  # follows the link and creates the file on the volume.
+  ln -sfn "$dst" "$src"
+  # Orphan siblings on the bind mount are never read (SQLite resolves the
+  # symlink and keeps aux files next to the real db) — remove them.
+  for suf in -wal -shm; do
+    if [ -e "$src$suf" ] || [ -L "$src$suf" ]; then rm -f "$src$suf"; fi
+  done
+done
+echo "state-init: migration/symlinks OK"
+`
+
+/**
+ * One-shot init service that migrates the agent's SQLite DBs from the VirtioFS
+ * bind mount (/opt/data) onto the named volume (/state) and leaves symlinks
+ * behind (#204 PR2). The hermes service depends_on it with
+ * `service_completed_successfully`, so the DBs are always off VirtioFS before
+ * the writer starts.
+ *
+ * Runs STATE_INIT_SCRIPT (see its doc for migration semantics).
+ *
+ * Reuses the hermes service's own image/build source (`sourceBlock`) — by
+ * construction already pulled/built, and guaranteed to carry /bin/sh. The
+ * entrypoint override bypasses s6 (`/init` never runs), so the script runs as
+ * root, which the chown/moves need. NOTE the service/container name must NOT
+ * start with `hermes-`/`seraph-` — discovery (pickContainerAdapter) would claim
+ * it as a phantom agent.
+ *
+ * All shell `$` are escaped as `$$` on embed — docker compose interpolates `$`
+ * in compose files, and an unescaped shell variable would be substituted (as
+ * empty, with a warning) at compose parse time, not at run time.
+ */
+export function stateInitService(
+  agentName: string,
+  agentDataDir: string,
+  sourceBlock: string,
+): string {
+  const vol = stateVolumeName(agentName)
+  const embedded = STATE_INIT_SCRIPT
+    .replace(/\$/g, '$$$$') // '$' → '$$' (compose interpolation escape)
+    .split('\n')
+    .map((l) => (l ? '        ' + l : l)) // 8-space indent under the `- |` scalar
+    .join('\n')
+    .trimEnd()
+  return `  state-init-${agentName}:
+${sourceBlock}
+    container_name: state-init-${agentName}
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+${embedded}
+    volumes:
+      - ${agentDataDir}:/opt/data
+      - ${vol}:/state
+`
+}
+
+/**
  * Default image for the Camofox sidecar in the VPN variant.
  *
  * This is the upstream third-party image (github.com/jo-inc/camofox-browser) —
@@ -162,17 +297,21 @@ function generatePlainCompose(
   const ollamaBlock = bundledOllama
     ? ollamaSidecar(agentName, agentDataDir, ollamaImage, '')
     : ''
-  const ollamaDepends = bundledOllama
-    ? `    depends_on:\n      ollama-${agentName}:\n        condition: service_healthy\n`
-    : ''
+  const initBlock = stateInitService(agentName, agentDataDir, sourceBlock)
+  // depends_on is always emitted now (init gate); map form so the conditional
+  // ollama entry can merge in (compose can't mix list + map forms).
+  const hermesDepends =
+    `    depends_on:\n` +
+    (bundledOllama ? `      ollama-${agentName}:\n        condition: service_healthy\n` : '') +
+    `      state-init-${agentName}:\n        condition: service_completed_successfully\n`
 
   return `# Generated by hermes-swarm-map — agent: ${agentName}
 services:
-${ollamaBlock}  hermes-${agentName}:
+${initBlock}${ollamaBlock}  hermes-${agentName}:
 ${sourceBlock}
     container_name: hermes-${agentName}
     restart: unless-stopped
-${ollamaDepends}    extra_hosts:
+${hermesDepends}    extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
       - ${agentDataDir}/.env
@@ -188,6 +327,7 @@ ${ollamaDepends}    extra_hosts:
         target: 8642
     volumes:
       - ${agentDataDir}:/opt/data
+      - ${stateVolumeName(agentName)}:/state
     command: gateway
     cap_drop:
       - ALL
@@ -202,7 +342,7 @@ ${resourcesBlock(memory, cpus)}
 networks:
   default:
     name: hermes-${agentName}
-`
+${stateVolumeBlock(agentName)}`
 }
 
 function generateVpnCompose(
@@ -232,15 +372,20 @@ function generateVpnCompose(
   const ollamaBlock = bundledOllama
     ? '\n' + ollamaSidecar(agentName, agentDataDir, ollamaImage, ollamaNetworkBlock)
     : ''
-  // When ollama is bundled the hermes service must wait for it to be healthy.
-  // depends_on can't mix list + map form, so emit the map form for both deps.
-  const hermesDepends = bundledOllama
-    ? `    depends_on:\n      wireguard:\n        condition: service_started\n      ollama-${agentName}:\n        condition: service_healthy\n`
-    : `    depends_on:\n      - wireguard\n`
+  // The state-init gate is unconditional, so depends_on is ALWAYS map form now
+  // (compose can't mix list + map forms; `- wireguard` can't coexist with the
+  // init condition entry).
+  const hermesDepends =
+    `    depends_on:\n      wireguard:\n        condition: service_started\n` +
+    (bundledOllama ? `      ollama-${agentName}:\n        condition: service_healthy\n` : '') +
+    `      state-init-${agentName}:\n        condition: service_completed_successfully\n`
+  // Init runs on the default network (no wireguard namespace) — it only touches
+  // the two mounts and must not depend on VPN bring-up.
+  const initBlock = stateInitService(agentName, agentDataDir, sourceBlock)
 
   return `# Generated by hermes-swarm-map — agent: ${agentName} (VPN mode)
 services:
-  wireguard:
+${initBlock}  wireguard:
     image: lscr.io/linuxserver/wireguard:latest
     container_name: wireguard-${agentName}
     restart: unless-stopped
@@ -303,6 +448,7 @@ ${hermesDepends}    extra_hosts:
       - HERMES_HOME=/opt/data
     volumes:
       - ${agentDataDir}:/opt/data
+      - ${stateVolumeName(agentName)}:/state
     command: gateway
     cap_drop:
       - ALL
@@ -317,7 +463,7 @@ ${resourcesBlock(memory, cpus)}
 networks:
   default:
     name: hermes-${agentName}
-`
+${stateVolumeBlock(agentName)}`
 }
 
 /**
@@ -336,10 +482,24 @@ export function setComposeImage(compose: string, image: string): string {
   if (svcIdx < 0 || svcIdx + 1 >= lines.length) {
     throw new Error('setComposeImage: no hermes-<name> service found in compose')
   }
+  setServiceSource(lines, svcIdx, image)
+  // The state-init service reuses the hermes source block by construction
+  // (#204 PR2) — rewrite it too so a CD image pin doesn't leave the init
+  // container on a stale (possibly garbage-collected) ref. Optional: pre-PR2
+  // composes have no init service.
+  const initIdx = lines.findIndex((l) => /^  state-init-[\w.-]+:\s*$/.test(l))
+  if (initIdx >= 0 && initIdx + 1 < lines.length) {
+    setServiceSource(lines, initIdx, image)
+  }
+  return lines.join('\n')
+}
+
+/** Replace the source block (first line under a service key) with `image: <ref>`. */
+function setServiceSource(lines: string[], svcIdx: number, image: string): void {
   const srcIdx = svcIdx + 1
   if (/^ {4}image:\s/.test(lines[srcIdx])) {
     lines[srcIdx] = `    image: ${image}`
-    return lines.join('\n')
+    return
   }
   if (/^ {4}build:\s*$/.test(lines[srcIdx])) {
     let end = srcIdx + 1
@@ -348,9 +508,9 @@ export function setComposeImage(compose: string, image: string): string {
     // items, …). Stops at the next 4-space sibling key or a blank line.
     while (end < lines.length && /^ {5,}\S/.test(lines[end])) end++
     lines.splice(srcIdx, end - srcIdx, `    image: ${image}`)
-    return lines.join('\n')
+    return
   }
-  throw new Error(`setComposeImage: unexpected source block under hermes service: "${lines[srcIdx]}"`)
+  throw new Error(`setComposeImage: unexpected source block under service "${lines[svcIdx].trim()}": "${lines[srcIdx]}"`)
 }
 
 /** Read the hermes service's image ref from a compose string, or null if it's a build: block (local). */
