@@ -177,13 +177,15 @@ function KeysPageContent() {
 
   async function deleteKey(keyId: string) {
     setSaving(true)
+    const key = keys?.find((k) => k.id === keyId)
+    const affected = key?.assignedTo.length ?? 0
     try {
       const res = await fetch(`/api/keys/${keyId}`, { method: 'DELETE' })
       if (!res.ok) {
         toast.error('Failed to delete key')
         return
       }
-      toast.success('Key deleted')
+      toast.success(`${key?.provider ?? 'Key'} key deleted everywhere — secret destroyed, stripped from ${affected} agent${affected === 1 ? '' : 's'}`)
       setConfirmDeleteId(null)
       refetch()
     } catch {
@@ -443,11 +445,19 @@ function KeysPageContent() {
                           Edit
                         </Button>
                         {confirmDeleteId === k.id ? (
-                          <Button size="sm" variant="destructive" onClick={() => deleteKey(k.id)} disabled={saving}>
-                            {saving ? '...' : 'Confirm?'}
-                          </Button>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-[var(--destructive)] whitespace-nowrap">
+                              Destroys the secret, strips {k.assignedTo.length} agent{k.assignedTo.length === 1 ? '' : 's'}. Irreversible.
+                            </span>
+                            <Button size="sm" variant="destructive" onClick={() => deleteKey(k.id)} disabled={saving}>
+                              {saving ? '...' : 'Delete everywhere'}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(null)} disabled={saving}>
+                              Cancel
+                            </Button>
+                          </div>
                         ) : (
-                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmDeleteId(k.id)}>
+                          <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmDeleteId(k.id)} title="Destroy this key everywhere — it will be stripped from every assigned agent">
                             Delete
                           </Button>
                         )}

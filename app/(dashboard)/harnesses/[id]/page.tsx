@@ -317,42 +317,6 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
     }
   }
 
-  async function unassignKey(keyId: string) {
-    if (!harness) return
-    const key = keys?.find((k) => k.id === keyId)
-    if (!key) return
-    setKeySaving(true)
-    try {
-      const res = await fetch(`/api/keys/${keyId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          assignedTo: key.assignedTo.filter((h) => h !== harness.id),
-        }),
-      })
-      if (!res.ok) {
-        toast.error('Failed to unassign key')
-        return
-      }
-      toast.success(`${key.provider} key removed`)
-      // Recreate (not 'quick') so the revoked key is actually pulled from the
-      // running process — a plain restart reloads no env_file, leaving the
-      // revoked credential live despite the "removed" toast (D3).
-      await fetch(`/api/harnesses/${id}/restart`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'recreate' }),
-      })
-      toast.success('Restarting agent to apply...')
-      refetch()
-      window.location.reload()
-    } catch {
-      toast.error('Failed to unassign key')
-    } finally {
-      setKeySaving(false)
-    }
-  }
-
   useEffect(() => {
     fetch(`/api/harnesses/${id}/settings`)
       .then(res => res.json())
@@ -1428,7 +1392,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
 
             {/* Current keys list */}
             {harnessKeys.map((k) => (
-              <HarnessKeyRow key={k.id} keyData={k} harnessId={harness.id} onUpdate={() => { refetch(); refetchKeys() }} />
+              <HarnessKeyRow key={k.id} keyData={k} harnessId={harness.id} harnessName={harness.name} onUpdate={() => { refetch(); refetchKeys() }} />
             ))}
             {harnessKeys.length === 0 && !showAddKey && !showAssignKey && (
               <p className="text-sm text-muted-foreground">No keys assigned.</p>
@@ -1761,7 +1725,7 @@ function ModelCascadeEditor({
   )
 }
 
-function HarnessKeyRow({ keyData, harnessId, onUpdate }: { keyData: Key; harnessId: string; onUpdate: () => void }) {
+function HarnessKeyRow({ keyData, harnessId, harnessName, onUpdate }: { keyData: Key; harnessId: string; harnessName: string; onUpdate: () => void }) {
   const [editing, setEditing] = useState(false)
   const [budget, setBudget] = useState(keyData.budgetUsd != null ? String(keyData.budgetUsd) : '')
   const [name, setName] = useState(keyData.name ?? '')
@@ -1803,7 +1767,15 @@ function HarnessKeyRow({ keyData, harnessId, onUpdate }: { keyData: Key; harness
         body: JSON.stringify({ assignedTo: newAssigned }),
       })
       if (!res.ok) throw new Error('Failed')
-      toast.success('Key unassigned')
+      // Never say "removed" for the non-destructive path — name the scope so the
+      // operator knows the key survived (issue #191).
+      const remaining = newAssigned.length
+      toast.success(
+        `${keyData.provider} key unassigned from ${harnessName}` +
+        (remaining > 0
+          ? ` — still assigned to ${remaining} other agent${remaining === 1 ? '' : 's'}`
+          : ' — key kept, now assigned nowhere')
+      )
       onUpdate()
     } catch { toast.error('Failed to unassign key') }
     finally { setSaving(false) }
@@ -1811,10 +1783,11 @@ function HarnessKeyRow({ keyData, harnessId, onUpdate }: { keyData: Key; harness
 
   async function deleteKey() {
     setSaving(true)
+    const affected = keyData.assignedTo.length
     try {
       const res = await fetch(`/api/keys/${keyData.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed')
-      toast.success('Key deleted globally')
+      toast.success(`${keyData.provider} key deleted everywhere — secret destroyed, stripped from ${affected} agent${affected === 1 ? '' : 's'}`)
       onUpdate()
     } catch { toast.error('Failed to delete key') }
     finally { setSaving(false); setConfirmDelete(false) }
@@ -1876,31 +1849,48 @@ function HarnessKeyRow({ keyData, harnessId, onUpdate }: { keyData: Key; harness
       <div>
         <p className="font-medium text-sm">{keyData.provider}{keyData.name ? <span className="text-muted-foreground font-normal"> — {keyData.name}</span> : null}</p>
         <p className="text-xs font-mono text-muted-foreground">{keyData.maskedValue}</p>
+        {keyData.assignedTo.length > 1 && (
+          <p className="text-xs text-[var(--warning)]">
+            Shared with {keyData.assignedTo.length - 1} other agent{keyData.assignedTo.length === 2 ? '' : 's'}
+          </p>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {keyData.budgetUsd != null && (
           <span className="text-xs text-muted-foreground">${keyData.budgetUsd}/mo</span>
         )}
         <Button size="xs" variant="ghost" onClick={() => setEditing(true)}>Edit</Button>
-        <button
+        {/* Unassign (safe, per-agent) and Delete (destructive, global) must be
+            visually distinct — a bare X here read as "delete" (issue #191). */}
+        <Button
+          size="xs"
+          variant="ghost"
           onClick={() => unassign()}
-          className="text-muted-foreground hover:text-[var(--warning)] transition-colors"
-          title="Unassign from this harness"
+          title="Detach from this agent only — the key survives and stays on any other agents"
           disabled={saving}
         >
-          <X className="h-4 w-4" />
-        </button>
+          Unassign
+        </Button>
         {!confirmDelete ? (
           <button
             onClick={() => setConfirmDelete(true)}
             className="text-xs text-muted-foreground hover:text-[var(--destructive)] transition-colors"
+            title="Destroy this key everywhere — not just this agent"
           >
             Delete
           </button>
         ) : (
-          <Button size="xs" variant="destructive" onClick={deleteKey} disabled={saving}>
-            Confirm?
-          </Button>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="text-xs text-[var(--destructive)]">
+              Destroys the secret, strips it from {keyData.assignedTo.length} agent{keyData.assignedTo.length === 1 ? '' : 's'}. Cannot be undone.
+            </span>
+            <Button size="xs" variant="destructive" onClick={deleteKey} disabled={saving}>
+              Delete everywhere
+            </Button>
+            <Button size="xs" variant="ghost" onClick={() => setConfirmDelete(false)} disabled={saving}>
+              Cancel
+            </Button>
+          </span>
         )}
       </div>
     </div>
