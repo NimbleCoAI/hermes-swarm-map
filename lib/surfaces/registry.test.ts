@@ -177,14 +177,16 @@ describe('registry structural invariants', () => {
       ].filter(Boolean) as string[]
       for (const v of all) expect(ALL_SURFACE_VARS.has(v)).toBe(true)
     }
-    // 35 distinct vars across five surfaces: the inventory's union of 34
-    // (which predated DISCORD_CHANNEL_SCOPED_ACCESS) plus that flag. NB the
-    // first cut of this test also said 34 — but by coincidence (it was missing
+    // 36 distinct vars across five surfaces: the inventory's union of 34
+    // (which predated DISCORD_CHANNEL_SCOPED_ACCESS) plus that flag, plus
+    // DISCORD_BOTS_REQUIRE_INLINE_MENTION (org default 2026-08-05). NB the
+    // first cut of this test said 34 — but by coincidence (it was missing
     // SIGNAL_PROFILE_NAME while adding the CSA flag). Count assertions must be
     // paired with membership assertions to mean anything:
     expect(ALL_SURFACE_VARS.has('SIGNAL_PROFILE_NAME')).toBe(true)
     expect(ALL_SURFACE_VARS.has('DISCORD_CHANNEL_SCOPED_ACCESS')).toBe(true)
-    expect(ALL_SURFACE_VARS.size).toBe(35)
+    expect(ALL_SURFACE_VARS.has('DISCORD_BOTS_REQUIRE_INLINE_MENTION')).toBe(true)
+    expect(ALL_SURFACE_VARS.size).toBe(36)
   })
 
   it('isSurfaceSlug / surfaceSpec agree with the SURFACES keys', () => {

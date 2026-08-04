@@ -64,6 +64,10 @@ describe('generateEnvContent', () => {
     // Explicit: this check runs BEFORE the human allowlist and skips it entirely
     // when it permits a bot, so it must not be left to an implicit default.
     expect(env).toMatch(/^DISCORD_ALLOW_BOTS=none$/m)
+    // Org policy (2026-08-05): bot senders must carry a literal inline
+    // @mention — a reply-ping alone must not trigger the agent. Inert while
+    // ALLOW_BOTS=none, but opening bot access later inherits the strict posture.
+    expect(env).toMatch(/^DISCORD_BOTS_REQUIRE_INLINE_MENTION=true$/m)
   })
 
   it('seeds channel-scoped access on (inert until channels are approved)', () => {

@@ -6,7 +6,7 @@
  */
 
 import { POLICY_VARS as DERIVED_POLICY_VARS, CONNECT_ENV_MAP } from '@/lib/surfaces/derive'
-import { isSurfaceSlug } from '@/lib/surfaces/registry'
+import { isSurfaceSlug, SURFACES } from '@/lib/surfaces/registry'
 
 /**
  * Build env vars for a surface connect operation.
@@ -82,21 +82,33 @@ export function ensurePolicyDefaults(
   content: string,
   platform: string
 ): string {
-  const policyKeys = POLICY_VARS[platform]
-  if (!policyKeys) return content
+  const basePolicyKeys = POLICY_VARS[platform]
+  if (!basePolicyKeys) return content
+
+  // Discord also seeds the inline-mention bot gate (org default 2026-08-05):
+  // bot senders must carry a literal inline @mention — a reply-ping alone does
+  // not trigger the agent. Seeded on BOTH creation paths (deploy template and
+  // here) so they cannot drift into opposite postures (the D1 lesson below).
+  const policyKeys = platform === 'discord'
+    ? [...basePolicyKeys, SURFACES.discord.behavior.botsRequireInlineMention!]
+    : basePolicyKeys
+
+  // Non-empty seed values. Everything else defaults to the secure empty string
+  // ("no one allowed") — EXCEPT Discord's channel allowlist, where the adapter
+  // reads empty as "no channel gate at all". Seed the '0' deny sentinel instead
+  // (no snowflake can be '0'), matching the deploy template. Before this, the
+  // connect path and the deploy path seeded OPPOSITE Discord postures (drift
+  // D1): a Discord surface connected to an existing agent was born fail-open.
+  const SEED_VALUES: Record<string, string> = {
+    DISCORD_ALLOWED_CHANNELS: '0',
+    DISCORD_BOTS_REQUIRE_INLINE_MENTION: 'true',
+  }
 
   let result = content
   for (const key of policyKeys) {
     const regex = new RegExp(`^${key}=`, 'm')
     if (!regex.test(result)) {
-      // Secure default: empty string = no one allowed — EXCEPT Discord's
-      // channel allowlist, where the adapter reads empty as "no channel gate
-      // at all". Seed the '0' deny sentinel instead (no snowflake can be '0'),
-      // matching the deploy template. Before this, the connect path and the
-      // deploy path seeded OPPOSITE Discord postures (drift D1): a Discord
-      // surface connected to an existing agent was born fail-open.
-      const value = key === 'DISCORD_ALLOWED_CHANNELS' ? '0' : ''
-      result = result.trimEnd() + `\n${key}=${value}\n`
+      result = result.trimEnd() + `\n${key}=${SEED_VALUES[key] ?? ''}\n`
     }
   }
 
