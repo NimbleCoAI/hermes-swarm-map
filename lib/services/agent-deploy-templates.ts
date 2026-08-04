@@ -131,6 +131,11 @@ export function generateEnvContent(params: {
     // Explicit: this check runs BEFORE the user allowlist and skips it entirely
     // when it permits a bot, so it must not be left to an implicit default.
     lines.push(`DISCORD_ALLOW_BOTS=none`)
+    // Org policy (2026-08-05): even when ALLOW_BOTS is opened to 'mentions',
+    // a bot sender must carry a LITERAL inline @mention — a reply-ping alone
+    // does not trigger the agent. Inert while ALLOW_BOTS=none; seeded here so
+    // opening bot access later inherits the strict posture by default.
+    lines.push(`DISCORD_BOTS_REQUIRE_INLINE_MENTION=true`)
   } else {
     lines.push(`# DISCORD_BOT_TOKEN=`)
     lines.push(`# DISCORD_ALLOWED_USERS=`)

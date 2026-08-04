@@ -65,6 +65,7 @@ export type SurfaceSpec = {
     requireMention: string // every surface has one
     observeUnmentioned?: string // signal / mattermost / telegram
     allowBots?: string // Discord only — tri-state, evaluated before the allowlist
+    botsRequireInlineMention?: string // Discord only — bot senders must carry a literal inline @mention (reply-pings don't count)
     groupInvitePolicy?: string // signal / slack / telegram — who may add the bot
     channelScopedAccess?: string // Discord only — approved-channel admission
     profileName?: string // Signal only — display-name preference, re-applied on connect
@@ -163,6 +164,7 @@ export const SURFACES: Record<SurfaceSlug, SurfaceSpec> = {
     behavior: {
       requireMention: 'DISCORD_REQUIRE_MENTION',
       allowBots: 'DISCORD_ALLOW_BOTS',
+      botsRequireInlineMention: 'DISCORD_BOTS_REQUIRE_INLINE_MENTION',
       channelScopedAccess: 'DISCORD_CHANNEL_SCOPED_ACCESS',
     },
     identity: {

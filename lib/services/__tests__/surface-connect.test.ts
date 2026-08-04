@@ -252,6 +252,25 @@ describe('ensurePolicyDefaults — Discord deny sentinel (drift D1)', () => {
     const out = ensurePolicyDefaults('DISCORD_ALLOWED_CHANNELS=555\n', 'discord')
     expect(out).toMatch(/^DISCORD_ALLOWED_CHANNELS=555$/m)
   })
+
+  it('seeds DISCORD_BOTS_REQUIRE_INLINE_MENTION=true (org default, parity with deploy template)', async () => {
+    const { ensurePolicyDefaults } = await import('@/lib/env-helpers')
+    const out = ensurePolicyDefaults('DISCORD_BOT_TOKEN=tok\n', 'discord')
+    expect(out).toMatch(/^DISCORD_BOTS_REQUIRE_INLINE_MENTION=true$/m)
+  })
+
+  it('never overwrites an existing DISCORD_BOTS_REQUIRE_INLINE_MENTION value', async () => {
+    const { ensurePolicyDefaults } = await import('@/lib/env-helpers')
+    const out = ensurePolicyDefaults('DISCORD_BOTS_REQUIRE_INLINE_MENTION=false\n', 'discord')
+    expect(out).toMatch(/^DISCORD_BOTS_REQUIRE_INLINE_MENTION=false$/m)
+    expect(out).not.toMatch(/^DISCORD_BOTS_REQUIRE_INLINE_MENTION=true$/m)
+  })
+
+  it('does not seed the inline-mention gate on non-discord platforms', async () => {
+    const { ensurePolicyDefaults } = await import('@/lib/env-helpers')
+    const out = ensurePolicyDefaults('SIGNAL_ACCOUNT=+1555\n', 'signal')
+    expect(out).not.toContain('DISCORD_BOTS_REQUIRE_INLINE_MENTION')
+  })
 })
 
 describe('buildConnectEnvVars parity with the replaced switch', () => {
