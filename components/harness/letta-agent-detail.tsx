@@ -279,7 +279,7 @@ function MessageViewer({ agentId, name }: { agentId: string; name: string }) {
           onChange={(e) => setText(e.target.value)}
           placeholder={`Message ${name}…`}
           rows={2}
-          className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm resize-y"
+          className="flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-base md:text-sm resize-y"
         />
         <Button size="sm" onClick={send} disabled={sending || !text.trim()}>
           {sending ? 'Sending…' : 'Send'}

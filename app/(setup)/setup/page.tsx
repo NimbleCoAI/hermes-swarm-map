@@ -106,7 +106,7 @@ export default function SetupWelcomePage() {
             <input
               type="text"
               placeholder="Or enter a path manually..."
-              className="w-full px-3 py-2 border border-[var(--border)] rounded-md bg-[var(--bg)] text-sm font-mono"
+              className="w-full px-3 py-2 border border-[var(--border)] rounded-md bg-[var(--bg)] text-base md:text-sm font-mono"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   const val = (e.target as HTMLInputElement).value.trim()

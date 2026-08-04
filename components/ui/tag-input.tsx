@@ -60,7 +60,7 @@ export function TagInput({ values, onChange, placeholder = 'Add...', validate, r
         onKeyDown={handleKeyDown}
         onBlur={addTag}
         placeholder={values.length === 0 ? placeholder : ''}
-        className="flex-1 min-w-[120px] bg-transparent text-sm outline-none"
+        className="flex-1 min-w-[120px] bg-transparent text-base md:text-sm outline-none"
       />
     </div>
   )
