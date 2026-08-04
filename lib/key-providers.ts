@@ -16,6 +16,11 @@
 // PROVIDER_TO_VAR entry for it, so it resolves via the explicit `envVar` hint,
 // else the key's name, else the useless CUSTOM_API_KEY fallback. Any form that
 // offers `custom` must therefore also offer the env-var field.
+//
+// `bluesky` is a credential PAIR: the app password is the secret (→
+// BLUESKY_APP_PASSWORD) and the account handle is non-secret config (→
+// BLUESKY_IDENTIFIER, from the key's `identifier` field). Any form that offers
+// `bluesky` must therefore also offer the identifier field.
 export const KEY_PROVIDERS = [
   // Model / inference. `openrouter` maps to OPENROUTER_API_KEY on the write path
   // (see KeysService.resolveEnvVar) — the fleet's GLM-5.2 chat primary AND its
@@ -24,7 +29,7 @@ export const KEY_PROVIDERS = [
   'anthropic', 'openai', 'google', 'google-cloud', 'openrouter', 'zai',
   'aws', 'aws-bedrock',
   // Platforms / surfaces
-  'github', 'notion', 'telegram', 'signal', 'mattermost',
+  'github', 'notion', 'telegram', 'signal', 'mattermost', 'bluesky',
   // Service APIs
   'brave', 'helius', 'coingecko', 'dehashed', 'opencorporates',
   'capsolver', 'open-measures', 'pexels',

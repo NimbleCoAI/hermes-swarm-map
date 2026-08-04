@@ -75,6 +75,10 @@ export type Key = {
   // Explicit target .env var. Custom-provider keys use this (or fall back to a
   // name-derived var) since they have no fixed provider→var mapping.
   envVar?: string
+  // Non-secret companion value for providers whose credential is a pair.
+  // Bluesky: the account handle/DID, emitted as BLUESKY_IDENTIFIER alongside
+  // the app password (the key's actual secret value → BLUESKY_APP_PASSWORD).
+  identifier?: string
   maskedValue: string
   assignedTo: string[]
   budgetUsd?: number
@@ -86,6 +90,7 @@ export type KeyInput = {
   value: string
   name?: string
   envVar?: string
+  identifier?: string
   budgetUsd?: number
 }
 

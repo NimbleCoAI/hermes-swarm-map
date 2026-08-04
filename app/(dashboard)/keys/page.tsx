@@ -36,6 +36,7 @@ function KeysPageContent() {
   const [newBudget, setNewBudget] = useState('')
   const [newName, setNewName] = useState('')
   const [newEnvVar, setNewEnvVar] = useState('')
+  const [newIdentifier, setNewIdentifier] = useState('')
   const [newAssignedTo, setNewAssignedTo] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -64,6 +65,7 @@ function KeysPageContent() {
     setNewProvider(prefill.provider)
     setNewAssignedTo(prefill.assignTo)
     if (prefill.name) setNewName(prefill.name)
+    if (prefill.identifier) setNewIdentifier(prefill.identifier)
   }, [searchParams, harnesses])
 
   function harnessNames(ids: string[]): string {
@@ -90,6 +92,7 @@ function KeysPageContent() {
     setNewBudget('')
     setNewName('')
     setNewEnvVar('')
+    setNewIdentifier('')
     setNewAssignedTo([])
   }
 
@@ -105,6 +108,7 @@ function KeysPageContent() {
           value: newValue,
           ...(newName ? { name: newName } : {}),
           ...(newEnvVar && newProvider === 'custom' ? { envVar: newEnvVar } : {}),
+          ...(newIdentifier && newProvider === 'bluesky' ? { identifier: newIdentifier.trim() } : {}),
           ...(newBudget ? { budgetUsd: parseFloat(newBudget) } : {}),
           ...(newAssignedTo.length ? { assignedTo: newAssignedTo } : {}),
         }),
@@ -247,6 +251,7 @@ function KeysPageContent() {
                 onChange={(e) => {
                   setNewProvider(e.target.value)
                   if (e.target.value !== 'custom') setNewEnvVar('')
+                  if (e.target.value !== 'bluesky') setNewIdentifier('')
                 }}
                 className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
               >
@@ -266,6 +271,18 @@ function KeysPageContent() {
                 className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm"
               />
             </div>
+            {newProvider === 'bluesky' && (
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Account handle</label>
+                <input
+                  type="text"
+                  value={newIdentifier}
+                  onChange={(e) => setNewIdentifier(e.target.value)}
+                  placeholder="e.g. nimbleco.ai — written as BLUESKY_IDENTIFIER"
+                  className="w-full rounded-md border border-[var(--border)] bg-background px-3 py-1.5 text-sm font-mono"
+                />
+              </div>
+            )}
             {newProvider === 'custom' && (
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Env var (optional)</label>
@@ -318,7 +335,7 @@ function KeysPageContent() {
             </div>
           )}
           <div className="flex gap-2">
-            <Button size="sm" onClick={addKey} disabled={saving || !newProvider || !newValue}>
+            <Button size="sm" onClick={addKey} disabled={saving || !newProvider || !newValue || (newProvider === 'bluesky' && !newIdentifier.trim())}>
               {saving ? 'Adding...' : 'Add Key'}
             </Button>
             <Button size="sm" variant="ghost" onClick={resetAddForm}>Cancel</Button>
@@ -422,6 +439,7 @@ function KeysPageContent() {
                   >
                     <td className="px-4 py-3 font-medium">
                       {k.provider}{k.name ? <span className="text-muted-foreground font-normal"> — {k.name}</span> : null}
+                      {k.identifier ? <span className="text-muted-foreground font-normal font-mono text-xs"> ({k.identifier})</span> : null}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{k.maskedValue}</td>
                     <td className="px-4 py-3 text-muted-foreground text-xs max-w-[200px] truncate">

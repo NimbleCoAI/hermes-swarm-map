@@ -15,6 +15,9 @@ export interface KeyRequestPrefill {
   provider: string
   assignTo: string[]
   name: string | undefined
+  // Non-secret companion value (Bluesky account handle) — still not secret
+  // material, so it may ride in the URL like everything else here.
+  identifier: string | undefined
 }
 
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]*$/
@@ -35,6 +38,7 @@ export function parseKeyRequestParams(
   }
 
   const name = searchParams.get('name')?.trim() || undefined
+  const identifier = searchParams.get('identifier')?.trim() || undefined
 
-  return { provider, assignTo, name }
+  return { provider, assignTo, name, identifier }
 }

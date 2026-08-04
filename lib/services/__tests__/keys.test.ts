@@ -342,3 +342,77 @@ describe('discovered keys persist when unassigned (no self-delete)', () => {
     expect(keys.list().find((k) => k.id === id)!.assignedTo).toEqual(['h_osint'])
   })
 })
+
+// Bluesky is a credential PAIR: the app password is the key's secret value
+// (BLUESKY_APP_PASSWORD) and the account handle rides in the key's
+// `identifier` metadata, emitted as BLUESKY_IDENTIFIER at write time.
+describe('bluesky credential pair (writeKeyToEnv/removeKeyFromEnv)', () => {
+  let tmpHome: string
+  let prevHome: string | undefined
+  let keys: KeysService
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-bsky-home-'))
+    prevHome = process.env.HOME
+    process.env.HOME = tmpHome
+    const storage = new Storage(fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-bsky-store-')))
+    keys = new KeysService(storage, new AuditService(storage))
+  })
+  afterEach(() => {
+    if (prevHome === undefined) delete process.env.HOME
+    else process.env.HOME = prevHome
+    fs.rmSync(tmpHome, { recursive: true, force: true })
+  })
+
+  const envFor = (name: string) => path.join(tmpHome, `.hermes-${name}`, '.env')
+  const read = (name: string) => fs.readFileSync(envFor(name), 'utf-8')
+
+  const PASS = 'abcd-efgh-ijkl-mnop'
+
+  it('writes BOTH vars when the identifier hint is present', () => {
+    keys.writeKeyToEnv('iris', 'bluesky', PASS, { identifier: 'nimbleco.ai' })
+    const env = read('iris')
+    expect(env).toMatch(new RegExp(`^BLUESKY_APP_PASSWORD=${PASS}$`, 'm'))
+    expect(env).toMatch(/^BLUESKY_IDENTIFIER=nimbleco\.ai$/m)
+  })
+
+  it('writes only the password without an identifier hint (never half-clears)', () => {
+    fs.mkdirSync(path.join(tmpHome, '.hermes-iris'), { recursive: true })
+    fs.writeFileSync(envFor('iris'), 'BLUESKY_IDENTIFIER=hand.written\n')
+    keys.writeKeyToEnv('iris', 'bluesky', PASS)
+    const env = read('iris')
+    expect(env).toMatch(/^BLUESKY_APP_PASSWORD=/m)
+    // A pre-existing hand-written identifier survives an identifier-less write.
+    expect(env).toMatch(/^BLUESKY_IDENTIFIER=hand\.written$/m)
+  })
+
+  it('updates a stale identifier on rewrite', () => {
+    keys.writeKeyToEnv('iris', 'bluesky', PASS, { identifier: 'old.handle' })
+    keys.writeKeyToEnv('iris', 'bluesky', PASS, { identifier: 'new.handle' })
+    const env = read('iris')
+    expect(env).toMatch(/^BLUESKY_IDENTIFIER=new\.handle$/m)
+    expect(env).not.toMatch(/old\.handle/)
+  })
+
+  it('removeKeyFromEnv clears both halves of the pair', () => {
+    keys.writeKeyToEnv('iris', 'bluesky', PASS, { identifier: 'nimbleco.ai' })
+    keys.removeKeyFromEnv('iris', 'bluesky')
+    const env = read('iris')
+    expect(env).not.toMatch(/BLUESKY_APP_PASSWORD/)
+    expect(env).not.toMatch(/BLUESKY_IDENTIFIER/)
+  })
+
+  it('preserves unrelated env vars when writing/removing the pair', () => {
+    fs.mkdirSync(path.join(tmpHome, '.hermes-iris'), { recursive: true })
+    fs.writeFileSync(envFor('iris'), 'GITHUB_TOKEN=ghp_KEEP\n')
+    keys.writeKeyToEnv('iris', 'bluesky', PASS, { identifier: 'nimbleco.ai' })
+    keys.removeKeyFromEnv('iris', 'bluesky')
+    expect(read('iris')).toMatch(/^GITHUB_TOKEN=ghp_KEEP$/m)
+  })
+
+  it('add() keeps the identifier on the stored key', () => {
+    const key = keys.add({ provider: 'bluesky', value: PASS, identifier: 'nimbleco.ai' })
+    expect(key.identifier).toBe('nimbleco.ai')
+    expect(keys.list([]).find((k) => k.id === key.id)!.identifier).toBe('nimbleco.ai')
+  })
+})
