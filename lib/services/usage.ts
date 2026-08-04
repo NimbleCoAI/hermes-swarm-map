@@ -1,8 +1,8 @@
 import path from 'path'
 import os from 'os'
-import fs from 'fs'
 import Database from 'better-sqlite3'
 import { lookupPricing, computeCost, type PricingEntry } from '@/lib/pricing'
+import { resolveStateDbPath } from './db-path'
 
 export type SessionUsage = {
   sessionId: string
@@ -103,15 +103,31 @@ function computeSessionCost(
 }
 
 /**
- * Query a single agent's state.db for cost today.
- * Returns 0 if the db doesn't exist or has no data.
- * Used by HarnessService.list() to populate costToday cheaply.
+ * Resolve the readable state.db path for a harness, or a sentinel:
+ *   - string  → open this (live DB for unmigrated, snapshot for migrated)
+ *   - 'none'  → fresh harness, no DB — legitimately zero usage
+ *   - 'pending' → migrated but no snapshot exported yet — usage UNKNOWN;
+ *     callers must return null/unknown, NEVER a silent zero (a zero here
+ *     turns budget enforcement off with no signal).
  */
-export function getCostToday(harnessId: string): number {
-  const dataDir = agentDataDir(harnessId)
-  const dbPath = path.join(dataDir, 'state.db')
+function readableStateDb(harnessId: string): string | 'none' | 'pending' {
+  const r = resolveStateDbPath(agentDataDir(harnessId))
+  if (r.kind === 'none') return 'none'
+  if (r.kind === 'migrated-pending') return 'pending'
+  return r.path
+}
 
-  if (!fs.existsSync(dbPath)) return 0
+/**
+ * Query a single agent's state.db for cost today.
+ * Returns 0 if the db doesn't exist or has no data; null when the harness is
+ * migrated but no snapshot has been exported yet (cost unknown — not zero).
+ * Used by HarnessService.list() to populate costToday cheaply.
+ * Migrated harnesses read the snapshot export: at most ~5 min stale.
+ */
+export function getCostToday(harnessId: string): number | null {
+  const dbPath = readableStateDb(harnessId)
+  if (dbPath === 'none') return 0
+  if (dbPath === 'pending') return null
 
   try {
     const db = new Database(dbPath, { readonly: true, fileMustExist: true })
@@ -147,14 +163,17 @@ export function getCostToday(harnessId: string): number {
 
 /**
  * Query a single agent's state.db for cost this month.
- * Returns 0 if the db doesn't exist or has no data.
- * Used by the policy budget-check endpoint.
+ * Returns 0 if the db doesn't exist or has no data; null when the harness is
+ * migrated but no snapshot has been exported yet (cost unknown — not zero).
+ * Used by the policy budget-check endpoint. Freshness note: for migrated
+ * harnesses this reads the snapshot export (≤ ~5 min stale) — against
+ * month-scale budgets that lag is noise, and strictly better than the
+ * pre-PR2 failure mode (dangling symlink → costMonth=0 → enforcement OFF).
  */
-export function getCostMonth(harnessId: string): number {
-  const dataDir = agentDataDir(harnessId)
-  const dbPath = path.join(dataDir, 'state.db')
-
-  if (!fs.existsSync(dbPath)) return 0
+export function getCostMonth(harnessId: string): number | null {
+  const dbPath = readableStateDb(harnessId)
+  if (dbPath === 'none') return 0
+  if (dbPath === 'pending') return null
 
   try {
     const db = new Database(dbPath, { readonly: true, fileMustExist: true })
@@ -190,14 +209,14 @@ export function getCostMonth(harnessId: string): number {
 
 /**
  * Query a single agent's state.db for today's session count.
- * Returns 0 if the db doesn't exist or has no data.
+ * Returns 0 if the db doesn't exist or has no data; null when the harness is
+ * migrated but no snapshot has been exported yet (count unknown — not zero).
  * Used by HarnessService.list() to populate invocations cheaply.
  */
-export function getInvocationsToday(harnessId: string): number {
-  const dataDir = agentDataDir(harnessId)
-  const dbPath = path.join(dataDir, 'state.db')
-
-  if (!fs.existsSync(dbPath)) return 0
+export function getInvocationsToday(harnessId: string): number | null {
+  const dbPath = readableStateDb(harnessId)
+  if (dbPath === 'none') return 0
+  if (dbPath === 'pending') return null
 
   try {
     const db = new Database(dbPath, { readonly: true, fileMustExist: true })
@@ -220,12 +239,12 @@ export function getInvocationsToday(harnessId: string): number {
 
 /**
  * Full usage summary for a harness — used by the /usage API endpoint.
+ * Null when there is no DB, or when the harness is migrated with no snapshot
+ * exported yet. Migrated harnesses read the snapshot export (≤ ~5 min stale).
  */
 export function getUsageSummary(harnessId: string): UsageSummary | null {
-  const dataDir = agentDataDir(harnessId)
-  const dbPath = path.join(dataDir, 'state.db')
-
-  if (!fs.existsSync(dbPath)) return null
+  const dbPath = readableStateDb(harnessId)
+  if (dbPath === 'none' || dbPath === 'pending') return null
 
   try {
     const db = new Database(dbPath, { readonly: true, fileMustExist: true })

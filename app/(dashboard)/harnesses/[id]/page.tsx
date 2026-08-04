@@ -734,7 +734,7 @@ function HermesHarnessDetail({ params }: { params: Promise<{ id: string }> }) {
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
               <h3 className="font-medium text-sm">Usage</h3>
               <Row label="Sessions today" value={usageData?.sessionCountToday ?? 0} />
-              <Row label="Cost today" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costToday ?? harness.costToday).toFixed(2)}`} />
+              <Row label="Cost today" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costToday ?? harness.costToday ?? 0).toFixed(2)}`} />
               <Row label="Cost this week" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costWeek ?? 0).toFixed(2)}`} />
               <Row label="Cost this month" value={`${usageData?.costStatus === 'estimated' ? '~' : ''}$${(usageData?.costMonth ?? 0).toFixed(2)}`} />
               <Row label="CPU" value={`${harness.cpu}%`} />

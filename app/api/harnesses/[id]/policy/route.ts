@@ -105,6 +105,21 @@ function handleBudgetCheck(harnessId: string) {
     return NextResponse.json({ budget: null, exceeded: false })
   }
 
+  // null = cost UNKNOWN (harness migrated to the named DB volume, snapshot not
+  // yet exported). Fail open but say so explicitly — the pre-PR2 alternative
+  // was a silent costMonth=0 that turned enforcement off with no signal.
+  // Once the snapshot exists, costMonth is ≤ ~5 min stale: negligible against
+  // month-scale budgets.
+  if (costMonth === null) {
+    return NextResponse.json({
+      budget: totalBudget,
+      costMonth: null,
+      costUnknown: true,
+      exceeded: false,
+      remaining: totalBudget,
+    })
+  }
+
   return NextResponse.json({
     budget: totalBudget,
     costMonth,

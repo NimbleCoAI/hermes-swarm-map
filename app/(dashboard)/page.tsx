@@ -51,9 +51,11 @@ export default function DashboardPage() {
   const { data: audit, loading: aLoading } = useApi<AuditEntry[]>('/api/audit', 5000)
 
   const running = harnesses?.filter((h) => h.status === 'running').length ?? 0
-  const invocations = harnesses?.reduce((s, h) => s + h.invocations, 0) ?? 0
+  // null cost/invocations = unknown (migrated harness awaiting its first
+  // snapshot export) — sum the known values rather than treating unknown as 0.
+  const invocations = harnesses?.reduce((s, h) => s + (h.invocations ?? 0), 0) ?? 0
   const errors = harnesses?.reduce((s, h) => s + (h.health?.errors ?? 0), 0) ?? 0
-  const costToday = harnesses?.reduce((s, h) => s + h.costToday, 0) ?? 0
+  const costToday = harnesses?.reduce((s, h) => s + (h.costToday ?? 0), 0) ?? 0
   const recentAudit = audit?.slice(-10).reverse() ?? []
 
   return (

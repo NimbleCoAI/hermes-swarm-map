@@ -217,8 +217,9 @@ export default function HarnessesPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{h.models?.[0] ?? '—'}</td>
                   {/* Letta agents have no per-agent container stats (design §4b) */}
-                  <td className="px-4 py-3 text-right">{isLetta(h) ? '—' : `$${(h.costToday ?? 0).toFixed(2)}`}</td>
-                  <td className="px-4 py-3 text-right">{isLetta(h) ? '—' : (h.invocations ?? 0)}</td>
+                  {/* null cost/invocations = unknown (migrated, snapshot pending) — '—', never $0 */}
+                  <td className="px-4 py-3 text-right">{isLetta(h) || h.costToday == null ? '—' : `$${h.costToday.toFixed(2)}`}</td>
+                  <td className="px-4 py-3 text-right">{isLetta(h) ? '—' : (h.invocations ?? '—')}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       {isLetta(h) ? (
