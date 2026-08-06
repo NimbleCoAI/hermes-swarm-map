@@ -132,6 +132,19 @@ describe('lookupPricing — GLM / Kimi / DeepSeek routing tiers', () => {
     }
   })
 
+  it('resolves deepseek-v4-flash (bare and deepseek/ prefixed) ahead of the legacy wildcard', () => {
+    // openrouter/deepseek/… covers double-prefixed names as recorded by some
+    // gateways — must still resolve the versioned entry (cache-read rate), not
+    // the legacy wildcard.
+    for (const id of ['deepseek-v4-flash', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash-0731', 'openrouter/deepseek/deepseek-v4-flash-0731']) {
+      const p = lookupPricing(id)
+      expect(p, id).not.toBeNull()
+      expect(p!.inputPerMillion).toBe(0.14)
+      expect(p!.outputPerMillion).toBe(0.28)
+      expect(p!.cacheReadPerMillion).toBe(0.0028)
+    }
+  })
+
   it('keeps legacy deepseek models on the old wildcard rates', () => {
     const p = lookupPricing('deepseek-chat')
     expect(p).not.toBeNull()

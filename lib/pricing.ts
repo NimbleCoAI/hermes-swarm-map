@@ -146,9 +146,25 @@ const PRICING_TABLE: Array<{ pattern: string | RegExp; pricing: PricingEntry }> 
     },
   },
   // ── DeepSeek ──────────────────────────────────────────────────────────
-  // DeepSeek V3.2 — the fleet's cheap routing tier ([intelligent-routing-cost]);
-  // $0.23/$0.34 per DeepSeek platform / OpenRouter listings (2026-07-23). Must
-  // sit ABOVE the legacy /^deepseek/ wildcard, which carries stale V3-era rates.
+  // DeepSeek V4 Flash — successor cheap routing tier (D-2026-08-06). DeepSeek
+  // permanent list price $0.14/$0.28, cache-hit $0.0028 (2026-05-22 schedule);
+  // OpenRouter was serving below list (~$0.09/$0.18) as of 2026-08-06 — we
+  // price at list, so spend is over-estimated rather than under-tracked. Must
+  // also sit ABOVE the legacy /^deepseek/ wildcard, which happens to share the
+  // in/out rates but has no cache-read rate — and the fleet runs ~6:1
+  // cache-read:input, so the cache field is the one that matters.
+  {
+    pattern: /^deepseek-v4-flash/,
+    pricing: {
+      inputPerMillion: 0.14,
+      outputPerMillion: 0.28,
+      cacheReadPerMillion: 0.0028,
+    },
+  },
+  // DeepSeek V3.2 — the previous cheap routing tier, still referenced by
+  // legacy cascade entries; $0.23/$0.34 per DeepSeek platform / OpenRouter
+  // listings (2026-07-23). Must also sit ABOVE the legacy /^deepseek/
+  // wildcard, which carries stale V3-era rates.
   {
     pattern: /^deepseek-v3\.2/,
     pricing: {
@@ -253,8 +269,12 @@ export function lookupPricing(modelName: string): PricingEntry | null {
     .replace(/^openai\//, '')
     .replace(/^google\//, '')
     .replace(/^vertex_ai\//, '')
-    .replace(/^deepseek\//, '')
+    // openrouter/ must strip BEFORE deepseek/: a double-prefixed
+    // "openrouter/deepseek/deepseek-*" name must still reach the versioned
+    // deepseek patterns (which carry the cache-read rate), not the legacy
+    // wildcard (which doesn't).
     .replace(/^openrouter\//, '')
+    .replace(/^deepseek\//, '')
     .replace(/^z-ai\//, '')
     .replace(/^zai\//, '')
     .replace(/^moonshotai\//, '')
