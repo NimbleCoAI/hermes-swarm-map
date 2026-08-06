@@ -24,15 +24,20 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from .profiles import build_directive, load_profile  # noqa: F401 (re-export)
+from .profiles import build_directive, load_alias_ids, load_profile  # noqa: F401 (re-export)
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def _env_truthy(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def data_dir() -> str:
+    """The agent's data dir — where Swarm Map drops ``resolved-identities.json``."""
+    return os.getenv("HERMES_DATA_DIR", "/opt/data").strip() or "/opt/data"
 
 
 def memory_dir() -> str:
@@ -41,7 +46,7 @@ def memory_dir() -> str:
     explicit = os.getenv("PERSON_MEMORY_DIR", "").strip()
     if explicit:
         return explicit
-    return os.path.join(os.getenv("HERMES_DATA_DIR", "/opt/data").strip() or "/opt/data", "memories")
+    return os.path.join(data_dir(), "memories")
 
 
 def handle_pre_llm_call(
@@ -54,7 +59,15 @@ def handle_pre_llm_call(
         if not sid:
             return None
         plat = str(platform or "slack").strip() or "slack"
-        profile = load_profile(memory_dir(), plat, sid)
+        mem = memory_dir()
+        profile = load_profile(mem, plat, sid)
+        if not profile:
+            # Same person, different id form (Signal: number vs UUID). Try
+            # every alternate id Swarm Map has resolved for this sender.
+            for alias in load_alias_ids(data_dir(), plat, sid):
+                profile = load_profile(mem, plat, alias)
+                if profile:
+                    break
         if not profile:
             return None
         directive = build_directive(profile)
