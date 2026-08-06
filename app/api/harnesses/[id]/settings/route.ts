@@ -13,7 +13,7 @@ import {
 } from '@/lib/surfaces/derive'
 import { services } from '@/lib/services'
 import { adapterForRuntime } from '@/lib/services/harness'
-import { isDeployBornCompose } from '@/lib/services/harness-compose'
+import { isDeployBornCompose, validateExtraMounts, validateExtraEnv } from '@/lib/services/harness-compose'
 
 function agentDataDir(harnessId: string): string {
   const name = harnessId.replace(/^h_/, '').replace(/_/g, '-')
@@ -369,6 +369,39 @@ export async function PUT(
           currentVersion,
         },
         { status: 409 },
+      )
+    }
+  }
+
+  // Pre-write validation of the agent's persisted extraMounts/extraEnv (#222).
+  //
+  // Those fields are rendered into the compose ~450 lines below, and
+  // renderExtraMounts/renderExtraEnv THROW on a malformed entry. By the time
+  // the render runs, the .env and the resources overlay have already been
+  // written — so a bad mount produced a 500 on top of partial state, AND every
+  // subsequent settings PUT for that agent threw at the same line, leaving the
+  // agent unreconfigurable through the API until someone hand-edited
+  // harnesses.json. Same invariant the #204 guard states further down: refuse
+  // BEFORE writing anything, so the refusal leaves no partial state.
+  //
+  // Unconditional, not gated on "would we regenerate?": a mount config that
+  // cannot render is broken whether or not this particular request happens to
+  // trip the regeneration branch, and 400-with-nothing-written is strictly
+  // better than 500-with-half-written. There is no UI for these fields, so the
+  // message has to name the file an operator must go fix.
+  {
+    const configured = services.harness.get(id)
+    const problem =
+      validateExtraMounts(configured?.extraMounts) ?? validateExtraEnv(configured?.extraEnv)
+    if (problem) {
+      return NextResponse.json(
+        {
+          error:
+            "This agent's saved extra mounts/env cannot be rendered into a compose file, "
+            + 'so no settings can be saved until they are fixed: ' + problem
+            + '. Edit the agent entry in harnesses.json (there is no console field for these yet).',
+        },
+        { status: 400 },
       )
     }
   }
@@ -814,6 +847,11 @@ export async function PUT(
         controlBindHost: settings.controlBindHost,
         memory: effectiveResources?.memory,
         cpus: effectiveResources?.cpus,
+        // Carried through every regeneration. Dropping these here is exactly
+        // the bug extraMounts exists to prevent: the container comes back
+        // healthy with a capability silently missing.
+        extraMounts: harness.extraMounts,
+        extraEnv: harness.extraEnv,
       })
       fs.writeFileSync(harness.composeFile, compose, 'utf-8')
     }

@@ -976,6 +976,34 @@ export class HarnessService {
         ...(overlay.cacheAge !== undefined ? { cacheAge: overlay.cacheAge } : {}),
         ...(overlay.parentId ? { parentId: overlay.parentId } : {}),
         ...(overlay.resources ? { resources: overlay.resources } : {}),
+        // Overlay-only fields that MUST survive the discovered projection.
+        //
+        // This literal — not normalizeStored — is what list()/get() return for
+        // every container Docker finds, i.e. for every agent that is actually
+        // running. normalizeStored is only the fallback for agents with no
+        // container. Anything carried there and forgotten here is silently
+        // absent exactly when it matters most:
+        //
+        //  - extraMounts/extraEnv: the settings route regenerates the compose
+        //    from get(id). Missing here, it regenerates WITHOUT the agent's
+        //    hand-added host mounts — for iris, its approval-gate spool — and
+        //    the container comes back healthy with the capability gone. That
+        //    is the failure these fields exist to prevent (#222).
+        //  - pinnedImageRef/lastKnownDigest: imageStatus() computes
+        //    `updateAvailable` from lastKnownDigest, and you only ever ask for
+        //    the image status of a RUNNING agent. Missing here, the answer is
+        //    permanently "no update available".
+        //  - apiPort: the persisted port reservation.
+        //
+        // Omitted-when-absent, exactly like the fields above, so a harness
+        // with no overlay extras keeps a byte-identical shape.
+        ...(overlay.extraMounts?.length ? { extraMounts: overlay.extraMounts } : {}),
+        ...(overlay.extraEnv && Object.keys(overlay.extraEnv).length
+          ? { extraEnv: overlay.extraEnv }
+          : {}),
+        ...(overlay.apiPort !== undefined ? { apiPort: overlay.apiPort } : {}),
+        ...(overlay.pinnedImageRef ? { pinnedImageRef: overlay.pinnedImageRef } : {}),
+        ...(overlay.lastKnownDigest ? { lastKnownDigest: overlay.lastKnownDigest } : {}),
       }
 
       // Override status based on restart tracker
@@ -1065,6 +1093,11 @@ export class HarnessService {
       ...(o.pinnedImageRef ? { pinnedImageRef: o.pinnedImageRef } : {}),
       ...(o.lastKnownDigest ? { lastKnownDigest: o.lastKnownDigest } : {}),
       ...(o.resources ? { resources: o.resources } : {}),
+      // Carried onto every projected harness so compose regeneration can see
+      // them. Omitted when absent, exactly like the fields above, so a legacy
+      // overlay stays byte-identical.
+      ...(o.extraMounts?.length ? { extraMounts: o.extraMounts } : {}),
+      ...(o.extraEnv && Object.keys(o.extraEnv).length ? { extraEnv: o.extraEnv } : {}),
     }
   }
 
@@ -1521,8 +1554,27 @@ export class HarnessService {
       fs.writeFileSync(composePath, dupAdapter.generateCompose(newName, port, newDataDir, { imageOrBuild: resolveImageOrBuild(settings), defaultImage: settings?.defaultImage }), 'utf-8')
     }
 
+    // A duplicate must NOT inherit the source's host bind mounts, nor the env
+    // vars naming them. Those paths point at the SOURCE agent's directories —
+    // for the iris gate, its approval spool — and the compose generated just
+    // above deliberately carries none of them. Spreading them onto the new
+    // overlay would leave overlay and compose silently divergent, and the next
+    // unrelated settings PUT regenerates FROM the overlay, at which point the
+    // duplicate gets (possibly rw) access to another agent's host paths. There
+    // is no console field for extraMounts, so nothing would ever surface it.
+    //
+    // Stripping is the safe default: a duplicate inheriting another agent's
+    // host mounts is almost never what someone meant. Re-add them deliberately
+    // on the duplicate if they are actually wanted.
+    const {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      extraMounts: _sourceExtraMounts,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      extraEnv: _sourceExtraEnv,
+      ...sourceWithoutHostAccess
+    } = source
     const duplicate: Partial<Harness> = {
-      ...source,
+      ...sourceWithoutHostAccess,
       id: newId,
       name: newName,
       channel: `:${port}`,

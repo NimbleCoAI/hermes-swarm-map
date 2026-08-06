@@ -7,7 +7,201 @@
  * Do NOT set read_only, no-new-privileges, or noexec tmpfs — s6 writes executables to /run.
  */
 
+import os from 'os'
 import { assertNoNewline } from '@/lib/env-helpers'
+import { ALL_SURFACE_VARS } from '@/lib/surfaces/derive'
+import type { ExtraMount } from '@/lib/types'
+
+/**
+ * Expand a leading `~` in a HOST path to this user's home directory.
+ *
+ * `~/.iris/nimbleco/intake` is the spelling every other host path in this
+ * codebase accepts (harness.ts's `expandPath`), and it is what an operator
+ * hand-editing `harnesses.json` will type. Docker Compose does NOT expand `~` —
+ * it would bind-mount a literal relative directory named `~` — so the expansion
+ * has to happen here, before the absolute-path check, and the EXPANDED value is
+ * what gets rendered.
+ *
+ * Only a bare `~` or a leading `~/` expands. `~someone/x` is deliberately left
+ * alone so it fails the absolute-path check loudly instead of turning into a
+ * silently wrong `/Users/mesomeone/x`. Container paths are never expanded — the
+ * home directory here is the HOST's.
+ */
+export function expandHostPath(p: string): string {
+  if (p === '~') return os.homedir()
+  if (p.startsWith('~/')) return os.homedir() + p.slice(1)
+  return p
+}
+
+/**
+ * Environment variable names an agent's `extraEnv` may NOT set.
+ *
+ * Two distinct silent-override hazards, both of which end with the container
+ * running an environment that disagrees with the configuration the console
+ * displays:
+ *
+ *   1. extraEnv is emitted AFTER the generated `environment:` block, and the
+ *      later entry of a duplicate name wins. So `HOME`/`HERMES_HOME` are
+ *      overridable — which re-creates exactly the EACCES "Provider
+ *      authentication failed" failure the pinned values exist to prevent.
+ *   2. A compose `environment:` entry outranks `env_file`. The agent's .env is
+ *      where every surface credential and every admission allowlist lives (who
+ *      may command this agent), so an extraEnv entry naming one of those vars
+ *      silently overrides security policy that the settings page still renders
+ *      from the .env.
+ *
+ * Refused rather than dropped: quietly ignoring a key someone wrote is its own
+ * false audit trail — the config would claim something the container never did.
+ */
+export const RESERVED_EXTRA_ENV_NAMES: ReadonlySet<string> = new Set<string>([
+  // Set by the generated `environment:` block that extraEnv is appended to.
+  'HOME',
+  'HERMES_HOME',
+  // The agent's identity to HSM policy (swarm_map_policy allowlist + admin
+  // lookups) and to lifecycle notifications. Overriding it lets one agent
+  // impersonate another — the same hazard the duplicate path resets it for.
+  'HERMES_AGENT_NAME',
+  // Process-level code-execution levers: each one turns a "non-secret env var"
+  // into arbitrary code running inside the agent container.
+  'PATH',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  // Every surface credential, admission allowlist and behavior gate the surface
+  // registry knows about — all delivered via env_file, all outrankable here.
+  ...ALL_SURFACE_VARS,
+])
+
+type ResolvedMount = {
+  hostPath: string
+  containerPath: string
+  mode: 'ro' | 'rw'
+  note: string
+}
+
+/**
+ * Validate + resolve every mount, or throw on the first bad one.
+ *
+ * Every value here is interpolated into a generated YAML file, so this
+ * validates rather than trusts. A path containing a newline could append
+ * arbitrary compose keys (another mount, a `user: root`, a `privileged: true`);
+ * a path containing a colon could forge the mode field of the short syntax
+ * (`/host:/container:rw` smuggled through what looks like one path). Both are
+ * refused loudly — a malformed mount must fail generation, never render into
+ * something that silently means more than it says.
+ */
+function checkMounts(mounts?: ExtraMount[]): ResolvedMount[] {
+  if (mounts === undefined || mounts === null) return []
+  if (!Array.isArray(mounts)) {
+    throw new Error('extraMounts must be an array of { hostPath, containerPath } entries')
+  }
+  return mounts.map((mount, index) => {
+    const where = `extraMounts[${index}]`
+    if (!mount || typeof mount !== 'object') {
+      throw new Error(`${where}: must be an object with hostPath and containerPath`)
+    }
+    // Newline check happens on the RAW value so the error names what was typed;
+    // the tilde expansion follows, and everything after it sees the real path.
+    const hostPath = expandHostPath(
+      assertNoNewline(String(mount.hostPath ?? ''), `${where}.hostPath`))
+    const containerPath = assertNoNewline(
+      String(mount.containerPath ?? ''), `${where}.containerPath`)
+    const mode = mount.mode ?? 'ro'
+    if (!hostPath || !containerPath) {
+      throw new Error(`${where}: hostPath and containerPath are both required`)
+    }
+    if (!hostPath.startsWith('/') || !containerPath.startsWith('/')) {
+      throw new Error(
+        `${where}: both paths must be absolute, got '${hostPath}' -> '${containerPath}'`)
+    }
+    if (hostPath.includes(':') || containerPath.includes(':')) {
+      throw new Error(
+        `${where}: a ':' in a path would forge the mount mode; refusing`)
+    }
+    if (mode !== 'ro' && mode !== 'rw') {
+      throw new Error(`${where}: mode must be 'ro' or 'rw', got '${mode}'`)
+    }
+    const note = mount.note ? assertNoNewline(mount.note, `${where}.note`) : ''
+    return { hostPath, containerPath, mode, note }
+  })
+}
+
+/** Validate + resolve every env entry, or throw on the first bad one. */
+function checkEnv(env?: Record<string, string>): Array<[string, string]> {
+  if (env === undefined || env === null) return []
+  if (typeof env !== 'object' || Array.isArray(env)) {
+    throw new Error('extraEnv must be an object of NAME: value pairs')
+  }
+  return Object.entries(env).map(([key, value]) => {
+    assertNoNewline(key, `extraEnv key '${key}'`)
+    assertNoNewline(String(value), `extraEnv['${key}']`)
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error(`extraEnv key '${key}' is not a valid environment variable name`)
+    }
+    if (RESERVED_EXTRA_ENV_NAMES.has(key)) {
+      throw new Error(
+        `extraEnv key '${key}' is reserved — it is set by the generated compose block ` +
+        `or delivered through the agent's .env (env_file), and a compose 'environment:' ` +
+        `entry silently outranks both. Refusing rather than shipping a container whose ` +
+        `environment disagrees with its configuration.`)
+    }
+    return [key, String(value)] as [string, string]
+  })
+}
+
+/**
+ * Check an agent's `extraMounts` WITHOUT rendering. Returns the first problem
+ * as a human-readable string, or null when they are renderable.
+ *
+ * This exists so a caller that is about to write something can refuse BEFORE
+ * writing. `renderExtraMounts` throws, and the settings PUT renders the compose
+ * only after the .env and the resources overlay have already landed — a throw
+ * there is a 500 on top of partial state. Same rules, same messages, one
+ * implementation, so the pre-check and the render can never drift.
+ */
+export function validateExtraMounts(mounts?: ExtraMount[]): string | null {
+  try {
+    checkMounts(mounts)
+    return null
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
+/** `validateExtraMounts` for `extraEnv`. See its doc for why this exists. */
+export function validateExtraEnv(env?: Record<string, string>): string | null {
+  try {
+    checkEnv(env)
+    return null
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
+/**
+ * Render an agent's extra bind mounts as compose `volumes:` entries.
+ *
+ * Returns lines already indented to 6 spaces, ready to append inside a service
+ * `volumes:` block, or '' when there are none. Throws on anything malformed —
+ * see `checkMounts` for what "malformed" means and why it fails loudly.
+ */
+export function renderExtraMounts(mounts?: ExtraMount[]): string {
+  return checkMounts(mounts)
+    .map(({ hostPath, containerPath, mode, note }) =>
+      `${note ? `      # ${note}\n` : ''}      - ${hostPath}:${containerPath}:${mode}\n`)
+    .join('')
+}
+
+/**
+ * Render extra environment variables as compose `environment:` list entries,
+ * indented to 6 spaces. Same injection posture as the mounts: a newline in a
+ * key or value could append arbitrary compose keys. Reserved names are refused
+ * — see RESERVED_EXTRA_ENV_NAMES.
+ */
+export function renderExtraEnv(env?: Record<string, string>): string {
+  return checkEnv(env)
+    .map(([key, value]) => `      - ${key}=${value}\n`)
+    .join('')
+}
 
 export interface ComposeOptions {
   imageOrBuild?: { image: string } | { build: string }
@@ -60,6 +254,18 @@ export interface ComposeOptions {
    * '4.0'). Defaults to '2.0' when omitted.
    */
   cpus?: string
+  /**
+   * Extra host→container bind mounts for the hermes service, beyond the data
+   * dir and state volume. Persisted on the harness so they survive every
+   * regeneration — the whole point (see Harness.extraMounts). Defaults to 'ro'
+   * per mount; 'rw' has to be asked for.
+   */
+  extraMounts?: ExtraMount[]
+  /**
+   * Extra env vars rendered into the hermes service's `environment:` block.
+   * Non-secret only — secrets belong in the agent's .env (env_file).
+   */
+  extraEnv?: Record<string, string>
 }
 
 /** Model the bundled ollama sidecar pulls and serves on boot (tiny, CPU-friendly). */
@@ -232,17 +438,22 @@ export function generateStandaloneCompose(
   agentDataDir: string,
   options?: ComposeOptions,
 ): string {
-  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
+  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus, extraMounts, extraEnv } = options ?? {}
   const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoorg/hermes-agent-mt:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
 
+  // Rendered (and validated) once, before either variant, so a malformed mount
+  // fails generation identically in VPN and plain mode.
+  const mountLines = renderExtraMounts(extraMounts)
+  const envLines = renderExtraEnv(extraEnv)
+
   if (vpnEnabled) {
-    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus)
+    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus, mountLines, envLines)
   }
 
-  return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage, memory, cpus)
+  return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage, memory, cpus, mountLines, envLines)
 }
 
 /** Render the hermes service's `deploy.resources.limits` block (8-space indented). */
@@ -302,6 +513,8 @@ function generatePlainCompose(
   ollamaImage?: string,
   memory?: string,
   cpus?: string,
+  extraMountLines: string = '',
+  extraEnvLines: string = '',
 ): string {
   // Sidecars share the default (named) network, so the hermes service reaches
   // ollama at http://ollama-<name>:11434 — no network_mode needed.
@@ -333,13 +546,13 @@ ${hermesDepends}    extra_hosts:
       # data dir so every agent works regardless of image-level ENV.
       - HOME=/opt/data
       - HERMES_HOME=/opt/data
-    ports:
+${extraEnvLines}    ports:
       - published: ${port}
         target: 8642
     volumes:
       - ${agentDataDir}:/opt/data
       - ${stateVolumeName(agentName)}:/state
-    command: gateway
+${extraMountLines}    command: gateway
     cap_drop:
       - ALL
     cap_add:
@@ -368,6 +581,8 @@ function generateVpnCompose(
   ollamaImage?: string,
   memory?: string,
   cpus?: string,
+  extraMountLines: string = '',
+  extraEnvLines: string = '',
 ): string {
   const camofoxPort = port + 1000
   const vncPort = port + 2000
@@ -457,10 +672,10 @@ ${hermesDepends}    extra_hosts:
       # hit /root and fail with EACCES ("Provider authentication failed").
       - HOME=/opt/data
       - HERMES_HOME=/opt/data
-    volumes:
+${extraEnvLines}    volumes:
       - ${agentDataDir}:/opt/data
       - ${stateVolumeName(agentName)}:/state
-    command: gateway
+${extraMountLines}    command: gateway
     cap_drop:
       - ALL
     cap_add:
