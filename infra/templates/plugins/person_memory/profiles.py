@@ -24,16 +24,18 @@ than raising, so a bad profile can never break a turn.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # Identity components are interpolated into a filesystem path, so we hard-reject
 # anything that could traverse (``/``, ``\``, ``..``) or inject NUL/whitespace.
-# This allowlist covers every real Slack/Telegram/Discord id and the
-# ``slack:U…`` scheme, while making the profile path un-escapable regardless of
-# how trusted the calling connector's id happens to be.
-_ID_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
+# This allowlist covers every real Slack/Telegram/Discord id, the ``slack:U…``
+# scheme, and E.164 phone numbers (``+64…`` — Signal presents these as sender
+# ids), while making the profile path un-escapable regardless of how trusted
+# the calling connector's id happens to be.
+_ID_RE = re.compile(r"^[A-Za-z0-9._:+-]+$")
 
 
 def _coerce(v: str) -> Any:
@@ -104,6 +106,57 @@ def load_profile(memory_dir: str, platform: str, user_id: str) -> Optional[Dict[
     if not (meta.get("technical_level") or meta.get("comm_style") or meta.get("display_name")):
         return None
     return meta
+
+
+def load_alias_ids(data_dir: str, platform: str, user_id: str) -> List[str]:
+    """Alternate ids the same sender is known by, from Swarm Map's
+    ``<data_dir>/resolved-identities.json``.
+
+    Swarm Map resolves admin-entered identities to platform-native ids and
+    stores both forms per platform::
+
+        {"signal": [{"display": "+64210000000",
+                     "nativeId": "5eca7c21-...",
+                     "profileName": "Kathryn"}]}
+
+    Signal is the motivating case: an envelope carries ``sourceNumber`` OR
+    ``sourceUuid`` depending on the sender, so a profile keyed by one form
+    misses when the connector presents the other. This maps whichever form
+    was presented to every other known form so the profile fires either way.
+
+    Returns allowlist-safe alternates (never ``user_id`` itself), in file
+    order, deduped. ``[]`` on any miss/error — fail-open like everything
+    else in this plugin.
+    """
+    if not data_dir or not platform or not user_id:
+        return []
+    try:
+        with open(os.path.join(data_dir, "resolved-identities.json"), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    entries = data.get(platform)
+    if not isinstance(entries, list):
+        return []
+    aliases: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        display = str(entry.get("display") or "").strip()
+        native = str(entry.get("nativeId") or "").strip()
+        if user_id == display and native:
+            aliases.append(native)
+        elif user_id == native and display:
+            aliases.append(display)
+    seen = set()
+    out: List[str] = []
+    for a in aliases:
+        if a != user_id and a not in seen and _ID_RE.match(a):
+            seen.add(a)
+            out.append(a)
+    return out
 
 
 def build_directive(profile: Dict[str, Any]) -> Optional[str]:

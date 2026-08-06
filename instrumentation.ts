@@ -4,6 +4,8 @@
 export async function register() {
   // Only the Node.js server runtime can touch better-sqlite3 / the filesystem.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+  const { migrateLegacyImageRefs } = await import('@/lib/services/image-migration')
+  migrateLegacyImageRefs()
   const { startIntegrityScheduler } = await import('@/lib/services/integrity-scheduler')
   startIntegrityScheduler()
   const { startDbSnapshotScheduler } = await import('@/lib/services/db-snapshot-scheduler')

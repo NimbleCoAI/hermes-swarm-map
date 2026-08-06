@@ -1,13 +1,16 @@
 name: person_memory
-version: "0.1.0"
+version: "0.2.0"
 description: >-
   Person-based adaptive memory (slice 1, read-only). Recognizes the current
   sender by platform user id and, via pre_llm_call, appends a short adaptation
   directive (technical depth + communication style) to the user message so the
   agent meets each person where they are — while keeping every fact and the
   shared context identical for everyone. Image-only profiles at
-  memories/people/<platform>:<id>.md. Never writes profiles, never touches the
-  system prompt, strictly fail-open.
+  memories/people/<platform>:<id>.md. When the presented id misses, alternate
+  id forms for the same sender are looked up in resolved-identities.json
+  (Signal envelopes carry a phone number OR a UUID depending on the sender),
+  so one profile fires for every form. Never writes profiles, never touches
+  the system prompt, strictly fail-open.
   NOTE: the directive is built only from display_name/role/technical_level/
   comm_style and the first lines of "## Notable context", which are echoed
   verbatim — and in shared group sessions are visible to everyone. Keep raw
