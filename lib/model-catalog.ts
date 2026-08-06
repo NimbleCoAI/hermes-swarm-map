@@ -59,10 +59,13 @@ export const MODEL_CATALOG: Record<string, ModelEntry[]> = {
     // capable agentic model. Per-agent cheaper picks (Qwen/DeepSeek-class) are
     // free-text in the cascade editor — verify the exact slug live before use.
     { id: 'moonshotai/kimi-k2.7-code', name: 'Kimi K2.7 Code (OR, cheap)', tier: 'fallback' },
-    // Cheap routing tier ([intelligent-routing-cost]) — V4 Flash (284B MoE, 1M
-    // ctx, GA 2026-07-20) supersedes V3.2 for the mechanical down-route slot
-    // (D-2026-08-06). V3.2 stays listed while live cascades still reference it.
-    { id: 'deepseek/deepseek-v4-flash', name: 'DeepSeek V4 Flash (OR, cheap)', tier: 'fallback' },
+    // Cheap routing tier ([intelligent-routing-cost]) — V4 Flash 0731 retrain
+    // (284B MoE, 1M ctx, Terminal-Bench 2.1 82.7) supersedes V3.2 for the
+    // mechanical down-route slot (D-2026-08-06). ⚠️ The BARE slug
+    // `deepseek/deepseek-v4-flash` resolves to the weak 0423 preview on
+    // OpenRouter (TB 61.8) — always pin -0731. V3.2 stays listed while live
+    // cascades still reference it.
+    { id: 'deepseek/deepseek-v4-flash-0731', name: 'DeepSeek V4 Flash 0731 (OR, cheap)', tier: 'fallback' },
     { id: 'deepseek/deepseek-v3.2', name: 'DeepSeek V3.2 (OR, cheap, legacy)', tier: 'fallback' },
   ],
   bedrock: [

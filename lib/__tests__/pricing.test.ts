@@ -133,7 +133,7 @@ describe('lookupPricing — GLM / Kimi / DeepSeek routing tiers', () => {
   })
 
   it('resolves deepseek-v4-flash (bare and deepseek/ prefixed) ahead of the legacy wildcard', () => {
-    for (const id of ['deepseek-v4-flash', 'deepseek/deepseek-v4-flash']) {
+    for (const id of ['deepseek-v4-flash', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash-0731']) {
       const p = lookupPricing(id)
       expect(p, id).not.toBeNull()
       expect(p!.inputPerMillion).toBe(0.14)
