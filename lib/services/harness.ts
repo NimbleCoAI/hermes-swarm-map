@@ -1065,6 +1065,11 @@ export class HarnessService {
       ...(o.pinnedImageRef ? { pinnedImageRef: o.pinnedImageRef } : {}),
       ...(o.lastKnownDigest ? { lastKnownDigest: o.lastKnownDigest } : {}),
       ...(o.resources ? { resources: o.resources } : {}),
+      // Carried onto every projected harness so compose regeneration can see
+      // them. Omitted when absent, exactly like the fields above, so a legacy
+      // overlay stays byte-identical.
+      ...(o.extraMounts?.length ? { extraMounts: o.extraMounts } : {}),
+      ...(o.extraEnv && Object.keys(o.extraEnv).length ? { extraEnv: o.extraEnv } : {}),
     }
   }
 

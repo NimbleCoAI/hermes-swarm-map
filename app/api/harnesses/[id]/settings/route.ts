@@ -814,6 +814,11 @@ export async function PUT(
         controlBindHost: settings.controlBindHost,
         memory: effectiveResources?.memory,
         cpus: effectiveResources?.cpus,
+        // Carried through every regeneration. Dropping these here is exactly
+        // the bug extraMounts exists to prevent: the container comes back
+        // healthy with a capability silently missing.
+        extraMounts: harness.extraMounts,
+        extraEnv: harness.extraEnv,
       })
       fs.writeFileSync(harness.composeFile, compose, 'utf-8')
     }

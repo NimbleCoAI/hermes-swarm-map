@@ -8,6 +8,72 @@
  */
 
 import { assertNoNewline } from '@/lib/env-helpers'
+import type { ExtraMount } from '@/lib/types'
+
+/**
+ * Render an agent's extra bind mounts as compose `volumes:` entries.
+ *
+ * Every value here is interpolated into a generated YAML file, so this
+ * validates rather than trusts. A path containing a newline could append
+ * arbitrary compose keys (another mount, a `user: root`, a `privileged: true`);
+ * a path containing a colon could forge the mode field of the short syntax
+ * (`/host:/container:rw` smuggled through what looks like one path). Both are
+ * refused loudly — a malformed mount must fail generation, never render into
+ * something that silently means more than it says.
+ *
+ * Returns lines already indented to 6 spaces, ready to append inside a service
+ * `volumes:` block, or '' when there are none.
+ */
+export function renderExtraMounts(mounts?: ExtraMount[]): string {
+  if (!mounts?.length) return ''
+  return mounts
+    .map((mount, index) => {
+      const where = `extraMounts[${index}]`
+      const hostPath = assertNoNewline(String(mount.hostPath ?? ''), `${where}.hostPath`)
+      const containerPath = assertNoNewline(
+        String(mount.containerPath ?? ''), `${where}.containerPath`)
+      const mode = mount.mode ?? 'ro'
+      if (!hostPath || !containerPath) {
+        throw new Error(`${where}: hostPath and containerPath are both required`)
+      }
+      if (!hostPath.startsWith('/') || !containerPath.startsWith('/')) {
+        throw new Error(
+          `${where}: both paths must be absolute, got '${hostPath}' -> '${containerPath}'`)
+      }
+      if (hostPath.includes(':') || containerPath.includes(':')) {
+        throw new Error(
+          `${where}: a ':' in a path would forge the mount mode; refusing`)
+      }
+      if (mode !== 'ro' && mode !== 'rw') {
+        throw new Error(`${where}: mode must be 'ro' or 'rw', got '${mode}'`)
+      }
+      const note = mount.note
+        ? assertNoNewline(mount.note, `${where}.note`)
+            .replace(/^/, '      # ') + '\n'
+        : ''
+      return `${note}      - ${hostPath}:${containerPath}:${mode}\n`
+    })
+    .join('')
+}
+
+/**
+ * Render extra environment variables as compose `environment:` list entries,
+ * indented to 6 spaces. Same injection posture as the mounts: a newline in a
+ * key or value could append arbitrary compose keys.
+ */
+export function renderExtraEnv(env?: Record<string, string>): string {
+  if (!env) return ''
+  return Object.entries(env)
+    .map(([key, value]) => {
+      assertNoNewline(key, `extraEnv key '${key}'`)
+      assertNoNewline(String(value), `extraEnv['${key}']`)
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        throw new Error(`extraEnv key '${key}' is not a valid environment variable name`)
+      }
+      return `      - ${key}=${value}\n`
+    })
+    .join('')
+}
 
 export interface ComposeOptions {
   imageOrBuild?: { image: string } | { build: string }
@@ -60,6 +126,18 @@ export interface ComposeOptions {
    * '4.0'). Defaults to '2.0' when omitted.
    */
   cpus?: string
+  /**
+   * Extra host→container bind mounts for the hermes service, beyond the data
+   * dir and state volume. Persisted on the harness so they survive every
+   * regeneration — the whole point (see Harness.extraMounts). Defaults to 'ro'
+   * per mount; 'rw' has to be asked for.
+   */
+  extraMounts?: ExtraMount[]
+  /**
+   * Extra env vars rendered into the hermes service's `environment:` block.
+   * Non-secret only — secrets belong in the agent's .env (env_file).
+   */
+  extraEnv?: Record<string, string>
 }
 
 /** Model the bundled ollama sidecar pulls and serves on boot (tiny, CPU-friendly). */
@@ -232,17 +310,22 @@ export function generateStandaloneCompose(
   agentDataDir: string,
   options?: ComposeOptions,
 ): string {
-  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus } = options ?? {}
+  const { imageOrBuild, defaultImage, vpnEnabled, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus, extraMounts, extraEnv } = options ?? {}
   const resolved = imageOrBuild ?? { image: defaultImage || 'ghcr.io/nimblecoorg/hermes-agent-mt:latest' }
   const sourceBlock = 'image' in resolved
     ? `    image: ${resolved.image}`
     : `    build:\n      context: ${resolved.build}\n      dockerfile: Dockerfile`
 
+  // Rendered (and validated) once, before either variant, so a malformed mount
+  // fails generation identically in VPN and plain mode.
+  const mountLines = renderExtraMounts(extraMounts)
+  const envLines = renderExtraEnv(extraEnv)
+
   if (vpnEnabled) {
-    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus)
+    return generateVpnCompose(agentName, port, agentDataDir, sourceBlock, camofoxImage, vncBindHost, controlBindHost, bundledOllama, ollamaImage, memory, cpus, mountLines, envLines)
   }
 
-  return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage, memory, cpus)
+  return generatePlainCompose(agentName, port, agentDataDir, sourceBlock, bundledOllama, ollamaImage, memory, cpus, mountLines, envLines)
 }
 
 /** Render the hermes service's `deploy.resources.limits` block (8-space indented). */
@@ -302,6 +385,8 @@ function generatePlainCompose(
   ollamaImage?: string,
   memory?: string,
   cpus?: string,
+  extraMountLines: string = '',
+  extraEnvLines: string = '',
 ): string {
   // Sidecars share the default (named) network, so the hermes service reaches
   // ollama at http://ollama-<name>:11434 — no network_mode needed.
@@ -333,13 +418,13 @@ ${hermesDepends}    extra_hosts:
       # data dir so every agent works regardless of image-level ENV.
       - HOME=/opt/data
       - HERMES_HOME=/opt/data
-    ports:
+${extraEnvLines}    ports:
       - published: ${port}
         target: 8642
     volumes:
       - ${agentDataDir}:/opt/data
       - ${stateVolumeName(agentName)}:/state
-    command: gateway
+${extraMountLines}    command: gateway
     cap_drop:
       - ALL
     cap_add:
@@ -368,6 +453,8 @@ function generateVpnCompose(
   ollamaImage?: string,
   memory?: string,
   cpus?: string,
+  extraMountLines: string = '',
+  extraEnvLines: string = '',
 ): string {
   const camofoxPort = port + 1000
   const vncPort = port + 2000
@@ -457,10 +544,10 @@ ${hermesDepends}    extra_hosts:
       # hit /root and fail with EACCES ("Provider authentication failed").
       - HOME=/opt/data
       - HERMES_HOME=/opt/data
-    volumes:
+${extraEnvLines}    volumes:
       - ${agentDataDir}:/opt/data
       - ${stateVolumeName(agentName)}:/state
-    command: gateway
+${extraMountLines}    command: gateway
     cap_drop:
       - ALL
     cap_add:
