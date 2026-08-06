@@ -31,6 +31,18 @@ is appended to the current turn's user message, ephemerally, never persisted.
 Kill switches: ``PERSON_MEMORY_DISABLED`` turns the plugin off entirely;
 ``PERSON_MEMORY_READONLY`` keeps the adaptation layer but disables every
 write, restoring slice-1 behavior.
+
+KNOWN OPEN QUESTION — read before extending this plugin. Cards are scoped to
+the *agent*, keyed by ``platform:id``, with no channel or surface scoping: a
+card learned in a DM fires in a group. The card filenames are raw identifiers
+and they sit in the agent's ``HOME``, which the agent can read with ordinary
+file tools — so a chat participant who gets the agent to list that directory
+can enumerate everyone it has ever spoken to. Self-seeding did not create that
+property, but it does mean the directory now fills with every sender instead
+of a hand-picked few. Scoping model, enumeration boundary, admin-tier tool
+surfaces, consent and retention are tracked in the memory-repo quest
+``person-memory-context-scoping``. Do not widen what this plugin stores or
+injects without reading it.
 """
 from __future__ import annotations
 
