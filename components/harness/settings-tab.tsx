@@ -17,6 +17,7 @@ type Settings = {
   dmPolicy: 'approved-only' | 'allow-all'
   groupInvitePolicy: 'approved-only' | 'allow-all'
   mentionGating: boolean
+  observeUnmentioned: boolean
   commandApprovalAdminOnly: boolean
   memoryScope: 'channel' | 'global'
   vpnEnabled: boolean
@@ -67,6 +68,13 @@ function updateDmPolicy(policy: 'approved-only' | 'allow-all') {
   function updateMentionGating(enabled: boolean) {
     if (!settings) return
     setSettings({ ...settings, mentionGating: enabled })
+    setDirty(true)
+    setSaved(false)
+  }
+
+  function updateObserveUnmentioned(enabled: boolean) {
+    if (!settings) return
+    setSettings({ ...settings, observeUnmentioned: enabled })
     setDirty(true)
     setSaved(false)
   }
@@ -283,8 +291,43 @@ if (loading) {
         </div>
         <p className="text-xs text-muted-foreground">
           {settings.mentionGating
-            ? 'Agent only responds when @mentioned, replied to, or a /command is used in groups. Observes other messages silently.'
+            ? 'Agent only responds when @mentioned, replied to, or a /command is used in groups.'
             : 'Agent responds to all messages in approved groups.'}
+        </p>
+      </div>
+
+      {/* Observe-Unmentioned */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          <h3 className="font-medium text-sm">Observe Unmentioned Messages</h3>
+        </div>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="observeUnmentioned"
+              checked={settings.observeUnmentioned === true}
+              onChange={() => updateObserveUnmentioned(true)}
+              className="accent-[var(--accent)]"
+            />
+            Observe (read context)
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="observeUnmentioned"
+              checked={settings.observeUnmentioned === false}
+              onChange={() => updateObserveUnmentioned(false)}
+              className="accent-[var(--accent)]"
+            />
+            Ignore
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {settings.observeUnmentioned
+            ? 'Agent reads group messages it isn’t addressed in for context — it still only responds per the mention-gating setting above. Independent of whether it replies.'
+            : 'Messages that don’t address the agent are dropped entirely (not even read for context).'}
         </p>
       </div>
 

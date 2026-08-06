@@ -56,11 +56,13 @@ describe('derived maps match the pre-registry literals (byte-for-byte)', () => {
     })
   })
 
-  it('OBSERVE_UNMENTIONED_VARS covers exactly signal/mattermost/telegram', () => {
+  it('OBSERVE_UNMENTIONED_VARS covers exactly signal/mattermost/telegram/slack/discord', () => {
     expect(OBSERVE_UNMENTIONED_VARS).toEqual({
       signal: 'SIGNAL_OBSERVE_UNMENTIONED',
       mattermost: 'MATTERMOST_OBSERVE_UNMENTIONED',
       telegram: 'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES',
+      slack: 'SLACK_OBSERVE_UNMENTIONED',
+      discord: 'DISCORD_OBSERVE_UNMENTIONED',
     })
   })
 
@@ -186,7 +188,10 @@ describe('registry structural invariants', () => {
     expect(ALL_SURFACE_VARS.has('SIGNAL_PROFILE_NAME')).toBe(true)
     expect(ALL_SURFACE_VARS.has('DISCORD_CHANNEL_SCOPED_ACCESS')).toBe(true)
     expect(ALL_SURFACE_VARS.has('DISCORD_BOTS_REQUIRE_INLINE_MENTION')).toBe(true)
-    expect(ALL_SURFACE_VARS.size).toBe(36)
+    // +2: SLACK_OBSERVE_UNMENTIONED + DISCORD_OBSERVE_UNMENTIONED (observe parity)
+    expect(ALL_SURFACE_VARS.has('SLACK_OBSERVE_UNMENTIONED')).toBe(true)
+    expect(ALL_SURFACE_VARS.has('DISCORD_OBSERVE_UNMENTIONED')).toBe(true)
+    expect(ALL_SURFACE_VARS.size).toBe(38)
   })
 
   it('isSurfaceSlug / surfaceSpec agree with the SURFACES keys', () => {

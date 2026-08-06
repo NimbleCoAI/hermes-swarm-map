@@ -115,6 +115,9 @@ type SettingsResponse = {
   dmPolicy: 'approved-only' | 'allow-all'
   groupInvitePolicy: 'approved-only' | 'allow-all'
   mentionGating: boolean
+  // Observe unmentioned messages: agent ingests channel context it isn't
+  // @mentioned in (does NOT respond — orthogonal to mentionGating). Default on.
+  observeUnmentioned: boolean
   commandApprovalAdminOnly: boolean
   memoryScope: 'channel' | 'global'
   vpnEnabled: boolean
@@ -263,6 +266,21 @@ export async function GET(
     }
   }
 
+  // Observe unmentioned — default ON (matches the deploy template, which writes
+  // the observe vars true at provision). Off only if an observe var is present
+  // and explicitly falsy. Orthogonal to mentionGating (this is input/context;
+  // that is the response gate). Surfaces whose adapter lacks the flag simply
+  // have no var written, so they don't drag the aggregate off.
+  const OBSERVE_TRUTHY = new Set(['true', '1', 'yes', 'on'])
+  let observeUnmentioned = true
+  for (const varName of Object.values(OBSERVE_UNMENTIONED_VARS)) {
+    const val = env[varName]
+    if (val !== undefined && !OBSERVE_TRUTHY.has(val.trim().toLowerCase())) {
+      observeUnmentioned = false
+      break
+    }
+  }
+
   // Read command approval setting — default true (admin-only) unless explicitly 'false'
   const commandApprovalAdminOnly = env[COMMAND_APPROVAL_VAR] !== 'false'
 
@@ -303,6 +321,7 @@ export async function GET(
     dmPolicy,
     groupInvitePolicy,
     mentionGating,
+    observeUnmentioned,
     commandApprovalAdminOnly,
     memoryScope,
     vpnEnabled,
@@ -598,9 +617,12 @@ export async function PUT(
     }
   }
 
-  // Observe-unmentioned — when mention-gating is on, silently record unmentioned messages;
-  // when off (responding to everything), observation is not needed
-  const observeValue = body.mentionGating !== false ? 'true' : 'false'
+  // Observe-unmentioned — first-class, ORTHOGONAL to mention-gating: the agent
+  // ingests unmentioned channel messages as context (it still does not respond;
+  // the mention gate governs the response). Default ON. Previously this was
+  // coupled to mentionGating (observe=off whenever responding-to-everything),
+  // which conflated input with output — decoupled here.
+  const observeValue = body.observeUnmentioned !== false ? 'true' : 'false'
   for (const [, varName] of Object.entries(OBSERVE_UNMENTIONED_VARS)) {
     const regex = new RegExp(`^${varName}=.*$`, 'm')
     if (regex.test(content)) {
