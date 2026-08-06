@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
@@ -8,6 +8,13 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    // Nested git worktrees (`.wt-<topic>/`) are full checkouts of this repo
+    // living inside it. Vitest's default include globs scoop up their test
+    // files, so a run on THIS branch reports other branches' failures as its
+    // own (33 of them as of 2026-08-06, none from this tree) — which makes
+    // every run dishonest and trains everyone to ignore red. Excluded, not
+    // deleted: these are live worktrees someone is working in.
+    exclude: [...configDefaults.exclude, '**/.wt-*/**'],
   },
   resolve: {
     alias: {

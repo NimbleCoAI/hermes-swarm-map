@@ -1,8 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import os from 'os'
 import {
+  expandHostPath,
   generateStandaloneCompose,
   renderExtraEnv,
   renderExtraMounts,
+  validateExtraEnv,
+  validateExtraMounts,
 } from './harness-compose'
 import type { ExtraMount } from '@/lib/types'
 
@@ -97,6 +101,51 @@ describe('renderExtraMounts', () => {
     ])).toThrow(/absolute/)
   })
 
+  // --- tilde expansion ------------------------------------------------------
+  //
+  // `~/.iris/...` is the spelling harness.ts's expandPath accepts everywhere
+  // else, so it is what someone hand-editing harnesses.json will type. It is
+  // ALSO non-absolute, so before expansion it hit the absolute-path throw — and
+  // that throw ran mid-PUT, after the .env had already been written. Compose
+  // itself does not expand `~`, so the expansion has to happen here and the
+  // EXPANDED path is what must be rendered.
+
+  describe('tilde expansion', () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    it('expands a leading ~ in a host path to the real home directory', () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/juni')
+      expect(renderExtraMounts([
+        { hostPath: '~/.iris/nimbleco/intake', containerPath: '/opt/iris-intake', mode: 'rw' },
+      ])).toBe('      - /Users/juni/.iris/nimbleco/intake:/opt/iris-intake:rw\n')
+      expect(validateExtraMounts([
+        { hostPath: '~/.iris/nimbleco/intake', containerPath: '/opt/iris-intake' },
+      ])).toBeNull()
+    })
+
+    it('expands a bare ~', () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/juni')
+      expect(expandHostPath('~')).toBe('/Users/juni')
+    })
+
+    it('does NOT expand ~user — that would silently invent a wrong path', () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/juni')
+      // /Users/junisomeone/x would be absolute, pass validation, and bind-mount
+      // a directory nobody named. Better to fail the absolute check.
+      expect(expandHostPath('~someone/x')).toBe('~someone/x')
+      expect(() => renderExtraMounts([
+        { hostPath: '~someone/x', containerPath: '/b' },
+      ])).toThrow(/absolute/)
+    })
+
+    it('leaves container paths alone — the home dir here is the HOST\'s', () => {
+      vi.spyOn(os, 'homedir').mockReturnValue('/Users/juni')
+      expect(() => renderExtraMounts([
+        { hostPath: '/a', containerPath: '~/b' },
+      ])).toThrow(/absolute/)
+    })
+  })
+
   it('refuses an empty path', () => {
     expect(() => renderExtraMounts([
       { hostPath: '', containerPath: '/b' },
@@ -131,6 +180,92 @@ describe('renderExtraEnv', () => {
 
   it('refuses a key that is not a valid env var name', () => {
     expect(() => renderExtraEnv({ 'not a key': 'x' })).toThrow(/valid environment variable name/)
+  })
+
+  // --- reserved names -------------------------------------------------------
+  //
+  // extraEnv is emitted AFTER the generated `environment:` block, and a compose
+  // `environment:` entry outranks `env_file`. So without a denylist an extraEnv
+  // key can (a) override the pinned HOME the generator sets specifically to
+  // avoid the EACCES "Provider authentication failed" credential-probe failure,
+  // and (b) silently replace a surface allowlist that the settings page still
+  // renders from the .env — the console showing one policy, the container
+  // running another. Both are refused, not dropped: dropping a key someone
+  // wrote is its own false audit trail.
+
+  it('refuses HOME and HERMES_HOME — the generated block sets them and loses', () => {
+    expect(() => renderExtraEnv({ HOME: '/tmp' })).toThrow(/reserved/)
+    expect(() => renderExtraEnv({ HERMES_HOME: '/tmp' })).toThrow(/reserved/)
+  })
+
+  it('refuses HERMES_AGENT_NAME — it is the agent identity HSM policy keys on', () => {
+    expect(() => renderExtraEnv({ HERMES_AGENT_NAME: 'someone-else' })).toThrow(/reserved/)
+  })
+
+  it('refuses process-level code-execution levers', () => {
+    for (const key of ['PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH']) {
+      expect(() => renderExtraEnv({ [key]: '/evil' })).toThrow(/reserved/)
+    }
+  })
+
+  it('refuses surface credentials and admission allowlists — env_file loses to this block', () => {
+    for (const key of [
+      'TELEGRAM_ALLOWED_USERS',
+      'SIGNAL_ALLOWED_USERS',
+      'DISCORD_ALLOWED_CHANNELS',
+      'DISCORD_BOT_TOKEN',
+    ]) {
+      expect(() => renderExtraEnv({ [key]: 'x' })).toThrow(/reserved/)
+    }
+  })
+
+  it('still allows ordinary agent-specific env', () => {
+    expect(renderExtraEnv({ IRIS_INTAKE_DIR: '/opt/iris-intake' }))
+      .toBe('      - IRIS_INTAKE_DIR=/opt/iris-intake\n')
+  })
+})
+
+// The validators exist so a caller about to WRITE can refuse first — the
+// settings PUT renders the compose only after the .env and the resources
+// overlay have landed, so a throw there is a 500 on top of partial state. They
+// must therefore accept and reject exactly what the renderers do; a validator
+// that is more permissive than its renderer is worse than no validator, because
+// it converts "refused cleanly" into "passed the gate, then exploded".
+describe('validateExtraMounts / validateExtraEnv agree with the renderers', () => {
+  const CASES: Array<{ label: string; mounts?: ExtraMount[]; env?: Record<string, string> }> = [
+    { label: 'nothing configured' },
+    { label: 'empty collections', mounts: [], env: {} },
+    { label: 'valid mounts + env', mounts: [SPOOL, PACKAGE], env: { IRIS_BRAND: 'nimbleco' } },
+    { label: 'relative host path', mounts: [{ hostPath: 'nope', containerPath: '/b' }] },
+    { label: 'newline in a path', mounts: [{ hostPath: '/a\n x: y', containerPath: '/b' }] },
+    { label: 'colon in a path', mounts: [{ hostPath: '/a:/b:rw', containerPath: '/b' }] },
+    { label: 'empty path', mounts: [{ hostPath: '', containerPath: '/b' }] },
+    { label: 'bad mode', mounts: [{ hostPath: '/a', containerPath: '/b', mode: 'z' as 'ro' }] },
+    { label: 'reserved env name', env: { HOME: '/tmp' } },
+    { label: 'invalid env name', env: { 'not a key': 'x' } },
+    { label: 'newline in env value', env: { A: 'x\n      - B=y' } },
+  ]
+
+  for (const { label, mounts, env } of CASES) {
+    it(`${label}: validator verdict matches render outcome`, () => {
+      let renderThrew: string | null = null
+      try {
+        renderExtraMounts(mounts)
+        renderExtraEnv(env)
+      } catch (err) {
+        renderThrew = (err as Error).message
+      }
+      const verdict = validateExtraMounts(mounts) ?? validateExtraEnv(env)
+      expect(verdict).toBe(renderThrew)
+    })
+  }
+
+  it('refuses a non-array extraMounts instead of crashing on .map', () => {
+    // harnesses.json is hand-edited; a bare object here used to reach .map().
+    expect(validateExtraMounts({ hostPath: '/a' } as unknown as ExtraMount[]))
+      .toMatch(/must be an array/)
+    expect(() => renderExtraMounts({ hostPath: '/a' } as unknown as ExtraMount[]))
+      .toThrow(/must be an array/)
   })
 })
 
@@ -176,7 +311,13 @@ describe('generateStandaloneCompose with extra mounts', () => {
     })
   }
 
-  it('survives regeneration — the whole point', () => {
+  // NOTE ON SCOPE: this asserts only that the generator is deterministic — it
+  // calls one pure function twice with one object, so it would stay green even
+  // if nothing ever passed extraMounts to it. The claim that actually matters
+  // ("a settings PUT re-renders the configured mounts") lives where the fields
+  // are carried: settings/route.test.ts asserts on the options object reaching
+  // generateCompose. Do not let this test stand in for that one.
+  it('is deterministic across regenerations (see note: route.test.ts owns the real claim)', () => {
     const options = {
       extraMounts: [SPOOL, PACKAGE],
       extraEnv: { IRIS_INTAKE_DIR: '/opt/iris-intake' },

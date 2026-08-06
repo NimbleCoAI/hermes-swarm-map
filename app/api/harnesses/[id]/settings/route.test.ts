@@ -23,16 +23,33 @@ vi.mock('@/lib/resolvers', () => ({
   expandTelegramAllowlist: vi.fn(async (_id: string, users: string[]) => users),
   expandDiscordAllowlist: vi.fn(async (_id: string, users: string[]) => users),
 }))
-vi.mock('@/lib/services/harness-compose', () => ({
-  generateStandaloneCompose: vi.fn(() => ''),
-  // Real implementation is a pure string test; the fixtures in these tests are
-  // standalone-shaped composes (never deploy-born), so classify as such.
-  isDeployBornCompose: vi.fn(() => false),
+vi.mock('@/lib/services/harness-compose', async () => {
+  // validateExtraMounts/validateExtraEnv are NOT stubbed: they are the pre-write
+  // refusal the route depends on, and stubbing them would make the 400 test
+  // assert against a fake. The generator stays stubbed (its output is covered by
+  // harness-extra-mounts.test.ts); the tests below assert on the options object
+  // it RECEIVES, which is the part the route is responsible for.
+  const actual = await vi.importActual<typeof import('@/lib/services/harness-compose')>(
+    '@/lib/services/harness-compose')
+  return {
+    ...actual,
+    generateStandaloneCompose: vi.fn(() => ''),
+    // Real implementation is a pure string test; the fixtures in these tests are
+    // standalone-shaped composes (never deploy-born), so classify as such.
+    isDeployBornCompose: vi.fn(() => false),
+  }
+})
+// Only buildSettingsEnvValue is stubbed. The rest is real because
+// harness-compose's (unstubbed) validators call assertNoNewline — a stub that
+// dropped it would turn "the mount was refused" into "undefined is not a
+// function", which passes a .toThrow-shaped test for the wrong reason.
+vi.mock('@/lib/env-helpers', async () => ({
+  ...(await vi.importActual<typeof import('@/lib/env-helpers')>('@/lib/env-helpers')),
+  buildSettingsEnvValue: vi.fn(() => ''),
 }))
-vi.mock('@/lib/env-helpers', () => ({ buildSettingsEnvValue: vi.fn(() => '') }))
 
 import { GET, PUT } from './route'
-import { isDeployBornCompose } from '@/lib/services/harness-compose'
+import { generateStandaloneCompose, isDeployBornCompose } from '@/lib/services/harness-compose'
 import { services } from '@/lib/services'
 import { expandSignalAllowlist, expandTelegramAllowlist } from '@/lib/resolvers'
 import { buildSettingsEnvValue } from '@/lib/env-helpers'
@@ -1045,6 +1062,115 @@ describe('Settings API — restart arms beyond .env changes', () => {
     expect(data.error).toMatch(/deploy-born/)
     expect((fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls).toHaveLength(0)
     expect(services.harness.restart).not.toHaveBeenCalled()
+  })
+})
+
+// extraMounts/extraEnv are the fields that exist BECAUSE regeneration used to
+// silently drop hand-added mounts. This route is the only place they are
+// carried into a regeneration, so it is the only place that claim can be
+// tested. (harness-extra-mounts.test.ts calls the generator directly with an
+// options object it constructs itself — deleting the two lines below would
+// leave every one of its tests green.)
+describe('Settings API — extraMounts/extraEnv survive compose regeneration (#222)', () => {
+  const SPOOL = {
+    hostPath: '/Users/juni/.iris/nimbleco/intake',
+    containerPath: '/opt/iris-intake',
+    mode: 'rw' as const,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(os, 'homedir').mockReturnValue('/home/test')
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1111.0 } as unknown as fs.Stats)
+    vi.spyOn(fs, 'readFileSync').mockReturnValue('GITHUB_TOKEN=x\n' as never)
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('passes the harness\'s saved extraMounts/extraEnv into generateCompose', async () => {
+    vi.mocked(services.harness.get).mockReturnValue({
+      name: 'iris',
+      runtime: 'hermes',
+      resources: { memory: '1G', cpus: '1.0' },
+      composeFile: '/tmp/iris.yml',
+      extraMounts: [SPOOL],
+      extraEnv: { IRIS_INTAKE_DIR: '/opt/iris-intake' },
+    } as never)
+
+    const res = await PUT(makeRequest({
+      dmPolicy: 'approved-only',
+      resources: { memory: '2G', cpus: '2.0' },
+    }), makeParams('h_iris'))
+    expect(res.status).toBe(200)
+
+    // The assertion that fails if route.ts stops forwarding the fields: not
+    // "the compose contains the mount" (the generator is stubbed here) but
+    // "the generator was HANDED the mount".
+    expect(generateStandaloneCompose).toHaveBeenCalledTimes(1)
+    const options = vi.mocked(generateStandaloneCompose).mock.calls[0][3]
+    expect(options?.extraMounts).toEqual([SPOOL])
+    expect(options?.extraEnv).toEqual({ IRIS_INTAKE_DIR: '/opt/iris-intake' })
+  })
+
+  it('REFUSES (400, nothing written) when the saved mounts cannot render', async () => {
+    // Before this guard the throw came from renderExtraMounts DURING the
+    // regeneration — after the .env and the resources overlay had been written.
+    // That is a 500 on partial state, and because the bad value stays on the
+    // overlay, every subsequent PUT throws at the same line: the agent becomes
+    // unreconfigurable through the API. Refuse first, write nothing.
+    vi.mocked(services.harness.get).mockReturnValue({
+      name: 'iris',
+      runtime: 'hermes',
+      resources: { memory: '1G', cpus: '1.0' },
+      composeFile: '/tmp/iris.yml',
+      extraMounts: [{ hostPath: 'relative/spool', containerPath: '/opt/iris-intake' }],
+    } as never)
+
+    const res = await PUT(makeRequest({
+      dmPolicy: 'approved-only',
+      resources: { memory: '2G', cpus: '2.0' },
+    }), makeParams('h_iris'))
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/absolute/)
+    expect((fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls)
+      .toHaveLength(0)
+    expect(services.harness.updateConfig).not.toHaveBeenCalled()
+    expect(services.harness.restart).not.toHaveBeenCalled()
+    expect(generateStandaloneCompose).not.toHaveBeenCalled()
+  })
+
+  it('REFUSES (400) a reserved extraEnv name rather than silently overriding .env policy', async () => {
+    vi.mocked(services.harness.get).mockReturnValue({
+      name: 'iris',
+      runtime: 'hermes',
+      composeFile: '/tmp/iris.yml',
+      extraEnv: { DISCORD_ALLOWED_USERS: '999' },
+    } as never)
+
+    const res = await PUT(makeRequest({ dmPolicy: 'approved-only' }), makeParams('h_iris'))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/reserved/)
+    expect((fs.writeFileSync as unknown as { mock: { calls: unknown[][] } }).mock.calls)
+      .toHaveLength(0)
+  })
+
+  it('accepts a ~-prefixed host path — the spelling every other host path takes', async () => {
+    vi.mocked(services.harness.get).mockReturnValue({
+      name: 'iris',
+      runtime: 'hermes',
+      resources: { memory: '1G', cpus: '1.0' },
+      composeFile: '/tmp/iris.yml',
+      extraMounts: [{ hostPath: '~/.iris/nimbleco/intake', containerPath: '/opt/iris-intake', mode: 'rw' }],
+    } as never)
+
+    const res = await PUT(makeRequest({
+      dmPolicy: 'approved-only',
+      resources: { memory: '2G', cpus: '2.0' },
+    }), makeParams('h_iris'))
+    expect(res.status).toBe(200)
+    expect(generateStandaloneCompose).toHaveBeenCalledTimes(1)
   })
 })
 

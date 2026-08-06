@@ -5,6 +5,7 @@ import { Storage } from '../storage'
 import { DockerService } from '../docker'
 import { AuditService } from '../audit'
 import { ConfigService } from '../config'
+import type { Harness } from '@/lib/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -206,5 +207,91 @@ describe('HarnessService.duplicate — slug normalization', () => {
   it('rejects a name with no sluggable characters', async () => {
     const result = await service.duplicateOverlay('h_srcagent', '!!!')
     expect(result).toBeUndefined()
+  })
+})
+
+// Host access on duplicate (#222): extraMounts/extraEnv name paths on the HOST,
+// belonging to the SOURCE agent. `duplicateOverlay` generates the duplicate's
+// compose with only {imageOrBuild, defaultImage} — no extras — and then spread
+// the whole source onto the new overlay three lines later. That left the compose
+// and the overlay silently divergent, and the next unrelated settings PUT
+// regenerates FROM the overlay: at that point the duplicate holds the source's
+// mounts, at the source's paths, at the source's mode. For the iris agent one of
+// those is the approval-gate spool at mode 'rw' — a second agent able to drop
+// cards into a gate that is not its own. There is no console field for
+// extraMounts, so nothing would ever have surfaced it.
+describe('HarnessService.duplicate — host access is not inherited', () => {
+  let tmpDir: string
+  let homeDir: string
+  let storage: Storage
+  let service: HarnessService
+
+  const SPOOL = {
+    hostPath: '/srv/iris/nimbleco/intake',
+    containerPath: '/opt/iris-intake',
+    mode: 'rw' as const,
+    note: 'approval-gate spool',
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swarm-map-duphost-'))
+    homeDir = path.join(tmpDir, 'home')
+    fs.mkdirSync(homeDir, { recursive: true })
+    vi.spyOn(os, 'homedir').mockReturnValue(homeDir)
+    storage = new Storage(tmpDir)
+    storage.write('settings.json', { dataDir: tmpDir })
+    service = new HarnessService(
+      storage,
+      new DockerService(),
+      new AuditService(storage),
+      new ConfigService(storage),
+    )
+    storage.write('harnesses.json', [{
+      id: 'h_iris',
+      name: 'iris',
+      tier: 'team',
+      extraMounts: [SPOOL],
+      extraEnv: { IRIS_INTAKE_DIR: '/opt/iris-intake' },
+    }])
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('does NOT copy the source\'s extraMounts/extraEnv onto the duplicate', async () => {
+    const result = await service.duplicateOverlay('h_iris', 'iris-copy')
+    expect(result).toBeDefined()
+    expect(result!.extraMounts).toBeUndefined()
+    expect(result!.extraEnv).toBeUndefined()
+
+    // And not on disk either — the overlay is what a later regeneration reads.
+    const onDisk = storage.read<Partial<Harness>[]>('harnesses.json', [])
+    const persisted = onDisk.find((h) => h.id === 'h_iris_copy')
+    expect(persisted).toBeDefined()
+    expect(persisted!.extraMounts).toBeUndefined()
+    expect(persisted!.extraEnv).toBeUndefined()
+
+    // The source keeps its own.
+    const src = onDisk.find((h) => h.id === 'h_iris')
+    expect(src!.extraMounts).toEqual([SPOOL])
+  })
+
+  it('leaves the duplicate\'s overlay and its generated compose in agreement', async () => {
+    // The real failure was divergence, not the copy per se: the compose never
+    // had the mounts, the overlay did, and regeneration believed the overlay.
+    const result = await service.duplicateOverlay('h_iris', 'iris-copy')
+    const compose = fs.readFileSync(result!.composeFile!, 'utf-8')
+    expect(compose).not.toContain('/opt/iris-intake')
+    expect(compose).not.toContain('IRIS_INTAKE_DIR')
+    expect(result!.extraMounts ?? []).toEqual([])
+  })
+
+  it('still carries the non-host-access fields it always did', async () => {
+    // Guard against over-stripping: only the two host-access fields go.
+    const result = await service.duplicateOverlay('h_iris', 'iris-copy')
+    expect(result!.tier).toBe('team')
+    expect(result!.parentId).toBe('h_iris')
   })
 })
