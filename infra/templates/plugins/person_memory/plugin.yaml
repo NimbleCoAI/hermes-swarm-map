@@ -16,6 +16,6 @@ description: >-
   verbatim — and in shared group sessions are visible to everyone. Keep raw
   identifiers (phone numbers, user IDs) OUT of those fields; the matching id
   lives in the FILENAME, never in the injected text.
-author: NimbleCo (for CHURPRIMO)
+author: NimbleCo
 hooks:
   - pre_llm_call
