@@ -115,8 +115,8 @@ def load_alias_ids(data_dir: str, platform: str, user_id: str) -> List[str]:
     Swarm Map resolves admin-entered identities to platform-native ids and
     stores both forms per platform::
 
-        {"signal": [{"display": "+64210000000",
-                     "nativeId": "5eca7c21-...",
+        {"signal": [{"display": "+<E.164 phone number>",
+                     "nativeId": "<ACI UUID>",
                      "profileName": "Kathryn"}]}
 
     Signal is the motivating case: an envelope carries ``sourceNumber`` OR
