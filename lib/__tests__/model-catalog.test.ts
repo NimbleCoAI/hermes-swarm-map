@@ -242,6 +242,14 @@ describe('MODEL_CATALOG — OpenRouter cheap metered workhorse lane', () => {
     expect(ds, 'deepseek v3.2 cheap routing tier should be in the openrouter catalog').toBeDefined()
     expect(ds?.tier).toBe('fallback')
   })
+
+  it('exposes DeepSeek V4 Flash as the successor cheap routing tier (D-2026-08-06)', () => {
+    // V4 Flash supersedes V3.2 for the cheap down-route slot; V3.2 stays listed
+    // while live agent cascades still reference it.
+    const ds = MODEL_CATALOG.openrouter.find((m) => m.id === 'deepseek/deepseek-v4-flash')
+    expect(ds, 'deepseek v4 flash should be in the openrouter catalog').toBeDefined()
+    expect(ds?.tier).toBe('fallback')
+  })
 })
 
 describe('MODEL_CATALOG — GLM-primary fleet hierarchy on OpenRouter', () => {
