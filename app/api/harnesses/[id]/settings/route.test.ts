@@ -815,6 +815,8 @@ describe('Settings API — optimistic concurrency (409) + no-op detection', () =
     'SIGNAL_OBSERVE_UNMENTIONED=true',
     'MATTERMOST_OBSERVE_UNMENTIONED=true',
     'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true',
+    'SLACK_OBSERVE_UNMENTIONED=true',
+    'DISCORD_OBSERVE_UNMENTIONED=true',
     'HERMES_APPROVAL_ADMIN_ONLY=true',
     'HERMES_MEMORY_SCOPE=channel',
   ].join('\n') + '\n'
@@ -914,6 +916,41 @@ describe('Settings API — optimistic concurrency (409) + no-op detection', () =
     expect(services.harness.restart).toHaveBeenCalledWith('h_test', 'recreate')
   })
 
+  it('observe-unmentioned is orthogonal to mention-gating (decoupled)', async () => {
+    // mentionGating OFF, observe left default (on): require_mention flips false
+    // while observe stays true. The old code coupled them (observe=off whenever
+    // responding-to-all); this pins the decoupling.
+    const writes: string[] = []
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, c: unknown) => {
+      if (typeof p === 'string' && (p as string).endsWith('.env')) writes.push(String(c))
+    }) as never)
+    const res = await PUT(
+      makeRequest({ ...policyBody, mentionGating: false, version: '1111:{"memory":null,"cpus":null}' }),
+      makeParams('h_test'),
+    )
+    expect(res.status).toBe(200)
+    const env = writes.at(-1) ?? ''
+    expect(env).toMatch(/^SLACK_REQUIRE_MENTION=false$/m)
+    expect(env).toMatch(/^SIGNAL_OBSERVE_UNMENTIONED=true$/m)
+    expect(env).toMatch(/^SLACK_OBSERVE_UNMENTIONED=true$/m)
+  })
+
+  it('observe-unmentioned can be turned off independently of mention-gating', async () => {
+    const writes: string[] = []
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: unknown, c: unknown) => {
+      if (typeof p === 'string' && (p as string).endsWith('.env')) writes.push(String(c))
+    }) as never)
+    const res = await PUT(
+      makeRequest({ ...policyBody, mentionGating: true, observeUnmentioned: false, version: '1111:{"memory":null,"cpus":null}' }),
+      makeParams('h_test'),
+    )
+    expect(res.status).toBe(200)
+    const env = writes.at(-1) ?? ''
+    expect(env).toMatch(/^SIGNAL_REQUIRE_MENTION=true$/m)
+    expect(env).toMatch(/^SIGNAL_OBSERVE_UNMENTIONED=false$/m)
+    expect(env).toMatch(/^DISCORD_OBSERVE_UNMENTIONED=false$/m)
+  })
+
   it('GET no longer merges resolved nativeIds into allowedUsers (read is not laundered)', async () => {
     vi.spyOn(fs, 'readFileSync').mockImplementation(((p: string) => {
       if (String(p).endsWith('resolved-identities.json')) {
@@ -954,6 +991,8 @@ describe('Settings API — restart arms beyond .env changes', () => {
     'SIGNAL_OBSERVE_UNMENTIONED=true',
     'MATTERMOST_OBSERVE_UNMENTIONED=true',
     'TELEGRAM_OBSERVE_UNMENTIONED_GROUP_MESSAGES=true',
+    'SLACK_OBSERVE_UNMENTIONED=true',
+    'DISCORD_OBSERVE_UNMENTIONED=true',
     'HERMES_APPROVAL_ADMIN_ONLY=true',
     'HERMES_MEMORY_SCOPE=channel',
   ].join('\n') + '\n'
