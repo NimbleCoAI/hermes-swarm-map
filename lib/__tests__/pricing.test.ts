@@ -133,7 +133,10 @@ describe('lookupPricing — GLM / Kimi / DeepSeek routing tiers', () => {
   })
 
   it('resolves deepseek-v4-flash (bare and deepseek/ prefixed) ahead of the legacy wildcard', () => {
-    for (const id of ['deepseek-v4-flash', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash-0731']) {
+    // openrouter/deepseek/… covers double-prefixed names as recorded by some
+    // gateways — must still resolve the versioned entry (cache-read rate), not
+    // the legacy wildcard.
+    for (const id of ['deepseek-v4-flash', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash-0731', 'openrouter/deepseek/deepseek-v4-flash-0731']) {
       const p = lookupPricing(id)
       expect(p, id).not.toBeNull()
       expect(p!.inputPerMillion).toBe(0.14)
